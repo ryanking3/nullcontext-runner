@@ -33,6 +33,11 @@ impl Session {
         fs::write(self.workspace.join("response.txt"), response)?;
         Ok(())
     }
+
+    pub fn write_report(&self, report_json: &str) -> Result<()> {
+        fs::write(self.workspace.join("report.json"), report_json)?;
+        Ok(())
+    }
 }
 
 fn create_session_workspace(session_id: &str) -> Result<PathBuf> {
