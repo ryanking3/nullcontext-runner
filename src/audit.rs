@@ -27,7 +27,7 @@ impl PrivacyReport {
             session_id,
             started_at: started_at.to_rfc3339(),
             history_stored,
-            backend: "llama.cpp".to_string(),
+            backend: "llama-server".to_string(),
             gpu_layers,
             process_exited_cleanly,
             workspace_deleted,

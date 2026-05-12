@@ -2,6 +2,7 @@ mod audit;
 mod cleanup;
 mod config;
 mod inference;
+mod runtime;
 mod session;
 
 use anyhow::Result;
@@ -13,6 +14,7 @@ use session::Session;
 
 fn main() -> Result<()> {
     let config = SessionConfig::from_env()?;
+
     let session = Session::create()?;
 
     println!("Starting NullContext session...");
@@ -23,16 +25,21 @@ fn main() -> Result<()> {
 
     let inference_result = run_inference(&config)?;
 
-    session.write_response(&inference_result.stdout)?;
-    session.write_runtime_log(&inference_result.stderr)?;
+    session.write_response(&inference_result.response)?;
 
     println!("\n--- Model Output ---\n");
-    println!("{}", inference_result.stdout);
+    println!("{}", inference_result.response);
 
     let workspace_deleted = if config.ephemeral {
-        println!("\nCleaning up ephemeral session...");
+        println!("\nSession mode: ephemeral");
+        println!("Cleaning up workspace...");
+
         cleanup_ephemeral_workspace(&session.workspace)?
     } else {
+        println!("\nSession mode: persistent");
+        println!("Workspace retained at:");
+        println!("{}", session.workspace.display());
+
         false
     };
 

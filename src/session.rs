@@ -33,18 +33,15 @@ impl Session {
         fs::write(self.workspace.join("response.txt"), response)?;
         Ok(())
     }
-
-    pub fn write_runtime_log(&self, log: &str) -> Result<()> {
-        fs::write(self.workspace.join("runtime.log"), log)?;
-        Ok(())
-    }
 }
 
 fn create_session_workspace(session_id: &str) -> Result<PathBuf> {
     let base = PathBuf::from("/tmp/nullcontext");
+
     fs::create_dir_all(&base)?;
 
     let session_dir = base.join(session_id);
+
     fs::create_dir_all(&session_dir)?;
 
     Ok(session_dir)
