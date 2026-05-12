@@ -7,7 +7,7 @@ mod session;
 
 use anyhow::Result;
 use audit::PrivacyReport;
-use cleanup::{cleanup_ephemeral_workspace, CleanupReport};
+use cleanup::{cleanup_ephemeral_workspace, scan_artifacts, CleanupReport};
 use config::SessionConfig;
 use inference::run_inference;
 use session::Session;
@@ -30,18 +30,21 @@ fn main() -> Result<()> {
     println!("\n--- Model Output ---\n");
     println!("{}", inference_result.response);
 
+    let artifacts_detected = scan_artifacts(&session.workspace)?;
+
     let cleanup_report = if config.ephemeral {
         println!("\nSession mode: ephemeral");
-        println!("Writing pre-cleanup report...");
+        println!("Detected {} workspace artifacts.", artifacts_detected.len());
         println!("Cleaning up workspace...");
 
-        cleanup_ephemeral_workspace(&session.workspace)
+        cleanup_ephemeral_workspace(&session.workspace, artifacts_detected)
     } else {
         println!("\nSession mode: persistent");
+        println!("Detected {} workspace artifacts.", artifacts_detected.len());
         println!("Workspace retained at:");
         println!("{}", session.workspace.display());
 
-        CleanupReport::not_attempted()
+        CleanupReport::not_attempted(artifacts_detected)
     };
 
     let report = PrivacyReport::new(
@@ -57,15 +60,12 @@ fn main() -> Result<()> {
 
     let report_json = report.to_pretty_json()?;
 
-    if config.ephemeral {
-        println!("\n--- Privacy Report v0 ---");
-        println!("{}", report_json);
-    } else {
+    if !config.ephemeral {
         session.write_report(&report_json)?;
-
-        println!("\n--- Privacy Report v0 ---");
-        println!("{}", report_json);
     }
+
+    println!("\n--- Privacy Report v0 ---");
+    println!("{}", report_json);
 
     Ok(())
 }

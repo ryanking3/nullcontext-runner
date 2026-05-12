@@ -17,47 +17,55 @@ pub struct CleanupReport {
     pub workspace_deleted: bool,
     pub files_removed: usize,
     pub directories_removed: usize,
-    pub artifacts: Vec<ArtifactRecord>,
+    pub artifacts_detected: Vec<ArtifactRecord>,
     pub error: Option<String>,
 }
 
 impl CleanupReport {
-    pub fn not_attempted() -> Self {
+    pub fn not_attempted(artifacts_detected: Vec<ArtifactRecord>) -> Self {
         Self {
             attempted: false,
             successful: false,
             workspace_deleted: false,
             files_removed: 0,
             directories_removed: 0,
-            artifacts: vec![],
+            artifacts_detected,
             error: None,
         }
     }
 }
 
-pub fn cleanup_ephemeral_workspace(path: &Path) -> CleanupReport {
+pub fn scan_artifacts(path: &Path) -> Result<Vec<ArtifactRecord>> {
+    let mut artifacts = Vec::new();
+
+    if !path.exists() {
+        return Ok(artifacts);
+    }
+
+    recursively_scan(path.to_path_buf(), &mut artifacts)?;
+
+    Ok(artifacts)
+}
+
+pub fn cleanup_ephemeral_workspace(
+    path: &Path,
+    artifacts_detected: Vec<ArtifactRecord>,
+) -> CleanupReport {
     let mut report = CleanupReport {
         attempted: true,
         successful: false,
         workspace_deleted: false,
-        files_removed: 0,
-        directories_removed: 0,
-        artifacts: vec![],
+        files_removed: artifacts_detected
+            .iter()
+            .filter(|a| a.kind == "file")
+            .count(),
+        directories_removed: artifacts_detected
+            .iter()
+            .filter(|a| a.kind == "directory")
+            .count(),
+        artifacts_detected,
         error: None,
     };
-
-    match scan_artifacts(path) {
-        Ok(artifacts) => {
-            report.files_removed = artifacts.iter().filter(|a| a.kind == "file").count();
-
-            report.directories_removed = artifacts.iter().filter(|a| a.kind == "directory").count();
-
-            report.artifacts = artifacts;
-        }
-        Err(error) => {
-            report.error = Some(format!("Failed to scan artifacts before cleanup: {error}"));
-        }
-    }
 
     if path.exists() {
         if let Err(error) = fs::remove_dir_all(path) {
@@ -70,18 +78,6 @@ pub fn cleanup_ephemeral_workspace(path: &Path) -> CleanupReport {
     report.successful = report.workspace_deleted && report.error.is_none();
 
     report
-}
-
-fn scan_artifacts(path: &Path) -> Result<Vec<ArtifactRecord>> {
-    let mut artifacts = Vec::new();
-
-    if !path.exists() {
-        return Ok(artifacts);
-    }
-
-    recursively_scan(path.to_path_buf(), &mut artifacts)?;
-
-    Ok(artifacts)
 }
 
 fn recursively_scan(path: PathBuf, artifacts: &mut Vec<ArtifactRecord>) -> Result<()> {
@@ -104,7 +100,6 @@ fn recursively_scan(path: PathBuf, artifacts: &mut Vec<ArtifactRecord>) -> Resul
     if metadata.is_dir() {
         for entry in fs::read_dir(&path)? {
             let entry = entry?;
-
             recursively_scan(entry.path(), artifacts)?;
         }
     }
