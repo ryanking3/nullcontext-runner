@@ -14,12 +14,12 @@ use session::Session;
 
 fn main() -> Result<()> {
     let config = SessionConfig::from_env()?;
-
     let session = Session::create()?;
 
     println!("Starting NullContext session...");
     println!("Session ID: {}", session.id);
     println!("Workspace: {}", session.workspace.display());
+    println!("Security mode: {}", config.security_mode.as_str());
 
     session.write_prompt(&config.prompt)?;
 
@@ -47,6 +47,8 @@ fn main() -> Result<()> {
         session.id,
         session.started_at,
         !config.ephemeral,
+        "llama-server".to_string(),
+        config.security_mode.as_str().to_string(),
         config.gpu_layers,
         inference_result.process_exited_cleanly,
         workspace_deleted,
