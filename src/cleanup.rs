@@ -1,7 +1,14 @@
 use anyhow::Result;
 use serde::Serialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ArtifactRecord {
+    pub path: String,
+    pub kind: String,
+    pub size_bytes: u64,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CleanupReport {
@@ -10,6 +17,7 @@ pub struct CleanupReport {
     pub workspace_deleted: bool,
     pub files_removed: usize,
     pub directories_removed: usize,
+    pub artifacts: Vec<ArtifactRecord>,
     pub error: Option<String>,
 }
 
@@ -21,6 +29,7 @@ impl CleanupReport {
             workspace_deleted: false,
             files_removed: 0,
             directories_removed: 0,
+            artifacts: vec![],
             error: None,
         }
     }
@@ -33,16 +42,20 @@ pub fn cleanup_ephemeral_workspace(path: &Path) -> CleanupReport {
         workspace_deleted: false,
         files_removed: 0,
         directories_removed: 0,
+        artifacts: vec![],
         error: None,
     };
 
-    match count_artifacts(path) {
-        Ok((files, dirs)) => {
-            report.files_removed = files;
-            report.directories_removed = dirs;
+    match scan_artifacts(path) {
+        Ok(artifacts) => {
+            report.files_removed = artifacts.iter().filter(|a| a.kind == "file").count();
+
+            report.directories_removed = artifacts.iter().filter(|a| a.kind == "directory").count();
+
+            report.artifacts = artifacts;
         }
         Err(error) => {
-            report.error = Some(format!("Failed to count artifacts before cleanup: {error}"));
+            report.error = Some(format!("Failed to scan artifacts before cleanup: {error}"));
         }
     }
 
@@ -59,28 +72,42 @@ pub fn cleanup_ephemeral_workspace(path: &Path) -> CleanupReport {
     report
 }
 
-fn count_artifacts(path: &Path) -> Result<(usize, usize)> {
-    let mut files = 0;
-    let mut dirs = 0;
+fn scan_artifacts(path: &Path) -> Result<Vec<ArtifactRecord>> {
+    let mut artifacts = Vec::new();
 
     if !path.exists() {
-        return Ok((files, dirs));
+        return Ok(artifacts);
     }
 
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let metadata = entry.metadata()?;
+    recursively_scan(path.to_path_buf(), &mut artifacts)?;
 
-        if metadata.is_file() {
-            files += 1;
-        } else if metadata.is_dir() {
-            dirs += 1;
+    Ok(artifacts)
+}
 
-            let (nested_files, nested_dirs) = count_artifacts(&entry.path())?;
-            files += nested_files;
-            dirs += nested_dirs;
+fn recursively_scan(path: PathBuf, artifacts: &mut Vec<ArtifactRecord>) -> Result<()> {
+    let metadata = fs::metadata(&path)?;
+
+    let kind = if metadata.is_file() {
+        "file"
+    } else if metadata.is_dir() {
+        "directory"
+    } else {
+        "unknown"
+    };
+
+    artifacts.push(ArtifactRecord {
+        path: path.display().to_string(),
+        kind: kind.to_string(),
+        size_bytes: metadata.len(),
+    });
+
+    if metadata.is_dir() {
+        for entry in fs::read_dir(&path)? {
+            let entry = entry?;
+
+            recursively_scan(entry.path(), artifacts)?;
         }
     }
 
-    Ok((files, dirs))
+    Ok(())
 }
