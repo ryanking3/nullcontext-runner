@@ -7,7 +7,7 @@ mod session;
 
 use anyhow::Result;
 use audit::PrivacyReport;
-use cleanup::cleanup_ephemeral_workspace;
+use cleanup::{cleanup_ephemeral_workspace, CleanupReport};
 use config::SessionConfig;
 use inference::run_inference;
 use session::Session;
@@ -30,14 +30,18 @@ fn main() -> Result<()> {
     println!("\n--- Model Output ---\n");
     println!("{}", inference_result.response);
 
-    let workspace_deleted = if config.ephemeral {
-        false
+    let cleanup_report = if config.ephemeral {
+        println!("\nSession mode: ephemeral");
+        println!("Writing pre-cleanup report...");
+        println!("Cleaning up workspace...");
+
+        cleanup_ephemeral_workspace(&session.workspace)
     } else {
         println!("\nSession mode: persistent");
         println!("Workspace retained at:");
         println!("{}", session.workspace.display());
 
-        false
+        CleanupReport::not_attempted()
     };
 
     let report = PrivacyReport::new(
@@ -48,36 +52,20 @@ fn main() -> Result<()> {
         config.security_mode.as_str().to_string(),
         config.gpu_layers,
         inference_result.process_exited_cleanly,
-        workspace_deleted,
+        cleanup_report,
     );
 
     let report_json = report.to_pretty_json()?;
 
-    session.write_report(&report_json)?;
-
-    let workspace_deleted = if config.ephemeral {
-        println!("\nSession mode: ephemeral");
-        println!("Writing report before cleanup...");
-        println!("Cleaning up workspace...");
-
-        cleanup_ephemeral_workspace(&session.workspace)?
+    if config.ephemeral {
+        println!("\n--- Privacy Report v0 ---");
+        println!("{}", report_json);
     } else {
-        workspace_deleted
-    };
+        session.write_report(&report_json)?;
 
-    let final_report = PrivacyReport::new(
-        session.id,
-        session.started_at,
-        !config.ephemeral,
-        "llama-server".to_string(),
-        config.security_mode.as_str().to_string(),
-        "0".to_string(),
-        inference_result.process_exited_cleanly,
-        workspace_deleted,
-    );
-
-    println!("\n--- Privacy Report v0 ---");
-    println!("{}", final_report.to_pretty_json()?);
+        println!("\n--- Privacy Report v0 ---");
+        println!("{}", report_json);
+    }
 
     Ok(())
 }

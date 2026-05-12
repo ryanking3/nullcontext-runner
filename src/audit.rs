@@ -1,3 +1,4 @@
+use crate::cleanup::CleanupReport;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -11,7 +12,7 @@ pub struct PrivacyReport {
     pub security_mode: String,
     pub gpu_layers: String,
     pub process_exited_cleanly: bool,
-    pub workspace_deleted: bool,
+    pub cleanup: CleanupReport,
     pub residual_risk: String,
 }
 
@@ -24,7 +25,7 @@ impl PrivacyReport {
         security_mode: String,
         gpu_layers: String,
         process_exited_cleanly: bool,
-        workspace_deleted: bool,
+        cleanup: CleanupReport,
     ) -> Self {
         Self {
             session_id,
@@ -34,7 +35,7 @@ impl PrivacyReport {
             security_mode,
             gpu_layers,
             process_exited_cleanly,
-            workspace_deleted,
+            cleanup,
             residual_risk:
                 "OS memory, swap, shell history, and llama.cpp internal allocations are not yet sanitized."
                     .to_string(),
