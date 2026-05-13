@@ -30,21 +30,27 @@ fn main() -> Result<()> {
     println!("\n--- Model Output ---\n");
     println!("{}", inference_result.response);
 
-    let artifacts_detected = scan_artifacts(&session.workspace)?;
+    let (artifacts_detected, scan_operation) = scan_artifacts(&session.workspace)?;
+
+    let sanitization_operations = vec![scan_operation];
 
     let cleanup_report = if config.ephemeral {
         println!("\nSession mode: ephemeral");
         println!("Detected {} workspace artifacts.", artifacts_detected.len());
         println!("Cleaning up workspace...");
 
-        cleanup_ephemeral_workspace(&session.workspace, artifacts_detected)
+        cleanup_ephemeral_workspace(
+            &session.workspace,
+            artifacts_detected,
+            sanitization_operations,
+        )
     } else {
         println!("\nSession mode: persistent");
         println!("Detected {} workspace artifacts.", artifacts_detected.len());
         println!("Workspace retained at:");
         println!("{}", session.workspace.display());
 
-        CleanupReport::not_attempted(artifacts_detected)
+        CleanupReport::not_attempted(artifacts_detected, sanitization_operations)
     };
 
     let report = PrivacyReport::new(

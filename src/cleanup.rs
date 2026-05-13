@@ -11,6 +11,13 @@ pub struct ArtifactRecord {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct SanitizationOperation {
+    pub operation: String,
+    pub status: String,
+    pub details: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CleanupReport {
     pub attempted: bool,
     pub successful: bool,
@@ -18,11 +25,15 @@ pub struct CleanupReport {
     pub files_removed: usize,
     pub directories_removed: usize,
     pub artifacts_detected: Vec<ArtifactRecord>,
+    pub sanitization_operations: Vec<SanitizationOperation>,
     pub error: Option<String>,
 }
 
 impl CleanupReport {
-    pub fn not_attempted(artifacts_detected: Vec<ArtifactRecord>) -> Self {
+    pub fn not_attempted(
+        artifacts_detected: Vec<ArtifactRecord>,
+        sanitization_operations: Vec<SanitizationOperation>,
+    ) -> Self {
         Self {
             attempted: false,
             successful: false,
@@ -30,26 +41,41 @@ impl CleanupReport {
             files_removed: 0,
             directories_removed: 0,
             artifacts_detected,
+            sanitization_operations,
             error: None,
         }
     }
 }
 
-pub fn scan_artifacts(path: &Path) -> Result<Vec<ArtifactRecord>> {
+pub fn scan_artifacts(path: &Path) -> Result<(Vec<ArtifactRecord>, SanitizationOperation)> {
     let mut artifacts = Vec::new();
 
     if !path.exists() {
-        return Ok(artifacts);
+        return Ok((
+            artifacts,
+            SanitizationOperation {
+                operation: "workspace_artifact_scan".to_string(),
+                status: "successful".to_string(),
+                details: "Workspace did not exist".to_string(),
+            },
+        ));
     }
 
     recursively_scan(path.to_path_buf(), &mut artifacts)?;
 
-    Ok(artifacts)
+    let operation = SanitizationOperation {
+        operation: "workspace_artifact_scan".to_string(),
+        status: "successful".to_string(),
+        details: format!("Scanned {} artifacts", artifacts.len()),
+    };
+
+    Ok((artifacts, operation))
 }
 
 pub fn cleanup_ephemeral_workspace(
     path: &Path,
     artifacts_detected: Vec<ArtifactRecord>,
+    mut sanitization_operations: Vec<SanitizationOperation>,
 ) -> CleanupReport {
     let mut report = CleanupReport {
         attempted: true,
@@ -64,18 +90,38 @@ pub fn cleanup_ephemeral_workspace(
             .filter(|a| a.kind == "directory")
             .count(),
         artifacts_detected,
+        sanitization_operations: vec![],
         error: None,
     };
 
     if path.exists() {
-        if let Err(error) = fs::remove_dir_all(path) {
-            report.error = Some(format!("Failed to remove workspace: {error}"));
-            return report;
+        match fs::remove_dir_all(path) {
+            Ok(_) => {
+                sanitization_operations.push(SanitizationOperation {
+                    operation: "workspace_recursive_delete".to_string(),
+                    status: "successful".to_string(),
+                    details: "Workspace directory removed".to_string(),
+                });
+            }
+            Err(error) => {
+                sanitization_operations.push(SanitizationOperation {
+                    operation: "workspace_recursive_delete".to_string(),
+                    status: "failed".to_string(),
+                    details: format!("Failed to remove workspace: {error}"),
+                });
+
+                report.error = Some(format!("Failed to remove workspace: {error}"));
+
+                report.sanitization_operations = sanitization_operations;
+
+                return report;
+            }
         }
     }
 
     report.workspace_deleted = !path.exists();
     report.successful = report.workspace_deleted && report.error.is_none();
+    report.sanitization_operations = sanitization_operations;
 
     report
 }
