@@ -32,8 +32,14 @@ pub struct CleanupReport {
 impl CleanupReport {
     pub fn not_attempted(
         artifacts_detected: Vec<ArtifactRecord>,
-        sanitization_operations: Vec<SanitizationOperation>,
+        mut sanitization_operations: Vec<SanitizationOperation>,
     ) -> Self {
+        sanitization_operations.push(SanitizationOperation {
+            operation: "workspace_retention_policy".to_string(),
+            status: "not_attempted".to_string(),
+            details: "Workspace retained because session is persistent".to_string(),
+        });
+
         Self {
             attempted: false,
             successful: false,
@@ -111,7 +117,6 @@ pub fn cleanup_ephemeral_workspace(
                 });
 
                 report.error = Some(format!("Failed to remove workspace: {error}"));
-
                 report.sanitization_operations = sanitization_operations;
 
                 return report;
@@ -119,8 +124,24 @@ pub fn cleanup_ephemeral_workspace(
         }
     }
 
-    report.workspace_deleted = !path.exists();
-    report.successful = report.workspace_deleted && report.error.is_none();
+    let workspace_deleted = !path.exists();
+
+    sanitization_operations.push(SanitizationOperation {
+        operation: "post_cleanup_workspace_verification".to_string(),
+        status: if workspace_deleted {
+            "successful".to_string()
+        } else {
+            "failed".to_string()
+        },
+        details: if workspace_deleted {
+            "Verified workspace path no longer exists".to_string()
+        } else {
+            "Workspace path still exists after cleanup attempt".to_string()
+        },
+    });
+
+    report.workspace_deleted = workspace_deleted;
+    report.successful = workspace_deleted && report.error.is_none();
     report.sanitization_operations = sanitization_operations;
 
     report
