@@ -7,7 +7,7 @@ mod session;
 
 use anyhow::Result;
 use audit::PrivacyReport;
-use cleanup::{cleanup_ephemeral_workspace, scan_artifacts, CleanupReport};
+use cleanup::{cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation};
 use config::SessionConfig;
 use inference::run_inference;
 use session::Session;
@@ -28,11 +28,17 @@ fn main() -> Result<()> {
     session.write_response(&inference_result.response)?;
 
     println!("\n--- Model Output ---\n");
-    println!("{}", inference_result.response);
+    println!("{}", inference_result.response.as_str());
 
     let (artifacts_detected, scan_operation) = scan_artifacts(&session.workspace)?;
 
-    let sanitization_operations = vec![scan_operation];
+    let mut sanitization_operations = vec![scan_operation];
+
+    sanitization_operations.push(SanitizationOperation {
+        operation: "rust_owned_prompt_response_zeroize".to_string(),
+        status: "scheduled".to_string(),
+        details: "Rust-owned prompt and response buffers use zeroize-on-drop. This does not sanitize llama.cpp internal memory, OS swap, or shell history.".to_string(),
+    });
 
     let cleanup_report = if config.ephemeral {
         println!("\nSession mode: ephemeral");
@@ -59,7 +65,7 @@ fn main() -> Result<()> {
         !config.ephemeral,
         "llama-server".to_string(),
         config.security_mode.as_str().to_string(),
-        config.gpu_layers,
+        config.gpu_layers.clone(),
         inference_result.process_exited_cleanly,
         cleanup_report,
     );

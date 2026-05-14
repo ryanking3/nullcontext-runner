@@ -3,10 +3,11 @@ use crate::runtime::ManagedRuntime;
 use anyhow::Result;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 #[derive(Debug)]
 pub struct InferenceResult {
-    pub response: String,
+    pub response: Zeroizing<String>,
     pub process_exited_cleanly: bool,
 }
 
@@ -35,7 +36,7 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
     let runtime_terminated = runtime.shutdown()?;
 
     Ok(InferenceResult {
-        response,
+        response: Zeroizing::new(response),
         process_exited_cleanly: runtime_terminated,
     })
 }

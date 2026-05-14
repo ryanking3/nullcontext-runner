@@ -1,5 +1,6 @@
 use anyhow::{bail, Result};
 use std::env;
+use zeroize::Zeroizing;
 
 #[derive(Debug, Clone)]
 pub enum SecurityMode {
@@ -27,11 +28,11 @@ impl SecurityMode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SessionConfig {
     pub llama_path: String,
     pub model_path: String,
-    pub prompt: String,
+    pub prompt: Zeroizing<String>,
     pub max_tokens: String,
     pub gpu_layers: String,
     pub ephemeral: bool,
@@ -49,6 +50,7 @@ impl SessionConfig {
         let mut filtered_args = Vec::new();
 
         let mut i = 0;
+
         while i < args.len() {
             match args[i].as_str() {
                 "--persistent" => {
@@ -80,11 +82,11 @@ impl SessionConfig {
         Ok(Self {
             llama_path: format!("{}/dev/llama.cpp/build/bin/llama-server", home),
             model_path: format!("{}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf", home),
-            prompt: if prompt.trim().is_empty() {
+            prompt: Zeroizing::new(if prompt.trim().is_empty() {
                 "Hello from NullContext".to_string()
             } else {
                 prompt
-            },
+            }),
             max_tokens: "256".to_string(),
             gpu_layers: "0".to_string(),
             ephemeral,
