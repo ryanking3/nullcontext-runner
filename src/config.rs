@@ -1,6 +1,6 @@
+use crate::sensitive::SensitiveString;
 use anyhow::{bail, Result};
 use std::env;
-use zeroize::Zeroizing;
 
 #[derive(Debug, Clone)]
 pub enum SecurityMode {
@@ -15,7 +15,7 @@ impl SecurityMode {
             "standard" => Ok(Self::Standard),
             "secure" => Ok(Self::Secure),
             "air-gapped" => Ok(Self::AirGapped),
-            _ => bail!("Invalid security mode: {value}. Use: standard, secure, air-gapped"),
+            _ => bail!("Invalid security mode: {value}"),
         }
     }
 
@@ -32,7 +32,7 @@ impl SecurityMode {
 pub struct SessionConfig {
     pub llama_path: String,
     pub model_path: String,
-    pub prompt: Zeroizing<String>,
+    pub prompt: SensitiveString,
     pub max_tokens: String,
     pub gpu_layers: String,
     pub ephemeral: bool,
@@ -58,7 +58,7 @@ impl SessionConfig {
                 }
                 "--mode" => {
                     if i + 1 >= args.len() {
-                        bail!("--mode requires a value: standard, secure, air-gapped");
+                        bail!("--mode requires a value");
                     }
 
                     security_mode = SecurityMode::from_str(&args[i + 1])?;
@@ -82,7 +82,7 @@ impl SessionConfig {
         Ok(Self {
             llama_path: format!("{}/dev/llama.cpp/build/bin/llama-server", home),
             model_path: format!("{}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf", home),
-            prompt: Zeroizing::new(if prompt.trim().is_empty() {
+            prompt: SensitiveString::new(if prompt.trim().is_empty() {
                 "Hello from NullContext".to_string()
             } else {
                 prompt

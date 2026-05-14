@@ -3,6 +3,7 @@ mod cleanup;
 mod config;
 mod inference;
 mod runtime;
+mod sensitive;
 mod session;
 
 use anyhow::Result;
@@ -13,7 +14,8 @@ use inference::run_inference;
 use session::Session;
 
 fn main() -> Result<()> {
-    let config = SessionConfig::from_env()?;
+    let mut config = SessionConfig::from_env()?;
+
     let session = Session::create()?;
 
     println!("Starting NullContext session...");
@@ -21,11 +23,11 @@ fn main() -> Result<()> {
     println!("Workspace: {}", session.workspace.display());
     println!("Security mode: {}", config.security_mode.as_str());
 
-    session.write_prompt(&config.prompt)?;
+    session.write_prompt(config.prompt.as_str())?;
 
-    let inference_result = run_inference(&config)?;
+    let mut inference_result = run_inference(&config)?;
 
-    session.write_response(&inference_result.response)?;
+    session.write_response(inference_result.response.as_str())?;
 
     println!("\n--- Model Output ---\n");
     println!("{}", inference_result.response.as_str());
@@ -34,10 +36,18 @@ fn main() -> Result<()> {
 
     let mut sanitization_operations = vec![scan_operation];
 
+    sanitization_operations.append(&mut inference_result.sanitization_operations);
+
+    println!("\nSanitizing Rust-owned buffers...");
+
+    config.prompt.sanitize();
+    inference_result.response.sanitize();
+
     sanitization_operations.push(SanitizationOperation {
-        operation: "rust_owned_prompt_response_zeroize".to_string(),
-        status: "scheduled".to_string(),
-        details: "Rust-owned prompt and response buffers use zeroize-on-drop. This does not sanitize llama.cpp internal memory, OS swap, or shell history.".to_string(),
+        operation: "explicit_rust_buffer_zeroization".to_string(),
+        status: "successful".to_string(),
+        details: "Explicitly overwrote Rust-owned prompt and response buffers before drop."
+            .to_string(),
     });
 
     let cleanup_report = if config.ephemeral {
