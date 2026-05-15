@@ -24,12 +24,12 @@ impl Session {
         })
     }
 
-    pub fn write_prompt(&self, prompt: &str) -> Result<()> {
+    pub fn write_prompt(&self, prompt: &[u8]) -> Result<()> {
         fs::write(self.workspace.join("prompt.txt"), prompt)?;
         Ok(())
     }
 
-    pub fn write_response(&self, response: &str) -> Result<()> {
+    pub fn write_response(&self, response: &[u8]) -> Result<()> {
         fs::write(self.workspace.join("response.txt"), response)?;
         Ok(())
     }

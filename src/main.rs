@@ -23,11 +23,11 @@ fn main() -> Result<()> {
     println!("Workspace: {}", session.workspace.display());
     println!("Security mode: {}", config.security_mode.as_str());
 
-    session.write_prompt(config.prompt.as_str())?;
+    session.write_prompt(config.prompt.as_bytes())?;
 
     let mut inference_result = run_inference(&config)?;
 
-    session.write_response(inference_result.response.as_str())?;
+    session.write_response(inference_result.response.as_bytes())?;
 
     println!("\n--- Model Output ---\n");
     println!("{}", inference_result.response.as_str());
@@ -44,9 +44,9 @@ fn main() -> Result<()> {
     inference_result.response.sanitize();
 
     sanitization_operations.push(SanitizationOperation {
-        operation: "explicit_rust_buffer_zeroization".to_string(),
+        operation: "explicit_sensitive_byte_buffer_zeroization".to_string(),
         status: "successful".to_string(),
-        details: "Explicitly overwrote Rust-owned prompt and response buffers before drop."
+        details: "Explicitly overwrote Rust-owned prompt and response byte buffers before drop."
             .to_string(),
     });
 

@@ -1,4 +1,4 @@
-use crate::sensitive::SensitiveString;
+use crate::sensitive::SensitiveBytes;
 use anyhow::{bail, Result};
 use std::env;
 
@@ -32,7 +32,7 @@ impl SecurityMode {
 pub struct SessionConfig {
     pub llama_path: String,
     pub model_path: String,
-    pub prompt: SensitiveString,
+    pub prompt: SensitiveBytes,
     pub max_tokens: String,
     pub gpu_layers: String,
     pub ephemeral: bool,
@@ -82,7 +82,7 @@ impl SessionConfig {
         Ok(Self {
             llama_path: format!("{}/dev/llama.cpp/build/bin/llama-server", home),
             model_path: format!("{}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf", home),
-            prompt: SensitiveString::new(if prompt.trim().is_empty() {
+            prompt: SensitiveBytes::new(if prompt.trim().is_empty() {
                 "Hello from NullContext".to_string()
             } else {
                 prompt

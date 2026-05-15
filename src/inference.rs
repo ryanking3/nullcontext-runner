@@ -1,7 +1,7 @@
 use crate::cleanup::SanitizationOperation;
 use crate::config::SessionConfig;
 use crate::runtime::ManagedRuntime;
-use crate::sensitive::SensitiveString;
+use crate::sensitive::SensitiveBytes;
 use anyhow::Result;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use zeroize::Zeroize;
 
 #[derive(Debug)]
 pub struct InferenceResult {
-    pub response: SensitiveString,
+    pub response: SensitiveBytes,
     pub process_exited_cleanly: bool,
     pub sanitization_operations: Vec<SanitizationOperation>,
 }
@@ -55,7 +55,7 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
     });
 
     Ok(InferenceResult {
-        response: SensitiveString::new(response),
+        response: SensitiveBytes::new(response),
         process_exited_cleanly: runtime_terminated,
         sanitization_operations: operations,
     })
@@ -81,12 +81,22 @@ fn send_completion_request(
 
     request.sanitize();
 
-    let operations = vec![SanitizationOperation {
-        operation: "http_request_prompt_buffer_zeroization".to_string(),
-        status: "successful".to_string(),
-        details: "Explicitly zeroized Rust-owned prompt copy used for llama-server HTTP request."
-            .to_string(),
-    }];
+    let operations = vec![
+        SanitizationOperation {
+            operation: "sensitive_bytes_prompt_storage".to_string(),
+            status: "successful".to_string(),
+            details:
+                "Application-owned prompt is stored in a zeroizing byte buffer instead of a long-lived String."
+                    .to_string(),
+        },
+        SanitizationOperation {
+            operation: "http_request_prompt_buffer_zeroization".to_string(),
+            status: "successful".to_string(),
+            details:
+                "Explicitly zeroized temporary Rust-owned prompt copy used for llama-server HTTP request."
+                    .to_string(),
+        },
+    ];
 
     Ok((response.content, operations))
 }
