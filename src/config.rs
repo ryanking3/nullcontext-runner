@@ -1,6 +1,7 @@
 use crate::sensitive::SensitiveBytes;
 use anyhow::{bail, Result};
 use std::env;
+use zeroize::Zeroize;
 
 #[derive(Debug, Clone)]
 pub enum SecurityMode {
@@ -42,12 +43,12 @@ pub struct SessionConfig {
 impl SessionConfig {
     pub fn from_env() -> Result<Self> {
         let home = env::var("HOME")?;
-        let args: Vec<String> = env::args().skip(1).collect();
+        let mut args: Vec<String> = env::args().skip(1).collect();
 
         let persistent = args.contains(&"--persistent".to_string());
 
         let mut security_mode = SecurityMode::Secure;
-        let mut filtered_args = Vec::new();
+        let mut filtered_args: Vec<String> = Vec::new();
 
         let mut i = 0;
 
@@ -58,6 +59,8 @@ impl SessionConfig {
                 }
                 "--mode" => {
                     if i + 1 >= args.len() {
+                        args.zeroize();
+                        filtered_args.zeroize();
                         bail!("--mode requires a value");
                     }
 
@@ -71,7 +74,17 @@ impl SessionConfig {
             }
         }
 
-        let prompt = filtered_args.join(" ");
+        let mut prompt = filtered_args.join(" ");
+
+        let prompt_bytes = SensitiveBytes::new(if prompt.trim().is_empty() {
+            "Hello from NullContext".to_string()
+        } else {
+            prompt.clone()
+        });
+
+        prompt.zeroize();
+        filtered_args.zeroize();
+        args.zeroize();
 
         let ephemeral = match security_mode {
             SecurityMode::Standard => !persistent,
@@ -82,11 +95,7 @@ impl SessionConfig {
         Ok(Self {
             llama_path: format!("{}/dev/llama.cpp/build/bin/llama-server", home),
             model_path: format!("{}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf", home),
-            prompt: SensitiveBytes::new(if prompt.trim().is_empty() {
-                "Hello from NullContext".to_string()
-            } else {
-                prompt
-            }),
+            prompt: prompt_bytes,
             max_tokens: "256".to_string(),
             gpu_layers: "0".to_string(),
             ephemeral,
