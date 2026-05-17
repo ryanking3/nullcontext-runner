@@ -2,6 +2,7 @@ mod audit;
 mod cleanup;
 mod config;
 mod inference;
+mod memory_scan;
 mod runtime;
 mod sensitive;
 mod session;
@@ -11,6 +12,7 @@ use audit::PrivacyReport;
 use cleanup::{cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation};
 use config::SessionConfig;
 use inference::run_inference;
+use memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use session::Session;
 
 fn main() -> Result<()> {
@@ -33,6 +35,14 @@ fn main() -> Result<()> {
     println!("\n--- Model Output ---\n");
     println!("{}", inference_result.response.as_str());
 
+    let prompt_probe = config.prompt.as_bytes().to_vec();
+    let response_probe = inference_result.response.as_bytes().to_vec();
+
+    let prompt_found_before = buffer_contains_pattern(config.prompt.as_bytes(), &prompt_probe);
+
+    let response_found_before =
+        buffer_contains_pattern(inference_result.response.as_bytes(), &response_probe);
+
     let (artifacts_detected, scan_operation) = scan_artifacts(&session.workspace)?;
 
     let mut sanitization_operations = vec![scan_operation];
@@ -52,6 +62,23 @@ fn main() -> Result<()> {
 
     config.prompt.sanitize();
     inference_result.response.sanitize();
+
+    let prompt_found_after = buffer_contains_pattern(config.prompt.as_bytes(), &prompt_probe);
+
+    let response_found_after =
+        buffer_contains_pattern(inference_result.response.as_bytes(), &response_probe);
+
+    sanitization_operations.push(verify_buffer_zeroization(
+        "prompt_buffer",
+        prompt_found_before,
+        prompt_found_after,
+    ));
+
+    sanitization_operations.push(verify_buffer_zeroization(
+        "response_buffer",
+        response_found_before,
+        response_found_after,
+    ));
 
     sanitization_operations.push(SanitizationOperation {
         operation: "explicit_sensitive_byte_buffer_zeroization".to_string(),
