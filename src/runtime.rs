@@ -1,6 +1,7 @@
 use crate::config::SessionConfig;
 use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
+use std::io::Read;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -23,17 +24,17 @@ impl ManagedRuntime {
             .arg("127.0.0.1")
             .arg("--port")
             .arg("8080")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
-            .context("Failed to launch llama-server")?;
+            .with_context(|| format!("Failed to launch llama-server at {}", config.llama_path))?;
 
-        let runtime = Self {
+        let mut runtime = Self {
             child,
             base_url: "http://127.0.0.1:8080".to_string(),
         };
 
-        runtime.wait_until_ready(Duration::from_secs(30))?;
+        runtime.wait_until_ready(Duration::from_secs(60))?;
 
         println!("Runtime healthy.");
 
@@ -57,7 +58,7 @@ impl ManagedRuntime {
         }
     }
 
-    fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
+    fn wait_until_ready(&mut self, timeout: Duration) -> Result<()> {
         println!("Waiting for runtime readiness...");
 
         let client = Client::new();
@@ -65,6 +66,18 @@ impl ManagedRuntime {
         let started_at = Instant::now();
 
         while started_at.elapsed() < timeout {
+            if let Some(status) = self.child.try_wait()? {
+                let stderr = read_child_stderr(&mut self.child);
+                let stdout = read_child_stdout(&mut self.child);
+
+                bail!(
+                    "llama-server exited before becoming ready. status: {}\nstdout:\n{}\nstderr:\n{}",
+                    status,
+                    stdout,
+                    stderr
+                );
+            }
+
             match client.get(&health_url).send() {
                 Ok(response) if response.status().is_success() => {
                     return Ok(());
@@ -77,4 +90,24 @@ impl ManagedRuntime {
 
         bail!("llama-server did not become ready within {:?}", timeout)
     }
+}
+
+fn read_child_stderr(child: &mut Child) -> String {
+    let Some(stderr) = child.stderr.as_mut() else {
+        return String::new();
+    };
+
+    let mut output = String::new();
+    let _ = stderr.read_to_string(&mut output);
+    output
+}
+
+fn read_child_stdout(child: &mut Child) -> String {
+    let Some(stdout) = child.stdout.as_mut() else {
+        return String::new();
+    };
+
+    let mut output = String::new();
+    let _ = stdout.read_to_string(&mut output);
+    output
 }
