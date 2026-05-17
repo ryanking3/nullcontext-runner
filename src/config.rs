@@ -1,6 +1,7 @@
 use crate::sensitive::SensitiveBytes;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::env;
+use std::io::{self, Read};
 use zeroize::Zeroize;
 
 #[derive(Debug, Clone)]
@@ -29,11 +30,29 @@ impl SecurityMode {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum PromptSource {
+    CliArgs,
+    Stdin,
+    Default,
+}
+
+impl PromptSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CliArgs => "cli_args",
+            Self::Stdin => "stdin",
+            Self::Default => "default",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct SessionConfig {
     pub llama_path: String,
     pub model_path: String,
     pub prompt: SensitiveBytes,
+    pub prompt_source: PromptSource,
     pub max_tokens: String,
     pub gpu_layers: String,
     pub ephemeral: bool,
@@ -46,6 +65,7 @@ impl SessionConfig {
         let mut args: Vec<String> = env::args().skip(1).collect();
 
         let persistent = args.contains(&"--persistent".to_string());
+        let use_stdin = args.contains(&"--stdin".to_string());
 
         let mut security_mode = SecurityMode::Secure;
         let mut filtered_args: Vec<String> = Vec::new();
@@ -55,6 +75,9 @@ impl SessionConfig {
         while i < args.len() {
             match args[i].as_str() {
                 "--persistent" => {
+                    i += 1;
+                }
+                "--stdin" => {
                     i += 1;
                 }
                 "--mode" => {
@@ -74,13 +97,25 @@ impl SessionConfig {
             }
         }
 
-        let mut prompt = filtered_args.join(" ");
+        let (mut prompt, prompt_source) = if use_stdin {
+            let mut stdin_prompt = String::new();
 
-        let prompt_bytes = SensitiveBytes::new(if prompt.trim().is_empty() {
-            "Hello from NullContext".to_string()
+            io::stdin()
+                .read_to_string(&mut stdin_prompt)
+                .context("Failed to read prompt from stdin")?;
+
+            (stdin_prompt, PromptSource::Stdin)
         } else {
-            prompt.clone()
-        });
+            let cli_prompt = filtered_args.join(" ");
+
+            if cli_prompt.trim().is_empty() {
+                ("Hello from NullContext".to_string(), PromptSource::Default)
+            } else {
+                (cli_prompt, PromptSource::CliArgs)
+            }
+        };
+
+        let prompt_bytes = SensitiveBytes::new(prompt.clone());
 
         prompt.zeroize();
         filtered_args.zeroize();
@@ -96,6 +131,7 @@ impl SessionConfig {
             llama_path: format!("{}/dev/llama.cpp/build/bin/llama-server", home),
             model_path: format!("{}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf", home),
             prompt: prompt_bytes,
+            prompt_source,
             max_tokens: "256".to_string(),
             gpu_layers: "0".to_string(),
             ephemeral,

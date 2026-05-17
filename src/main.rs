@@ -22,6 +22,7 @@ fn main() -> Result<()> {
     println!("Session ID: {}", session.id);
     println!("Workspace: {}", session.workspace.display());
     println!("Security mode: {}", config.security_mode.as_str());
+    println!("Prompt source: {}", config.prompt_source.as_str());
 
     session.write_prompt(config.prompt.as_bytes())?;
 
@@ -37,6 +38,15 @@ fn main() -> Result<()> {
     let mut sanitization_operations = vec![scan_operation];
 
     sanitization_operations.append(&mut inference_result.sanitization_operations);
+
+    sanitization_operations.push(SanitizationOperation {
+        operation: "prompt_ingest_channel".to_string(),
+        status: "recorded".to_string(),
+        details: format!(
+            "Prompt was provided via '{}'. Use --stdin to avoid shell history and process argv exposure.",
+            config.prompt_source.as_str()
+        ),
+    });
 
     println!("\nSanitizing Rust-owned buffers...");
 
