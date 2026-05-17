@@ -1,7 +1,10 @@
 use crate::sensitive::SensitiveBytes;
 use anyhow::{bail, Context, Result};
+use serde::Deserialize;
 use std::env;
+use std::fs;
 use std::io::{self, Read};
+use std::path::PathBuf;
 use zeroize::Zeroize;
 
 #[derive(Debug, Clone)]
@@ -47,6 +50,39 @@ impl PromptSource {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct FileConfig {
+    llama_path: Option<String>,
+    model_path: Option<String>,
+    default_mode: Option<String>,
+    max_tokens: Option<u32>,
+    gpu_layers: Option<u32>,
+}
+
+impl FileConfig {
+    fn load(home: &str) -> Result<Self> {
+        let config_path = PathBuf::from(format!("{home}/.nullcontext/config.toml"));
+
+        if !config_path.exists() {
+            return Ok(Self {
+                llama_path: None,
+                model_path: None,
+                default_mode: None,
+                max_tokens: None,
+                gpu_layers: None,
+            });
+        }
+
+        let raw = fs::read_to_string(&config_path)
+            .with_context(|| format!("Failed to read config file at {}", config_path.display()))?;
+
+        let parsed: Self = toml::from_str(&raw)
+            .with_context(|| format!("Failed to parse config file at {}", config_path.display()))?;
+
+        Ok(parsed)
+    }
+}
+
 #[derive(Debug)]
 pub struct SessionConfig {
     pub llama_path: String,
@@ -62,12 +98,16 @@ pub struct SessionConfig {
 impl SessionConfig {
     pub fn from_env() -> Result<Self> {
         let home = env::var("HOME")?;
+        let file_config = FileConfig::load(&home)?;
+
         let mut args: Vec<String> = env::args().skip(1).collect();
 
         let persistent = args.contains(&"--persistent".to_string());
         let use_stdin = args.contains(&"--stdin".to_string());
 
-        let mut security_mode = SecurityMode::Secure;
+        let mut security_mode =
+            SecurityMode::from_str(file_config.default_mode.as_deref().unwrap_or("secure"))?;
+
         let mut filtered_args: Vec<String> = Vec::new();
 
         let mut i = 0;
@@ -128,12 +168,16 @@ impl SessionConfig {
         };
 
         Ok(Self {
-            llama_path: format!("{}/dev/llama.cpp/build/bin/llama-server", home),
-            model_path: format!("{}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf", home),
+            llama_path: file_config
+                .llama_path
+                .unwrap_or_else(|| format!("{home}/dev/llama.cpp/build/bin/llama-server")),
+            model_path: file_config
+                .model_path
+                .unwrap_or_else(|| format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf")),
             prompt: prompt_bytes,
             prompt_source,
-            max_tokens: "256".to_string(),
-            gpu_layers: "0".to_string(),
+            max_tokens: file_config.max_tokens.unwrap_or(256).to_string(),
+            gpu_layers: file_config.gpu_layers.unwrap_or(0).to_string(),
             ephemeral,
             security_mode,
         })
