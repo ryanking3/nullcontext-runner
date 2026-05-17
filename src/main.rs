@@ -3,6 +3,7 @@ mod cleanup;
 mod config;
 mod inference;
 mod memory_scan;
+mod registry;
 mod runtime;
 mod sensitive;
 mod session;
@@ -10,14 +11,27 @@ mod session;
 use anyhow::Result;
 use audit::PrivacyReport;
 use cleanup::{cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation};
-use config::SessionConfig;
+use config::{AppCommand, SessionConfig};
 use inference::run_inference;
 use memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
+use registry::{list_sessions, register_persistent_session, show_report};
 use session::Session;
 
 fn main() -> Result<()> {
-    let mut config = SessionConfig::from_env()?;
+    match AppCommand::from_env()? {
+        AppCommand::Run(config) => run_session(config),
+        AppCommand::ListSessions => {
+            let home = std::env::var("HOME")?;
+            list_sessions(&home)
+        }
+        AppCommand::ShowReport { session_id } => {
+            let home = std::env::var("HOME")?;
+            show_report(&home, &session_id)
+        }
+    }
+}
 
+fn run_session(mut config: SessionConfig) -> Result<()> {
     let session = Session::create()?;
 
     println!("Starting NullContext session...");
@@ -114,13 +128,15 @@ fn main() -> Result<()> {
         config.security_mode.as_str().to_string(),
         config.gpu_layers.clone(),
         inference_result.process_exited_cleanly,
-        cleanup_report,
+        cleanup_report.clone(),
     );
 
     let report_json = report.to_pretty_json()?;
 
     if !config.ephemeral {
         session.write_report(&report_json)?;
+
+        register_persistent_session(&config.home, &session, &config, &cleanup_report)?;
     }
 
     println!("\n--- Privacy Report v0 ---");

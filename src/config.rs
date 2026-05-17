@@ -7,6 +7,13 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 use zeroize::Zeroize;
 
+#[derive(Debug)]
+pub enum AppCommand {
+    Run(SessionConfig),
+    ListSessions,
+    ShowReport { session_id: String },
+}
+
 #[derive(Debug, Clone)]
 pub enum SecurityMode {
     Standard,
@@ -85,6 +92,7 @@ impl FileConfig {
 
 #[derive(Debug)]
 pub struct SessionConfig {
+    pub home: String,
     pub llama_path: String,
     pub model_path: String,
     pub prompt: SensitiveBytes,
@@ -95,12 +103,37 @@ pub struct SessionConfig {
     pub security_mode: SecurityMode,
 }
 
-impl SessionConfig {
+impl AppCommand {
     pub fn from_env() -> Result<Self> {
         let home = env::var("HOME")?;
-        let file_config = FileConfig::load(&home)?;
-
         let mut args: Vec<String> = env::args().skip(1).collect();
+
+        if args.contains(&"--list-sessions".to_string()) {
+            args.zeroize();
+            return Ok(Self::ListSessions);
+        }
+
+        if let Some(index) = args.iter().position(|arg| arg == "--show-report") {
+            if index + 1 >= args.len() {
+                args.zeroize();
+                bail!("--show-report requires a session id");
+            }
+
+            let session_id = args[index + 1].clone();
+            args.zeroize();
+
+            return Ok(Self::ShowReport { session_id });
+        }
+
+        let config = SessionConfig::from_args(home, args)?;
+
+        Ok(Self::Run(config))
+    }
+}
+
+impl SessionConfig {
+    fn from_args(home: String, mut args: Vec<String>) -> Result<Self> {
+        let file_config = FileConfig::load(&home)?;
 
         let persistent = args.contains(&"--persistent".to_string());
         let use_stdin = args.contains(&"--stdin".to_string());
@@ -137,7 +170,7 @@ impl SessionConfig {
             }
         }
 
-        let (mut prompt, prompt_source) = if use_stdin {
+        let (prompt, prompt_source) = if use_stdin {
             let mut stdin_prompt = String::new();
 
             io::stdin()
@@ -155,9 +188,8 @@ impl SessionConfig {
             }
         };
 
-        let prompt_bytes = SensitiveBytes::new(prompt.clone());
+        let prompt_bytes = SensitiveBytes::new(prompt);
 
-        prompt.zeroize();
         filtered_args.zeroize();
         args.zeroize();
 
@@ -168,6 +200,7 @@ impl SessionConfig {
         };
 
         Ok(Self {
+            home: home.clone(),
             llama_path: file_config
                 .llama_path
                 .unwrap_or_else(|| format!("{home}/dev/llama.cpp/build/bin/llama-server")),
