@@ -150,6 +150,11 @@ button:disabled {
   background: #7f1d1d55;
 }
 
+.status.running {
+  color: #fde68a;
+  background: #78350f55;
+}
+
 pre {
   overflow: auto;
   white-space: pre-wrap;

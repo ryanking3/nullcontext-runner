@@ -17,6 +17,13 @@ pub struct SanitizationOperation {
     pub details: String,
 }
 
+pub fn log_sanitization_operation(operation: &SanitizationOperation) {
+    println!(
+        "[audit] {} | {} | {}",
+        operation.operation, operation.status, operation.details
+    );
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CleanupReport {
     pub attempted: bool,
@@ -34,11 +41,14 @@ impl CleanupReport {
         artifacts_detected: Vec<ArtifactRecord>,
         mut sanitization_operations: Vec<SanitizationOperation>,
     ) -> Self {
-        sanitization_operations.push(SanitizationOperation {
+        let operation = SanitizationOperation {
             operation: "workspace_retention_policy".to_string(),
             status: "not_attempted".to_string(),
             details: "Workspace retained because session is persistent".to_string(),
-        });
+        };
+
+        log_sanitization_operation(&operation);
+        sanitization_operations.push(operation);
 
         Self {
             attempted: false,
@@ -103,18 +113,24 @@ pub fn cleanup_ephemeral_workspace(
     if path.exists() {
         match fs::remove_dir_all(path) {
             Ok(_) => {
-                sanitization_operations.push(SanitizationOperation {
+                let operation = SanitizationOperation {
                     operation: "workspace_recursive_delete".to_string(),
                     status: "successful".to_string(),
                     details: "Workspace directory removed".to_string(),
-                });
+                };
+
+                log_sanitization_operation(&operation);
+                sanitization_operations.push(operation);
             }
             Err(error) => {
-                sanitization_operations.push(SanitizationOperation {
+                let operation = SanitizationOperation {
                     operation: "workspace_recursive_delete".to_string(),
                     status: "failed".to_string(),
                     details: format!("Failed to remove workspace: {error}"),
-                });
+                };
+
+                log_sanitization_operation(&operation);
+                sanitization_operations.push(operation);
 
                 report.error = Some(format!("Failed to remove workspace: {error}"));
                 report.sanitization_operations = sanitization_operations;
@@ -126,7 +142,7 @@ pub fn cleanup_ephemeral_workspace(
 
     let workspace_deleted = !path.exists();
 
-    sanitization_operations.push(SanitizationOperation {
+    let operation = SanitizationOperation {
         operation: "post_cleanup_workspace_verification".to_string(),
         status: if workspace_deleted {
             "successful".to_string()
@@ -138,7 +154,10 @@ pub fn cleanup_ephemeral_workspace(
         } else {
             "Workspace path still exists after cleanup attempt".to_string()
         },
-    });
+    };
+
+    log_sanitization_operation(&operation);
+    sanitization_operations.push(operation);
 
     report.workspace_deleted = workspace_deleted;
     report.successful = workspace_deleted && report.error.is_none();

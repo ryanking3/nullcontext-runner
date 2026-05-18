@@ -10,7 +10,10 @@ mod session;
 
 use anyhow::Result;
 use audit::PrivacyReport;
-use cleanup::{cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation};
+use cleanup::{
+    cleanup_ephemeral_workspace, log_sanitization_operation, scan_artifacts, CleanupReport,
+    SanitizationOperation,
+};
 use config::{AppCommand, SessionConfig};
 use inference::run_inference;
 use memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
@@ -59,18 +62,27 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
 
     let (artifacts_detected, scan_operation) = scan_artifacts(&session.workspace)?;
 
+    log_sanitization_operation(&scan_operation);
+
     let mut sanitization_operations = vec![scan_operation];
+
+    for operation in &inference_result.sanitization_operations {
+        log_sanitization_operation(operation);
+    }
 
     sanitization_operations.append(&mut inference_result.sanitization_operations);
 
-    sanitization_operations.push(SanitizationOperation {
+    let prompt_ingest_operation = SanitizationOperation {
         operation: "prompt_ingest_channel".to_string(),
         status: "recorded".to_string(),
         details: format!(
             "Prompt was provided via '{}'. Use --stdin to avoid shell history and process argv exposure.",
             config.prompt_source.as_str()
         ),
-    });
+    };
+
+    log_sanitization_operation(&prompt_ingest_operation);
+    sanitization_operations.push(prompt_ingest_operation);
 
     println!("\nSanitizing Rust-owned buffers...");
 
@@ -82,24 +94,30 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
     let response_found_after =
         buffer_contains_pattern(inference_result.response.as_bytes(), &response_probe);
 
-    sanitization_operations.push(verify_buffer_zeroization(
-        "prompt_buffer",
-        prompt_found_before,
-        prompt_found_after,
-    ));
+    let prompt_verification_operation =
+        verify_buffer_zeroization("prompt_buffer", prompt_found_before, prompt_found_after);
 
-    sanitization_operations.push(verify_buffer_zeroization(
+    log_sanitization_operation(&prompt_verification_operation);
+    sanitization_operations.push(prompt_verification_operation);
+
+    let response_verification_operation = verify_buffer_zeroization(
         "response_buffer",
         response_found_before,
         response_found_after,
-    ));
+    );
 
-    sanitization_operations.push(SanitizationOperation {
+    log_sanitization_operation(&response_verification_operation);
+    sanitization_operations.push(response_verification_operation);
+
+    let explicit_zeroization_operation = SanitizationOperation {
         operation: "explicit_sensitive_byte_buffer_zeroization".to_string(),
         status: "successful".to_string(),
         details: "Explicitly overwrote Rust-owned prompt and response byte buffers before drop."
             .to_string(),
-    });
+    };
+
+    log_sanitization_operation(&explicit_zeroization_operation);
+    sanitization_operations.push(explicit_zeroization_operation);
 
     let cleanup_report = if config.ephemeral {
         println!("\nSession mode: ephemeral");

@@ -1,11 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
 type RunSessionResponse = {
   stdout: string;
   stderr: string;
   success: boolean;
+};
+
+type StreamChunk = {
+  stream: string;
+  chunk: string;
 };
 
 type ParsedRunOutput = {
@@ -31,13 +37,8 @@ function parseRunOutput(stdout: string, stderr: string): ParsedRunOutput {
     lifecycleLogs = stdout.slice(0, modelIndex).trim();
 
     if (reportIndex >= 0) {
-      modelOutput = stdout
-        .slice(modelIndex + modelMarker.length, reportIndex)
-        .trim();
-
-      privacyReport = stdout
-        .slice(reportIndex + reportMarker.length)
-        .trim();
+      modelOutput = stdout.slice(modelIndex + modelMarker.length, reportIndex).trim();
+      privacyReport = stdout.slice(reportIndex + reportMarker.length).trim();
     } else {
       modelOutput = stdout.slice(modelIndex + modelMarker.length).trim();
     }
@@ -61,40 +62,65 @@ function App() {
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState("secure");
   const [persistent, setPersistent] = useState(false);
-  const [runResult, setRunResult] = useState<RunSessionResponse | null>(null);
+
+  const [streamStdout, setStreamStdout] = useState("");
+  const [streamStderr, setStreamStderr] = useState("");
+  const [runStatus, setRunStatus] = useState<"idle" | "running" | "success" | "failed">("idle");
+
   const [sessions, setSessions] = useState("");
   const [reportSessionId, setReportSessionId] = useState("");
   const [report, setReport] = useState("");
-  const [isRunning, setIsRunning] = useState(false);
 
   const parsedOutput = useMemo(() => {
-    if (!runResult) {
+    if (!streamStdout && !streamStderr) {
       return null;
     }
 
-    return parseRunOutput(runResult.stdout, runResult.stderr);
-  }, [runResult]);
+    return parseRunOutput(streamStdout, streamStderr);
+  }, [streamStdout, streamStderr]);
+
+useEffect(() => {
+  const unlistenChunkPromise = listen<StreamChunk>("nullcontext://stream-chunk", (event) => {
+    if (event.payload.stream === "stdout") {
+      setStreamStdout((current) => `${current}${event.payload.chunk}`);
+    } else {
+      setStreamStderr((current) => `${current}${event.payload.chunk}`);
+    }
+  });
+
+  const unlistenErrorPromise = listen<StreamChunk>("nullcontext://stream-error", (event) => {
+    setStreamStderr((current) => `${current}${event.payload.chunk}\n`);
+    setRunStatus("failed");
+  });
+
+  const unlistenCompletePromise = listen<RunSessionResponse>(
+    "nullcontext://stream-complete",
+    (event) => {
+      setRunStatus(event.payload.success ? "success" : "failed");
+    }
+  );
+
+  return () => {
+    unlistenChunkPromise.then((unlisten) => unlisten());
+    unlistenErrorPromise.then((unlisten) => unlisten());
+    unlistenCompletePromise.then((unlisten) => unlisten());
+  };
+}, []);
 
   async function runSession() {
-    setIsRunning(true);
-    setRunResult(null);
+    setStreamStdout("");
+    setStreamStderr("");
+    setRunStatus("running");
 
     try {
-      const result = await invoke<RunSessionResponse>("run_nullcontext_session", {
+      await invoke("run_nullcontext_session_streaming", {
         prompt,
         mode,
         persistent,
       });
-
-      setRunResult(result);
     } catch (error) {
-      setRunResult({
-        stdout: "",
-        stderr: String(error),
-        success: false,
-      });
-    } finally {
-      setIsRunning(false);
+      setStreamStderr(String(error));
+      setRunStatus("failed");
     }
   }
 
@@ -181,31 +207,39 @@ function App() {
           </label>
         </div>
 
-        <button onClick={runSession} disabled={isRunning || prompt.trim() === ""}>
-          {isRunning ? "Running..." : "Run local session"}
+        <button onClick={runSession} disabled={runStatus === "running" || prompt.trim() === ""}>
+          {runStatus === "running" ? "Running..." : "Run local session"}
         </button>
       </section>
 
-      {runResult && parsedOutput && (
+      {parsedOutput && (
         <section className="result-grid">
           <div className="card">
             <h2>LLM Response</h2>
-            <div className={runResult.success ? "status success" : "status failed"}>
-              {runResult.success ? "success" : "failed"}
+            <div
+              className={
+                runStatus === "success"
+                  ? "status success"
+                  : runStatus === "failed"
+                    ? "status failed"
+                    : "status running"
+              }
+            >
+              {runStatus}
             </div>
             <pre className="model-output">
-              {parsedOutput.modelOutput || "No model output captured."}
+              {parsedOutput.modelOutput || "Waiting for model output..."}
             </pre>
           </div>
 
           <div className="card">
             <h2>Runtime / Lifecycle Logs</h2>
-            <pre>{parsedOutput.lifecycleLogs || "No lifecycle logs captured."}</pre>
+            <pre>{parsedOutput.lifecycleLogs || "Waiting for lifecycle logs..."}</pre>
           </div>
 
           <div className="card">
             <h2>Privacy Report</h2>
-            <pre>{parsedOutput.privacyReport || "No privacy report captured."}</pre>
+            <pre>{parsedOutput.privacyReport || "Waiting for privacy report..."}</pre>
           </div>
 
           {parsedOutput.stderr.trim() && (
