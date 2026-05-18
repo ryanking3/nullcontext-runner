@@ -176,3 +176,62 @@ summary {
   color: #cbd5e1;
   font-weight: 700;
 }
+
+.muted {
+  color: #94a3b8;
+}
+
+.audit-list {
+  display: grid;
+  gap: 12px;
+}
+
+.audit-item {
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 12px;
+  background: #020617;
+}
+
+.audit-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.audit-item code {
+  color: #c4b5fd;
+}
+
+.audit-item p {
+  margin: 8px 0 0;
+  color: #cbd5e1;
+}
+
+.op-status {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.op-status.success {
+  color: #a7f3d0;
+  background: #064e3b55;
+}
+
+.op-status.failed {
+  color: #fecaca;
+  background: #7f1d1d55;
+}
+
+.op-status.warning {
+  color: #fde68a;
+  background: #78350f55;
+}
+
+.op-status.neutral {
+  color: #cbd5e1;
+  background: #33415588;
+}

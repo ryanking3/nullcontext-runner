@@ -14,13 +14,43 @@ type StreamChunk = {
   chunk: string;
 };
 
+type AuditOperation = {
+  operation: string;
+  status: string;
+  details: string;
+};
+
 type ParsedRunOutput = {
   lifecycleLogs: string;
+  auditOperations: AuditOperation[];
   modelOutput: string;
   privacyReport: string;
   rawOutput: string;
   stderr: string;
 };
+
+function parseAuditLine(line: string): AuditOperation | null {
+  if (!line.startsWith("[audit] ")) {
+    return null;
+  }
+
+  const payload = line.replace("[audit] ", "");
+  const parts = payload.split(" | ");
+
+  if (parts.length < 3) {
+    return {
+      operation: "unknown",
+      status: "unknown",
+      details: payload,
+    };
+  }
+
+  return {
+    operation: parts[0]?.trim() ?? "unknown",
+    status: parts[1]?.trim() ?? "unknown",
+    details: parts.slice(2).join(" | ").trim(),
+  };
+}
 
 function parseRunOutput(stdout: string, stderr: string): ParsedRunOutput {
   const modelMarker = "--- Model Output ---";
@@ -29,12 +59,12 @@ function parseRunOutput(stdout: string, stderr: string): ParsedRunOutput {
   const modelIndex = stdout.indexOf(modelMarker);
   const reportIndex = stdout.indexOf(reportMarker);
 
-  let lifecycleLogs = stdout;
+  let beforeModel = stdout;
   let modelOutput = "";
   let privacyReport = "";
 
   if (modelIndex >= 0) {
-    lifecycleLogs = stdout.slice(0, modelIndex).trim();
+    beforeModel = stdout.slice(0, modelIndex);
 
     if (reportIndex >= 0) {
       modelOutput = stdout.slice(modelIndex + modelMarker.length, reportIndex).trim();
@@ -45,17 +75,49 @@ function parseRunOutput(stdout: string, stderr: string): ParsedRunOutput {
   }
 
   if (modelIndex < 0 && reportIndex >= 0) {
-    lifecycleLogs = stdout.slice(0, reportIndex).trim();
+    beforeModel = stdout.slice(0, reportIndex);
     privacyReport = stdout.slice(reportIndex + reportMarker.length).trim();
   }
 
+  const allNonReportOutput = reportIndex >= 0 ? stdout.slice(0, reportIndex) : stdout;
+
+  const auditOperations: AuditOperation[] = [];
+  const lifecycleLines: string[] = [];
+
+  for (const line of allNonReportOutput.split("\n")) {
+    const audit = parseAuditLine(line.trim());
+
+    if (audit) {
+      auditOperations.push(audit);
+    } else if (!line.includes(modelMarker)) {
+      lifecycleLines.push(line);
+    }
+  }
+
   return {
-    lifecycleLogs,
+    lifecycleLogs: lifecycleLines.join("\n").trim(),
+    auditOperations,
     modelOutput,
     privacyReport,
     rawOutput: stdout,
     stderr,
   };
+}
+
+function statusClass(status: string) {
+  if (status === "successful") {
+    return "op-status success";
+  }
+
+  if (status === "failed") {
+    return "op-status failed";
+  }
+
+  if (status === "warning") {
+    return "op-status warning";
+  }
+
+  return "op-status neutral";
 }
 
 function App() {
@@ -79,33 +141,33 @@ function App() {
     return parseRunOutput(streamStdout, streamStderr);
   }, [streamStdout, streamStderr]);
 
-useEffect(() => {
-  const unlistenChunkPromise = listen<StreamChunk>("nullcontext://stream-chunk", (event) => {
-    if (event.payload.stream === "stdout") {
-      setStreamStdout((current) => `${current}${event.payload.chunk}`);
-    } else {
-      setStreamStderr((current) => `${current}${event.payload.chunk}`);
-    }
-  });
+  useEffect(() => {
+    const unlistenChunkPromise = listen<StreamChunk>("nullcontext://stream-chunk", (event) => {
+      if (event.payload.stream === "stdout") {
+        setStreamStdout((current) => `${current}${event.payload.chunk}`);
+      } else {
+        setStreamStderr((current) => `${current}${event.payload.chunk}`);
+      }
+    });
 
-  const unlistenErrorPromise = listen<StreamChunk>("nullcontext://stream-error", (event) => {
-    setStreamStderr((current) => `${current}${event.payload.chunk}\n`);
-    setRunStatus("failed");
-  });
+    const unlistenErrorPromise = listen<StreamChunk>("nullcontext://stream-error", (event) => {
+      setStreamStderr((current) => `${current}${event.payload.chunk}\n`);
+      setRunStatus("failed");
+    });
 
-  const unlistenCompletePromise = listen<RunSessionResponse>(
-    "nullcontext://stream-complete",
-    (event) => {
-      setRunStatus(event.payload.success ? "success" : "failed");
-    }
-  );
+    const unlistenCompletePromise = listen<RunSessionResponse>(
+      "nullcontext://stream-complete",
+      (event) => {
+        setRunStatus(event.payload.success ? "success" : "failed");
+      }
+    );
 
-  return () => {
-    unlistenChunkPromise.then((unlisten) => unlisten());
-    unlistenErrorPromise.then((unlisten) => unlisten());
-    unlistenCompletePromise.then((unlisten) => unlisten());
-  };
-}, []);
+    return () => {
+      unlistenChunkPromise.then((unlisten) => unlisten());
+      unlistenErrorPromise.then((unlisten) => unlisten());
+      unlistenCompletePromise.then((unlisten) => unlisten());
+    };
+  }, []);
 
   async function runSession() {
     setStreamStdout("");
@@ -230,6 +292,26 @@ useEffect(() => {
             <pre className="model-output">
               {parsedOutput.modelOutput || "Waiting for model output..."}
             </pre>
+          </div>
+
+          <div className="card">
+            <h2>Audit Operations</h2>
+
+            {parsedOutput.auditOperations.length === 0 ? (
+              <p className="muted">Waiting for audit operations...</p>
+            ) : (
+              <div className="audit-list">
+                {parsedOutput.auditOperations.map((operation, index) => (
+                  <div className="audit-item" key={`${operation.operation}-${index}`}>
+                    <div className="audit-item-header">
+                      <code>{operation.operation}</code>
+                      <span className={statusClass(operation.status)}>{operation.status}</span>
+                    </div>
+                    <p>{operation.details}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="card">
