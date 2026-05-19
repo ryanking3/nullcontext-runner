@@ -7,6 +7,7 @@ mod registry;
 mod runtime;
 mod sensitive;
 mod session;
+mod web;
 
 use anyhow::Result;
 use audit::PrivacyReport;
@@ -20,25 +21,19 @@ use memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use registry::{list_sessions, register_persistent_session, show_report};
 use session::Session;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     match AppCommand::from_env()? {
         AppCommand::Run(config) => run_session(config),
         AppCommand::ListSessions => {
-            let home = if let Ok(home) = std::env::var("HOME") {
-                home
-            } else {
-                std::env::var("USERPROFILE")?
-            };
+            let home = home_dir()?;
             list_sessions(&home)
         }
         AppCommand::ShowReport { session_id } => {
-            let home = if let Ok(home) = std::env::var("HOME") {
-                home
-            } else {
-                std::env::var("USERPROFILE")?
-            };
+            let home = home_dir()?;
             show_report(&home, &session_id)
         }
+        AppCommand::Serve => web::serve().await,
     }
 }
 
@@ -169,4 +164,16 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
     println!("{}", report_json);
 
     Ok(())
+}
+
+fn home_dir() -> Result<String> {
+    if let Ok(home) = std::env::var("HOME") {
+        return Ok(home);
+    }
+
+    if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        return Ok(user_profile);
+    }
+
+    anyhow::bail!("Could not determine home directory. HOME and USERPROFILE are both unset.")
 }

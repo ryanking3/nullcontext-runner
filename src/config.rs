@@ -12,6 +12,7 @@ pub enum AppCommand {
     Run(SessionConfig),
     ListSessions,
     ShowReport { session_id: String },
+    Serve,
 }
 
 #[derive(Debug, Clone)]
@@ -19,18 +20,6 @@ pub enum SecurityMode {
     Standard,
     Secure,
     AirGapped,
-}
-
-fn home_dir() -> Result<String> {
-    if let Ok(home) = std::env::var("HOME") {
-        return Ok(home);
-    }
-
-    if let Ok(user_profile) = std::env::var("USERPROFILE") {
-        return Ok(user_profile);
-    }
-
-    bail!("Could not determine home directory. HOME and USERPROFILE are both unset.")
 }
 
 impl SecurityMode {
@@ -50,6 +39,18 @@ impl SecurityMode {
             Self::AirGapped => "air-gapped",
         }
     }
+}
+
+fn home_dir() -> Result<String> {
+    if let Ok(home) = std::env::var("HOME") {
+        return Ok(home);
+    }
+
+    if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        return Ok(user_profile);
+    }
+
+    bail!("Could not determine home directory. HOME and USERPROFILE are both unset.")
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +120,11 @@ impl AppCommand {
     pub fn from_env() -> Result<Self> {
         let home = home_dir()?;
         let mut args: Vec<String> = env::args().skip(1).collect();
+
+        if args.first().map(|arg| arg.as_str()) == Some("serve") {
+            args.zeroize();
+            return Ok(Self::Serve);
+        }
 
         if args.contains(&"--list-sessions".to_string()) {
             args.zeroize();
