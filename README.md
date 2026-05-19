@@ -2,7 +2,7 @@
 
 NullContext is a local-first secure inference environment for running LLM sessions with explicit lifecycle visibility, audit reporting, and configurable persistence behavior.
 
-The project currently targets macOS development using:
+The project currently targets macOS and Windows development using:
 
 - Rust
 - llama.cpp
@@ -71,18 +71,7 @@ The Tauri desktop shell currently supports:
 
 ---
 
-## Project Structure
 
-```text
-nullcontext-runner/
-├── src/                    # Rust backend runtime
-├── apps/
-│   └── desktop/            # Tauri desktop shell
-├── target/
-└── README.md
-```
-
----
 
 ## Security Modes
 
