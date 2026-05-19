@@ -21,6 +21,18 @@ pub enum SecurityMode {
     AirGapped,
 }
 
+fn home_dir() -> Result<String> {
+    if let Ok(home) = std::env::var("HOME") {
+        return Ok(home);
+    }
+
+    if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        return Ok(user_profile);
+    }
+
+    bail!("Could not determine home directory. HOME and USERPROFILE are both unset.")
+}
+
 impl SecurityMode {
     pub fn from_str(value: &str) -> Result<Self> {
         match value {
@@ -105,7 +117,7 @@ pub struct SessionConfig {
 
 impl AppCommand {
     pub fn from_env() -> Result<Self> {
-        let home = env::var("HOME")?;
+        let home = home_dir()?;
         let mut args: Vec<String> = env::args().skip(1).collect();
 
         if args.contains(&"--list-sessions".to_string()) {

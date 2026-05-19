@@ -24,11 +24,19 @@ fn main() -> Result<()> {
     match AppCommand::from_env()? {
         AppCommand::Run(config) => run_session(config),
         AppCommand::ListSessions => {
-            let home = std::env::var("HOME")?;
+            let home = if let Ok(home) = std::env::var("HOME") {
+                home
+            } else {
+                std::env::var("USERPROFILE")?
+            };
             list_sessions(&home)
         }
         AppCommand::ShowReport { session_id } => {
-            let home = std::env::var("HOME")?;
+            let home = if let Ok(home) = std::env::var("HOME") {
+                home
+            } else {
+                std::env::var("USERPROFILE")?
+            };
             show_report(&home, &session_id)
         }
     }
