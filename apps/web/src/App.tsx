@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import "./App.css";
 
 const API_BASE = "http://127.0.0.1:3333";
 
@@ -41,6 +42,16 @@ type ParsedOutput = {
   auditOperations: AuditOperation[];
 };
 
+type Theme = "dark" | "light";
+
+function stripAuditLines(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("[audit] "))
+    .join("\n")
+    .trim();
+}
+
 function parseAuditLine(line: string): AuditOperation | null {
   if (!line.startsWith("[audit] ")) {
     return null;
@@ -64,55 +75,122 @@ function parseAuditLine(line: string): AuditOperation | null {
   };
 }
 
+function extractAuditOperationsFromReport(report: string): AuditOperation[] {
+  if (!report.trim()) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(report);
+    const operations = parsed?.cleanup?.sanitization_operations;
+
+    if (!Array.isArray(operations)) {
+      return [];
+    }
+
+    return operations
+      .filter((operation) => {
+        return (
+          typeof operation.operation === "string" &&
+          typeof operation.status === "string" &&
+          typeof operation.details === "string"
+        );
+      })
+      .map((operation) => ({
+        operation: operation.operation,
+        status: operation.status,
+        details: operation.details,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function firstExistingIndex(source: string, markers: string[], start: number): number {
+  const indexes = markers
+    .map((marker) => source.indexOf(marker, start))
+    .filter((index) => index >= 0);
+
+  if (indexes.length === 0) {
+    return -1;
+  }
+
+  return Math.min(...indexes);
+}
+
 function parseRunOutput(stdout: string): ParsedOutput {
   const modelMarker = "--- Model Output ---";
   const reportMarker = "--- Privacy Report v0 ---";
 
+  const cleanupMarkers = [
+    "\nSanitizing Rust-owned buffers...",
+    "\nSession mode:",
+    "\n[audit] prompt_buffer_ram_zeroization_verification",
+    "\n[audit] response_buffer_ram_zeroization_verification",
+    "\n[audit] explicit_sensitive_byte_buffer_zeroization",
+  ];
+
   const modelIndex = stdout.indexOf(modelMarker);
   const reportIndex = stdout.indexOf(reportMarker);
 
-  let lifecycleSection = stdout;
   let modelOutput = "";
   let privacyReport = "";
 
-  if (modelIndex >= 0) {
-    lifecycleSection = stdout.slice(0, modelIndex);
-
-    if (reportIndex >= 0) {
-      modelOutput = stdout.slice(modelIndex + modelMarker.length, reportIndex).trim();
-      privacyReport = stdout.slice(reportIndex + reportMarker.length).trim();
-    } else {
-      modelOutput = stdout.slice(modelIndex + modelMarker.length).trim();
-    }
-  }
-
-  if (modelIndex < 0 && reportIndex >= 0) {
-    lifecycleSection = stdout.slice(0, reportIndex);
+  if (reportIndex >= 0) {
     privacyReport = stdout.slice(reportIndex + reportMarker.length).trim();
   }
 
-  const allBeforeReport = reportIndex >= 0 ? stdout.slice(0, reportIndex) : stdout;
+  let lifecycleSource = reportIndex >= 0 ? stdout.slice(0, reportIndex) : stdout;
+
+  if (modelIndex >= 0) {
+    const modelStart = modelIndex + modelMarker.length;
+    const modelEnd = firstExistingIndex(stdout, cleanupMarkers, modelStart);
+
+    if (modelEnd >= 0) {
+      modelOutput = stripAuditLines(stdout.slice(modelStart, modelEnd));
+      lifecycleSource = [
+        stdout.slice(0, modelIndex),
+        `${modelMarker}\n<RESPONSE>`,
+        stdout.slice(modelEnd, reportIndex >= 0 ? reportIndex : stdout.length),
+      ].join("\n");
+    } else if (reportIndex >= 0) {
+      modelOutput = stripAuditLines(stdout.slice(modelStart, reportIndex));
+      lifecycleSource = [
+        stdout.slice(0, modelIndex),
+        `${modelMarker}\n<RESPONSE>`,
+      ].join("\n");
+    } else {
+      modelOutput = stripAuditLines(stdout.slice(modelStart));
+      lifecycleSource = [
+        stdout.slice(0, modelIndex),
+        `${modelMarker}\n<RESPONSE>`,
+      ].join("\n");
+    }
+  }
+
   const auditOperations: AuditOperation[] = [];
   const lifecycleLines: string[] = [];
 
-  for (const line of allBeforeReport.split("\n")) {
-    const audit = parseAuditLine(line.trim());
+  for (const line of lifecycleSource.split("\n")) {
+    const trimmed = line.trim();
+    const audit = parseAuditLine(trimmed);
 
     if (audit) {
       auditOperations.push(audit);
       continue;
     }
 
-    if (!line.includes(modelMarker)) {
-      lifecycleLines.push(line);
-    }
+    lifecycleLines.push(line);
   }
+
+  const reportAuditOperations = extractAuditOperationsFromReport(privacyReport);
 
   return {
     lifecycleLogs: lifecycleLines.join("\n").trim(),
     modelOutput,
     privacyReport,
-    auditOperations,
+    auditOperations:
+      reportAuditOperations.length > 0 ? reportAuditOperations : auditOperations,
   };
 }
 
@@ -124,12 +202,21 @@ function statusClass(status: string): string {
   return "pill neutral";
 }
 
+function shortId(id: string): string {
+  return id.slice(0, 8);
+}
+
 function App() {
+  const [theme, setTheme] = useState<Theme>("dark");
   const [serverStatus, setServerStatus] = useState<"checking" | "online" | "offline">("checking");
+  const [healthCheckedAt, setHealthCheckedAt] = useState<string>("never");
+  const [registryLoadedAt, setRegistryLoadedAt] = useState<string>("never");
+
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState("secure");
   const [persistent, setPersistent] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+
   const [runResponse, setRunResponse] = useState<RunResponse | null>(null);
   const [sessions, setSessions] = useState<SessionIndexEntry[]>([]);
   const [selectedReport, setSelectedReport] = useState<string>("");
@@ -141,11 +228,15 @@ function App() {
   }, [runResponse]);
 
   async function checkHealth() {
+    setServerStatus("checking");
+
     try {
       const response = await fetch(`${API_BASE}/api/health`);
       setServerStatus(response.ok ? "online" : "offline");
     } catch {
       setServerStatus("offline");
+    } finally {
+      setHealthCheckedAt(new Date().toLocaleTimeString());
     }
   }
 
@@ -156,6 +247,8 @@ function App() {
       setSessions(data.sessions ?? []);
     } catch {
       setSessions([]);
+    } finally {
+      setRegistryLoadedAt(new Date().toLocaleTimeString());
     }
   }
 
@@ -208,6 +301,10 @@ function App() {
   }
 
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  useEffect(() => {
     checkHealth();
     loadSessions();
   }, []);
@@ -219,21 +316,24 @@ function App() {
           <div className="logo">NC</div>
           <div>
             <h1>NullContext</h1>
-            <p>local secure inference</p>
+            <p>localhost runtime</p>
           </div>
         </div>
 
-        <div className="server-card">
+        <section className="server-line">
           <span className={`server-dot ${serverStatus}`} />
-          <span>server: {serverStatus}</span>
-          <button onClick={checkHealth}>check</button>
-        </div>
+          <span>server:{serverStatus}</span>
+          <button className="ghost-button" onClick={checkHealth}>
+            check
+          </button>
+        </section>
+        <p className="microcopy">last check: {healthCheckedAt}</p>
 
         <section className="panel">
-          <h2>Session</h2>
+          <div className="panel-title">session</div>
 
           <label>
-            Security mode
+            mode
             <select value={mode} onChange={(event) => setMode(event.target.value)}>
               <option value="secure">secure</option>
               <option value="standard">standard</option>
@@ -251,21 +351,24 @@ function App() {
             persistent
           </label>
 
-          <div className="hint">
-            Secure and air-gapped sessions are ephemeral. Standard mode can retain reports and
-            workspace artifacts.
-          </div>
+          <p className="microcopy">
+            secure and air-gapped sessions are ephemeral. standard can retain workspace artifacts.
+          </p>
         </section>
 
         <section className="panel">
           <div className="panel-header">
-            <h2>Registry</h2>
-            <button onClick={loadSessions}>refresh</button>
+            <div className="panel-title">registry</div>
+            <button className="ghost-button" onClick={loadSessions}>
+              refresh
+            </button>
           </div>
+
+          <p className="microcopy">last refresh: {registryLoadedAt}</p>
 
           <div className="session-list">
             {sessions.length === 0 ? (
-              <p className="muted-text">No persistent sessions.</p>
+              <p className="muted-text">no persistent sessions</p>
             ) : (
               sessions.map((session) => (
                 <button
@@ -277,7 +380,7 @@ function App() {
                   key={session.session_id}
                   onClick={() => openReport(session.session_id)}
                 >
-                  <span>{session.session_id.slice(0, 8)}</span>
+                  <span>{shortId(session.session_id)}</span>
                   <small>{session.security_mode}</small>
                   <small>{new Date(session.started_at).toLocaleString()}</small>
                 </button>
@@ -285,19 +388,31 @@ function App() {
             )}
           </div>
         </section>
+
+        <section className="panel">
+          <div className="panel-title">theme</div>
+          <div className="segmented">
+            <button
+              className={theme === "dark" ? "selected" : ""}
+              onClick={() => setTheme("dark")}
+            >
+              dark
+            </button>
+            <button
+              className={theme === "light" ? "selected" : ""}
+              onClick={() => setTheme("light")}
+            >
+              light
+            </button>
+          </div>
+        </section>
       </aside>
 
       <section className="main-column">
         <header className="topbar">
           <div>
-            <h2>Chat</h2>
-            <p>localhost-only web UI for NullContext sessions</p>
-          </div>
-
-          <div className="topbar-actions">
-            <span className="badge">GGUF</span>
-            <span className="badge">llama.cpp</span>
-            <span className="badge">offline-capable</span>
+            <h2>chat</h2>
+            <p>local inference with lifecycle visibility</p>
           </div>
         </header>
 
@@ -305,10 +420,10 @@ function App() {
           <div className="messages">
             {!runResponse && (
               <div className="empty-state">
-                <h3>Start a local session</h3>
+                <h3>ready</h3>
                 <p>
-                  Enter a prompt below. NullContext will run local inference, track artifacts,
-                  emit audit operations, and generate a privacy report.
+                  enter a prompt. NullContext will run local inference, scan artifacts, emit audit
+                  operations, and generate a privacy report.
                 </p>
               </div>
             )}
@@ -323,7 +438,7 @@ function App() {
                 <div className="message assistant">
                   <div className="role">assistant</div>
                   <div className="bubble">
-                    {parsed?.modelOutput || "No model output captured."}
+                    {parsed?.modelOutput || "no model output captured"}
                   </div>
                 </div>
               </>
@@ -334,52 +449,52 @@ function App() {
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Message NullContext..."
+              placeholder="message nullcontext..."
             />
 
             <button onClick={runSession} disabled={isRunning || prompt.trim() === ""}>
-              {isRunning ? "running..." : "send"}
+              {isRunning ? "running" : "send"}
             </button>
           </div>
         </section>
       </section>
 
       <aside className="inspector">
-        <section className="panel">
-          <h2>Audit operations</h2>
+        <details className="panel" open>
+          <summary>audit operations ({parsed?.auditOperations.length ?? 0})</summary>
 
           {!parsed || parsed.auditOperations.length === 0 ? (
-            <p className="muted-text">Audit operations appear after a run.</p>
+            <p className="muted-text">audit operations appear after a run</p>
           ) : (
             <div className="audit-list">
               {parsed.auditOperations.map((operation, index) => (
-                <div className="audit-item" key={`${operation.operation}-${index}`}>
-                  <div className="audit-row">
+                <details className="audit-item" key={`${operation.operation}-${index}`}>
+                  <summary>
                     <code>{operation.operation}</code>
                     <span className={statusClass(operation.status)}>{operation.status}</span>
-                  </div>
+                  </summary>
                   <p>{operation.details}</p>
-                </div>
+                </details>
               ))}
             </div>
           )}
-        </section>
+        </details>
 
-        <section className="panel">
-          <h2>Runtime logs</h2>
-          <pre>{parsed?.lifecycleLogs || "No runtime logs yet."}</pre>
-        </section>
+        <details className="panel" open>
+          <summary>runtime logs</summary>
+          <pre>{parsed?.lifecycleLogs || "no runtime logs yet"}</pre>
+        </details>
 
-        <section className="panel">
-          <h2>Privacy report</h2>
-          <pre>{selectedReport || parsed?.privacyReport || "No report selected."}</pre>
-        </section>
+        <details className="panel" open>
+          <summary>privacy report</summary>
+          <pre>{selectedReport || parsed?.privacyReport || "no report selected"}</pre>
+        </details>
 
         {runResponse?.stderr && (
-          <section className="panel danger">
-            <h2>stderr</h2>
+          <details className="panel danger" open>
+            <summary>stderr</summary>
             <pre>{runResponse.stderr}</pre>
-          </section>
+          </details>
         )}
       </aside>
     </main>
