@@ -66,7 +66,9 @@ fn send_completion_request(
     prompt: &str,
     n_predict: u32,
 ) -> Result<(String, Vec<SanitizationOperation>)> {
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()?;
 
     let mut request = CompletionRequest {
         prompt: prompt.to_string(),

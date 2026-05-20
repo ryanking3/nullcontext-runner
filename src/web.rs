@@ -3,11 +3,13 @@ use anyhow::Result;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::net::SocketAddr;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
@@ -27,6 +29,20 @@ struct ErrorResponse {
     error: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RunRequest {
+    prompt: String,
+    mode: Option<String>,
+    persistent: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RunResponse {
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
 pub async fn serve() -> Result<()> {
     let home = home_dir()?;
 
@@ -36,6 +52,7 @@ pub async fn serve() -> Result<()> {
 
     let app = Router::new()
         .route("/api/health", get(health))
+        .route("/api/run", post(run_session))
         .route("/api/sessions", get(list_sessions))
         .route("/api/reports/:session_id", get(show_report))
         .layer(CorsLayer::permissive())
@@ -57,6 +74,55 @@ async fn health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".to_string(),
         service: "nullcontext".to_string(),
+    })
+}
+
+async fn run_session(Json(request): Json<RunRequest>) -> Response {
+    match run_cli_session(request) {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+fn run_cli_session(request: RunRequest) -> Result<RunResponse> {
+    let exe_path = std::env::current_exe()?;
+
+    let mode = request.mode.unwrap_or_else(|| "secure".to_string());
+    let persistent = request.persistent.unwrap_or(false);
+
+    let mut command = Command::new(exe_path);
+
+    command
+        .arg("--mode")
+        .arg(mode)
+        .arg("--stdin")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    if persistent {
+        command.arg("--persistent");
+    }
+
+    let mut child = command.spawn()?;
+
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Failed to open child stdin"))?;
+
+        stdin.write_all(request.prompt.as_bytes())?;
+    }
+
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output()?;
+
+    Ok(RunResponse {
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
     })
 }
 

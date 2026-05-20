@@ -21,8 +21,7 @@ use memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use registry::{list_sessions, register_persistent_session, show_report};
 use session::Session;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     match AppCommand::from_env()? {
         AppCommand::Run(config) => run_session(config),
         AppCommand::ListSessions => {
@@ -33,7 +32,10 @@ async fn main() -> Result<()> {
             let home = home_dir()?;
             show_report(&home, &session_id)
         }
-        AppCommand::Serve => web::serve().await,
+        AppCommand::Serve => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(web::serve())
+        }
     }
 }
 
