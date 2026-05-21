@@ -1,13 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 
 const API_BASE = "http://127.0.0.1:3333";
-
-type RunResponse = {
-  success: boolean;
-  stdout: string;
-  stderr: string;
-};
 
 type SessionRegistry = {
   sessions: SessionIndexEntry[];
@@ -35,164 +29,18 @@ type AuditOperation = {
   details: string;
 };
 
-type ParsedOutput = {
-  lifecycleLogs: string;
-  modelOutput: string;
-  privacyReport: string;
-  auditOperations: AuditOperation[];
-};
-
 type Theme = "dark" | "light";
+type RunStatus = "idle" | "running" | "success" | "failed";
 
-function stripAuditLines(text: string): string {
-  return text
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("[audit] "))
-    .join("\n")
-    .trim();
-}
-
-function parseAuditLine(line: string): AuditOperation | null {
-  if (!line.startsWith("[audit] ")) {
-    return null;
-  }
-
-  const payload = line.replace("[audit] ", "");
-  const parts = payload.split(" | ");
-
-  if (parts.length < 3) {
-    return {
-      operation: "unknown",
-      status: "unknown",
-      details: payload,
-    };
-  }
-
-  return {
-    operation: parts[0]?.trim() ?? "unknown",
-    status: parts[1]?.trim() ?? "unknown",
-    details: parts.slice(2).join(" | ").trim(),
-  };
-}
-
-function extractAuditOperationsFromReport(report: string): AuditOperation[] {
-  if (!report.trim()) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(report);
-    const operations = parsed?.cleanup?.sanitization_operations;
-
-    if (!Array.isArray(operations)) {
-      return [];
-    }
-
-    return operations
-      .filter((operation) => {
-        return (
-          typeof operation.operation === "string" &&
-          typeof operation.status === "string" &&
-          typeof operation.details === "string"
-        );
-      })
-      .map((operation) => ({
-        operation: operation.operation,
-        status: operation.status,
-        details: operation.details,
-      }));
-  } catch {
-    return [];
-  }
-}
-
-function firstExistingIndex(source: string, markers: string[], start: number): number {
-  const indexes = markers
-    .map((marker) => source.indexOf(marker, start))
-    .filter((index) => index >= 0);
-
-  if (indexes.length === 0) {
-    return -1;
-  }
-
-  return Math.min(...indexes);
-}
-
-function parseRunOutput(stdout: string): ParsedOutput {
-  const modelMarker = "--- Model Output ---";
-  const reportMarker = "--- Privacy Report v0 ---";
-
-  const cleanupMarkers = [
-    "\nSanitizing Rust-owned buffers...",
-    "\nSession mode:",
-    "\n[audit] prompt_buffer_ram_zeroization_verification",
-    "\n[audit] response_buffer_ram_zeroization_verification",
-    "\n[audit] explicit_sensitive_byte_buffer_zeroization",
-  ];
-
-  const modelIndex = stdout.indexOf(modelMarker);
-  const reportIndex = stdout.indexOf(reportMarker);
-
-  let modelOutput = "";
-  let privacyReport = "";
-
-  if (reportIndex >= 0) {
-    privacyReport = stdout.slice(reportIndex + reportMarker.length).trim();
-  }
-
-  let lifecycleSource = reportIndex >= 0 ? stdout.slice(0, reportIndex) : stdout;
-
-  if (modelIndex >= 0) {
-    const modelStart = modelIndex + modelMarker.length;
-    const modelEnd = firstExistingIndex(stdout, cleanupMarkers, modelStart);
-
-    if (modelEnd >= 0) {
-      modelOutput = stripAuditLines(stdout.slice(modelStart, modelEnd));
-      lifecycleSource = [
-        stdout.slice(0, modelIndex),
-        `${modelMarker}\n<RESPONSE>`,
-        stdout.slice(modelEnd, reportIndex >= 0 ? reportIndex : stdout.length),
-      ].join("\n");
-    } else if (reportIndex >= 0) {
-      modelOutput = stripAuditLines(stdout.slice(modelStart, reportIndex));
-      lifecycleSource = [
-        stdout.slice(0, modelIndex),
-        `${modelMarker}\n<RESPONSE>`,
-      ].join("\n");
-    } else {
-      modelOutput = stripAuditLines(stdout.slice(modelStart));
-      lifecycleSource = [
-        stdout.slice(0, modelIndex),
-        `${modelMarker}\n<RESPONSE>`,
-      ].join("\n");
-    }
-  }
-
-  const auditOperations: AuditOperation[] = [];
-  const lifecycleLines: string[] = [];
-
-  for (const line of lifecycleSource.split("\n")) {
-    const trimmed = line.trim();
-    const audit = parseAuditLine(trimmed);
-
-    if (audit) {
-      auditOperations.push(audit);
-      continue;
-    }
-
-    lifecycleLines.push(line);
-  }
-
-  const reportAuditOperations = extractAuditOperationsFromReport(privacyReport);
-
-  return {
-    lifecycleLogs: lifecycleLines.join("\n").trim(),
-    modelOutput,
-    privacyReport,
-    auditOperations:
-      reportAuditOperations.length > 0 ? reportAuditOperations : auditOperations,
-  };
-}
+type StreamPayload = {
+  type: string;
+  message?: string;
+  text?: string;
+  operation?: string;
+  status?: string;
+  details?: string;
+  success?: boolean;
+};
 
 function statusClass(status: string): string {
   if (status === "successful") return "pill success";
@@ -206,6 +54,26 @@ function shortId(id: string): string {
   return id.slice(0, 8);
 }
 
+function parseSseBlock(block: string): StreamPayload | null {
+  const dataLines = block
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.replace(/^data:\s?/, ""));
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(dataLines.join("\n")) as StreamPayload;
+  } catch {
+    return {
+      type: "error",
+      message: `Failed to parse stream event: ${dataLines.join("\n")}`,
+    };
+  }
+}
+
 function App() {
   const [theme, setTheme] = useState<Theme>("dark");
   const [serverStatus, setServerStatus] = useState<"checking" | "online" | "offline">("checking");
@@ -215,17 +83,17 @@ function App() {
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState("secure");
   const [persistent, setPersistent] = useState(false);
-  const [isRunning, setIsRunning] = useState(false);
+  const [runStatus, setRunStatus] = useState<RunStatus>("idle");
 
-  const [runResponse, setRunResponse] = useState<RunResponse | null>(null);
+  const [modelOutput, setModelOutput] = useState("");
+  const [runtimeLogs, setRuntimeLogs] = useState("");
+  const [privacyReport, setPrivacyReport] = useState("");
+  const [stderr, setStderr] = useState("");
+  const [auditOperations, setAuditOperations] = useState<AuditOperation[]>([]);
+
   const [sessions, setSessions] = useState<SessionIndexEntry[]>([]);
   const [selectedReport, setSelectedReport] = useState<string>("");
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
-
-  const parsed = useMemo(() => {
-    if (!runResponse) return null;
-    return parseRunOutput(runResponse.stdout);
-  }, [runResponse]);
 
   async function checkHealth() {
     setServerStatus("checking");
@@ -252,14 +120,97 @@ function App() {
     }
   }
 
-  async function runSession() {
-    setIsRunning(true);
-    setRunResponse(null);
+  function resetRunState() {
+    setModelOutput("");
+    setRuntimeLogs("");
+    setPrivacyReport("");
+    setStderr("");
+    setAuditOperations([]);
     setSelectedReport("");
     setSelectedSessionId("");
+  }
+
+  function handleStreamPayload(payload: StreamPayload) {
+    switch (payload.type) {
+      case "runtime": {
+        if (payload.message) {
+          setRuntimeLogs((current) => `${current}${payload.message}\n`);
+        }
+        break;
+      }
+
+      case "audit": {
+        if (payload.operation && payload.status && payload.details) {
+          setAuditOperations((current) => [
+            ...current,
+            {
+              operation: payload.operation ?? "unknown",
+              status: payload.status ?? "unknown",
+              details: payload.details ?? "",
+            },
+          ]);
+        }
+        break;
+      }
+
+      case "model": {
+        if (payload.text) {
+          setModelOutput((current) => `${current}${payload.text}`);
+          setRuntimeLogs((current) => {
+            if (current.includes("--- Model Output ---\n<RESPONSE>\n")) {
+              return current;
+            }
+
+            return `${current}--- Model Output ---\n<RESPONSE>\n`;
+          });
+        }
+        break;
+      }
+
+      case "report": {
+        if (payload.text) {
+          setPrivacyReport((current) => `${current}${payload.text}`);
+        }
+        break;
+      }
+
+      case "stderr": {
+        if (payload.message) {
+          setStderr((current) => `${current}${payload.message}\n`);
+        }
+        break;
+      }
+
+      case "error": {
+        if (payload.message) {
+          setStderr((current) => `${current}${payload.message}\n`);
+        }
+        setRunStatus("failed");
+        break;
+      }
+
+      case "complete": {
+        setRunStatus(payload.success ? "success" : "failed");
+
+        if (persistent) {
+          loadSessions();
+        }
+
+        break;
+      }
+
+      default: {
+        setRuntimeLogs((current) => `${current}${JSON.stringify(payload)}\n`);
+      }
+    }
+  }
+
+  async function runSession() {
+    resetRunState();
+    setRunStatus("running");
 
     try {
-      const response = await fetch(`${API_BASE}/api/run`, {
+      const response = await fetch(`${API_BASE}/api/run/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -271,20 +222,46 @@ function App() {
         }),
       });
 
-      const data = (await response.json()) as RunResponse;
-      setRunResponse(data);
+      if (!response.body) {
+        throw new Error("Streaming response body was empty");
+      }
 
-      if (persistent) {
-        await loadSessions();
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() ?? "";
+
+        for (const block of blocks) {
+          const payload = parseSseBlock(block);
+
+          if (payload) {
+            handleStreamPayload(payload);
+          }
+        }
+      }
+
+      if (buffer.trim()) {
+        const payload = parseSseBlock(buffer);
+
+        if (payload) {
+          handleStreamPayload(payload);
+        }
       }
     } catch (error) {
-      setRunResponse({
-        success: false,
-        stdout: "",
-        stderr: String(error),
-      });
-    } finally {
-      setIsRunning(false);
+      setStderr(String(error));
+      setRunStatus("failed");
     }
   }
 
@@ -418,7 +395,7 @@ function App() {
 
         <section className="chat-card">
           <div className="messages">
-            {!runResponse && (
+            {runStatus === "idle" && !modelOutput && (
               <div className="empty-state">
                 <h3>ready</h3>
                 <p>
@@ -428,7 +405,7 @@ function App() {
               </div>
             )}
 
-            {runResponse && (
+            {(runStatus !== "idle" || modelOutput) && (
               <>
                 <div className="message user">
                   <div className="role">user</div>
@@ -438,7 +415,7 @@ function App() {
                 <div className="message assistant">
                   <div className="role">assistant</div>
                   <div className="bubble">
-                    {parsed?.modelOutput || "no model output captured"}
+                    {modelOutput || (runStatus === "running" ? "running..." : "no model output")}
                   </div>
                 </div>
               </>
@@ -452,8 +429,8 @@ function App() {
               placeholder="message nullcontext..."
             />
 
-            <button onClick={runSession} disabled={isRunning || prompt.trim() === ""}>
-              {isRunning ? "running" : "send"}
+            <button onClick={runSession} disabled={runStatus === "running" || prompt.trim() === ""}>
+              {runStatus === "running" ? "running" : "send"}
             </button>
           </div>
         </section>
@@ -461,13 +438,13 @@ function App() {
 
       <aside className="inspector">
         <details className="panel" open>
-          <summary>audit operations ({parsed?.auditOperations.length ?? 0})</summary>
+          <summary>audit operations ({auditOperations.length})</summary>
 
-          {!parsed || parsed.auditOperations.length === 0 ? (
-            <p className="muted-text">audit operations appear after a run</p>
+          {auditOperations.length === 0 ? (
+            <p className="muted-text">audit operations appear during a run</p>
           ) : (
             <div className="audit-list">
-              {parsed.auditOperations.map((operation, index) => (
+              {auditOperations.map((operation, index) => (
                 <details className="audit-item" key={`${operation.operation}-${index}`}>
                   <summary>
                     <code>{operation.operation}</code>
@@ -482,18 +459,18 @@ function App() {
 
         <details className="panel" open>
           <summary>runtime logs</summary>
-          <pre>{parsed?.lifecycleLogs || "no runtime logs yet"}</pre>
+          <pre>{runtimeLogs || "no runtime logs yet"}</pre>
         </details>
 
         <details className="panel" open>
           <summary>privacy report</summary>
-          <pre>{selectedReport || parsed?.privacyReport || "no report selected"}</pre>
+          <pre>{selectedReport || privacyReport || "no report selected"}</pre>
         </details>
 
-        {runResponse?.stderr && (
+        {stderr && (
           <details className="panel danger" open>
             <summary>stderr</summary>
-            <pre>{runResponse.stderr}</pre>
+            <pre>{stderr}</pre>
           </details>
         )}
       </aside>
