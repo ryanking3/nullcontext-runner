@@ -58,6 +58,7 @@ pub enum PromptSource {
     CliArgs,
     Stdin,
     Default,
+    Web,
 }
 
 impl PromptSource {
@@ -66,6 +67,7 @@ impl PromptSource {
             Self::CliArgs => "cli_args",
             Self::Stdin => "stdin",
             Self::Default => "default",
+            Self::Web => "web",
         }
     }
 }
@@ -150,6 +152,43 @@ impl AppCommand {
 }
 
 impl SessionConfig {
+    pub fn from_web_request(
+        home: String,
+        prompt: String,
+        mode: Option<String>,
+        persistent: bool,
+    ) -> Result<Self> {
+        let file_config = FileConfig::load(&home)?;
+
+        let security_mode = SecurityMode::from_str(
+            mode.as_deref()
+                .or(file_config.default_mode.as_deref())
+                .unwrap_or("secure"),
+        )?;
+
+        let ephemeral = match security_mode {
+            SecurityMode::Standard => !persistent,
+            SecurityMode::Secure => true,
+            SecurityMode::AirGapped => true,
+        };
+
+        Ok(Self {
+            home: home.clone(),
+            llama_path: file_config
+                .llama_path
+                .unwrap_or_else(|| format!("{home}/dev/llama.cpp/build/bin/llama-server")),
+            model_path: file_config
+                .model_path
+                .unwrap_or_else(|| format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf")),
+            prompt: SensitiveBytes::new(prompt),
+            prompt_source: PromptSource::Web,
+            max_tokens: file_config.max_tokens.unwrap_or(128).to_string(),
+            gpu_layers: file_config.gpu_layers.unwrap_or(0).to_string(),
+            ephemeral,
+            security_mode,
+        })
+    }
+
     fn from_args(home: String, mut args: Vec<String>) -> Result<Self> {
         let file_config = FileConfig::load(&home)?;
 
@@ -227,7 +266,7 @@ impl SessionConfig {
                 .unwrap_or_else(|| format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf")),
             prompt: prompt_bytes,
             prompt_source,
-            max_tokens: file_config.max_tokens.unwrap_or(256).to_string(),
+            max_tokens: file_config.max_tokens.unwrap_or(128).to_string(),
             gpu_layers: file_config.gpu_layers.unwrap_or(0).to_string(),
             ephemeral,
             security_mode,
