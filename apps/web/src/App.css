@@ -521,3 +521,27 @@ pre {
     grid-template-columns: 1fr;
   }
 }
+.active-chat-controls {
+  display: grid;
+  gap: 10px;
+}
+
+.active-chat-controls button {
+  width: 100%;
+}
+
+.session-meta {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  padding: 8px;
+  color: var(--muted);
+  background: var(--input);
+  font-size: 11px;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

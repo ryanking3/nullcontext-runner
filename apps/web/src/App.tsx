@@ -31,6 +31,7 @@ type AuditOperation = {
 
 type Theme = "dark" | "light";
 type RunStatus = "idle" | "running" | "success" | "failed";
+type RuntimeMode = "one-shot" | "active-chat";
 
 type StreamPayload = {
   type: string;
@@ -40,6 +41,35 @@ type StreamPayload = {
   status?: string;
   details?: string;
   success?: boolean;
+};
+
+type ChatStartResponse = {
+  session_id: string;
+  workspace: string;
+  security_mode: string;
+  persistent: boolean;
+  runtime_active: boolean;
+  turns: number;
+};
+
+type ChatStatusResponse = {
+  session_id: string;
+  workspace: string;
+  security_mode: string;
+  persistent: boolean;
+  runtime_active: boolean;
+  turns: number;
+};
+
+type ChatEndResponse = {
+  session_id: string;
+  runtime_stopped: boolean;
+  report: unknown;
+};
+
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
 };
 
 function statusClass(status: string): string {
@@ -80,12 +110,18 @@ function App() {
   const [healthCheckedAt, setHealthCheckedAt] = useState<string>("never");
   const [registryLoadedAt, setRegistryLoadedAt] = useState<string>("never");
 
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>("one-shot");
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState("secure");
   const [persistent, setPersistent] = useState(false);
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
 
-  const [modelOutput, setModelOutput] = useState("");
+  const [activeChatSessionId, setActiveChatSessionId] = useState("");
+  const [activeChatWorkspace, setActiveChatWorkspace] = useState("");
+  const [activeChatTurns, setActiveChatTurns] = useState(0);
+  const [activeChatRuntimeActive, setActiveChatRuntimeActive] = useState(false);
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [runtimeLogs, setRuntimeLogs] = useState("");
   const [privacyReport, setPrivacyReport] = useState("");
   const [stderr, setStderr] = useState("");
@@ -120,14 +156,39 @@ function App() {
     }
   }
 
-  function resetRunState() {
-    setModelOutput("");
+  function resetRunPanels() {
     setRuntimeLogs("");
     setPrivacyReport("");
     setStderr("");
     setAuditOperations([]);
     setSelectedReport("");
     setSelectedSessionId("");
+  }
+
+  function resetOneShotConversation() {
+    setMessages([]);
+    resetRunPanels();
+  }
+
+  function appendAssistantText(text: string) {
+    setMessages((current) => {
+      const next = [...current];
+      const last = next[next.length - 1];
+
+      if (last?.role === "assistant") {
+        next[next.length - 1] = {
+          ...last,
+          content: `${last.content}${text}`,
+        };
+      } else {
+        next.push({
+          role: "assistant",
+          content: text,
+        });
+      }
+
+      return next;
+    });
   }
 
   function handleStreamPayload(payload: StreamPayload) {
@@ -155,7 +216,7 @@ function App() {
 
       case "model": {
         if (payload.text) {
-          setModelOutput((current) => `${current}${payload.text}`);
+          appendAssistantText(payload.text);
           setRuntimeLogs((current) => {
             if (current.includes("--- Model Output ---\n<RESPONSE>\n")) {
               return current;
@@ -196,6 +257,10 @@ function App() {
           loadSessions();
         }
 
+        if (runtimeMode === "active-chat" && payload.success) {
+          refreshActiveChatStatus();
+        }
+
         break;
       }
 
@@ -205,9 +270,62 @@ function App() {
     }
   }
 
-  async function runSession() {
-    resetRunState();
+  async function consumeSseResponse(response: Response) {
+    if (!response.body) {
+      throw new Error("Streaming response body was empty");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() ?? "";
+
+      for (const block of blocks) {
+        const payload = parseSseBlock(block);
+
+        if (payload) {
+          handleStreamPayload(payload);
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      const payload = parseSseBlock(buffer);
+
+      if (payload) {
+        handleStreamPayload(payload);
+      }
+    }
+  }
+
+  async function runOneShot() {
+    resetOneShotConversation();
     setRunStatus("running");
+
+    const currentPrompt = prompt;
+
+    setMessages([
+      {
+        role: "user",
+        content: currentPrompt,
+      },
+      {
+        role: "assistant",
+        content: "",
+      },
+    ]);
 
     try {
       const response = await fetch(`${API_BASE}/api/run/stream`, {
@@ -216,53 +334,174 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          prompt,
+          prompt: currentPrompt,
           mode,
           persistent,
         }),
       });
 
-      if (!response.body) {
-        throw new Error("Streaming response body was empty");
+      await consumeSseResponse(response);
+    } catch (error) {
+      setStderr(String(error));
+      setRunStatus("failed");
+    }
+  }
+
+  async function startActiveChat() {
+    resetRunPanels();
+    setRunStatus("running");
+
+    try {
+      const response = await fetch(`${API_BASE}/api/chat/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mode,
+          persistent,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
+      const data = (await response.json()) as ChatStartResponse;
 
-      let buffer = "";
+      setActiveChatSessionId(data.session_id);
+      setActiveChatWorkspace(data.workspace);
+      setActiveChatTurns(data.turns);
+      setActiveChatRuntimeActive(data.runtime_active);
+      setRunStatus("success");
 
-      while (true) {
-        const { value, done } = await reader.read();
+      setRuntimeLogs((current) =>
+        `${current}Started active chat session ${data.session_id}\nWorkspace: ${data.workspace}\n`
+      );
+    } catch (error) {
+      setStderr(String(error));
+      setRunStatus("failed");
+    }
+  }
 
-        if (done) {
-          break;
-        }
+  async function refreshActiveChatStatus() {
+    if (!activeChatSessionId) {
+      return;
+    }
 
-        buffer += decoder.decode(value, { stream: true });
+    try {
+      const response = await fetch(`${API_BASE}/api/chat/${activeChatSessionId}/status`);
 
-        const blocks = buffer.split("\n\n");
-        buffer = blocks.pop() ?? "";
-
-        for (const block of blocks) {
-          const payload = parseSseBlock(block);
-
-          if (payload) {
-            handleStreamPayload(payload);
-          }
-        }
+      if (!response.ok) {
+        return;
       }
 
-      if (buffer.trim()) {
-        const payload = parseSseBlock(buffer);
+      const data = (await response.json()) as ChatStatusResponse;
 
-        if (payload) {
-          handleStreamPayload(payload);
-        }
+      setActiveChatTurns(data.turns);
+      setActiveChatRuntimeActive(data.runtime_active);
+      setActiveChatWorkspace(data.workspace);
+    } catch {
+      // Non-critical UI refresh failure.
+    }
+  }
+
+  async function endActiveChat() {
+    if (!activeChatSessionId) {
+      return;
+    }
+
+    setRunStatus("running");
+
+    try {
+      const response = await fetch(`${API_BASE}/api/chat/${activeChatSessionId}/end`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
+
+      const data = (await response.json()) as ChatEndResponse;
+
+      setActiveChatRuntimeActive(false);
+      setActiveChatTurns(0);
+      setPrivacyReport(JSON.stringify(data.report, null, 2));
+      setRuntimeLogs((current) =>
+        `${current}Ended active chat session ${data.session_id}\nRuntime stopped: ${data.runtime_stopped}\n`
+      );
+
+      setActiveChatSessionId("");
+      setActiveChatWorkspace("");
+      setRunStatus("success");
+
+      if (persistent) {
+        await loadSessions();
       }
     } catch (error) {
       setStderr(String(error));
       setRunStatus("failed");
     }
+  }
+
+  async function sendActiveChatMessage() {
+    if (!activeChatSessionId) {
+      setStderr("No active chat session. Start a session first.");
+      setRunStatus("failed");
+      return;
+    }
+
+    setRunStatus("running");
+    setRuntimeLogs("");
+    setPrivacyReport("");
+    setStderr("");
+    setAuditOperations([]);
+
+    const currentPrompt = prompt;
+
+    setMessages((current) => [
+      ...current,
+      {
+        role: "user",
+        content: currentPrompt,
+      },
+      {
+        role: "assistant",
+        content: "",
+      },
+    ]);
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/chat/${activeChatSessionId}/message/stream`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            prompt: currentPrompt,
+          }),
+        }
+      );
+
+      await consumeSseResponse(response);
+      setPrompt("");
+    } catch (error) {
+      setStderr(String(error));
+      setRunStatus("failed");
+    }
+  }
+
+  async function runSession() {
+    if (runtimeMode === "one-shot") {
+      await runOneShot();
+      return;
+    }
+
+    await sendActiveChatMessage();
   }
 
   async function openReport(sessionId: string) {
@@ -307,11 +546,40 @@ function App() {
         <p className="microcopy">last check: {healthCheckedAt}</p>
 
         <section className="panel">
+          <div className="panel-title">runtime mode</div>
+
+          <div className="segmented">
+            <button
+              className={runtimeMode === "one-shot" ? "selected" : ""}
+              onClick={() => setRuntimeMode("one-shot")}
+              disabled={activeChatRuntimeActive}
+            >
+              one-shot
+            </button>
+            <button
+              className={runtimeMode === "active-chat" ? "selected" : ""}
+              onClick={() => setRuntimeMode("active-chat")}
+            >
+              active chat
+            </button>
+          </div>
+
+          <p className="microcopy">
+            one-shot cleans up every prompt. active chat keeps the runtime alive until end +
+            sanitize.
+          </p>
+        </section>
+
+        <section className="panel">
           <div className="panel-title">session</div>
 
           <label>
             mode
-            <select value={mode} onChange={(event) => setMode(event.target.value)}>
+            <select
+              value={mode}
+              onChange={(event) => setMode(event.target.value)}
+              disabled={activeChatRuntimeActive}
+            >
               <option value="secure">secure</option>
               <option value="standard">standard</option>
               <option value="air-gapped">air-gapped</option>
@@ -322,11 +590,34 @@ function App() {
             <input
               type="checkbox"
               checked={persistent}
-              disabled={mode !== "standard"}
+              disabled={mode !== "standard" || activeChatRuntimeActive}
               onChange={(event) => setPersistent(event.target.checked)}
             />
             persistent
           </label>
+
+          {runtimeMode === "active-chat" && (
+            <div className="active-chat-controls">
+              {!activeChatRuntimeActive ? (
+                <button onClick={startActiveChat} disabled={runStatus === "running"}>
+                  start session
+                </button>
+              ) : (
+                <button onClick={endActiveChat} disabled={runStatus === "running"}>
+                  end + sanitize
+                </button>
+              )}
+
+              {activeChatSessionId && (
+                <div className="session-meta">
+                  <div>id: {shortId(activeChatSessionId)}</div>
+                  <div>runtime: {activeChatRuntimeActive ? "active" : "stopped"}</div>
+                  <div>turns: {activeChatTurns}</div>
+                  <div className="truncate">workspace: {activeChatWorkspace}</div>
+                </div>
+              )}
+            </div>
+          )}
 
           <p className="microcopy">
             secure and air-gapped sessions are ephemeral. standard can retain workspace artifacts.
@@ -389,47 +680,57 @@ function App() {
         <header className="topbar">
           <div>
             <h2>chat</h2>
-            <p>local inference with lifecycle visibility</p>
+            <p>
+              {runtimeMode === "one-shot"
+                ? "one-shot secure inference"
+                : "active runtime chat session"}
+            </p>
           </div>
         </header>
 
         <section className="chat-card">
           <div className="messages">
-            {runStatus === "idle" && !modelOutput && (
+            {messages.length === 0 && (
               <div className="empty-state">
                 <h3>ready</h3>
                 <p>
-                  enter a prompt. NullContext will run local inference, scan artifacts, emit audit
-                  operations, and generate a privacy report.
+                  {runtimeMode === "one-shot"
+                    ? "send a prompt. NullContext will start, infer, audit, report, and clean up."
+                    : "start an active chat session, then send multiple prompts through the same runtime."}
                 </p>
               </div>
             )}
 
-            {(runStatus !== "idle" || modelOutput) && (
-              <>
-                <div className="message user">
-                  <div className="role">user</div>
-                  <div className="bubble">{prompt}</div>
+            {messages.map((message, index) => (
+              <div className={`message ${message.role}`} key={`${message.role}-${index}`}>
+                <div className="role">{message.role}</div>
+                <div className="bubble">
+                  {message.content || (runStatus === "running" ? "running..." : "")}
                 </div>
-
-                <div className="message assistant">
-                  <div className="role">assistant</div>
-                  <div className="bubble">
-                    {modelOutput || (runStatus === "running" ? "running..." : "no model output")}
-                  </div>
-                </div>
-              </>
-            )}
+              </div>
+            ))}
           </div>
 
           <div className="composer">
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              placeholder="message nullcontext..."
+              placeholder={
+                runtimeMode === "active-chat" && !activeChatRuntimeActive
+                  ? "start a session first..."
+                  : "message nullcontext..."
+              }
+              disabled={runtimeMode === "active-chat" && !activeChatRuntimeActive}
             />
 
-            <button onClick={runSession} disabled={runStatus === "running" || prompt.trim() === ""}>
+            <button
+              onClick={runSession}
+              disabled={
+                runStatus === "running" ||
+                prompt.trim() === "" ||
+                (runtimeMode === "active-chat" && !activeChatRuntimeActive)
+              }
+            >
               {runStatus === "running" ? "running" : "send"}
             </button>
           </div>
