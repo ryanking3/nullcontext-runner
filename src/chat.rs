@@ -5,11 +5,17 @@ use crate::cleanup::{
 use crate::config::SessionConfig;
 use crate::registry::register_persistent_session;
 use crate::runtime::ManagedRuntime;
+use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
 use anyhow::{bail, Result};
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use zeroize::Zeroize;
 
 #[derive(Debug, Clone)]
 pub struct ChatSessionManager {
@@ -21,13 +27,24 @@ struct ActiveChatSession {
     session: Session,
     config: SessionConfig,
     runtime: ManagedRuntime,
-    turns: usize,
+    turns: Vec<ChatTurn>,
+}
+
+#[derive(Debug)]
+struct ChatTurn {
+    user: SensitiveBytes,
+    assistant: SensitiveBytes,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct StartChatRequest {
     pub mode: Option<String>,
     pub persistent: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChatMessageRequest {
+    pub prompt: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,6 +72,43 @@ pub struct EndChatResponse {
     pub session_id: String,
     pub runtime_stopped: bool,
     pub report: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChatStreamEvent {
+    #[serde(rename = "type")]
+    pub event_type: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct StreamingCompletionRequest {
+    prompt: String,
+    n_predict: u32,
+    stream: bool,
+}
+
+impl StreamingCompletionRequest {
+    fn sanitize(&mut self) {
+        self.prompt.zeroize();
+    }
 }
 
 impl ChatSessionManager {
@@ -96,7 +150,7 @@ impl ChatSessionManager {
             session,
             config,
             runtime,
-            turns: 0,
+            turns: vec![],
         };
 
         let mut sessions = self
@@ -125,8 +179,70 @@ impl ChatSessionManager {
             security_mode: active.config.security_mode.as_str().to_string(),
             persistent: !active.config.ephemeral,
             runtime_active: true,
-            turns: active.turns,
+            turns: active.turns.len(),
         })
+    }
+
+    pub fn stream_message<F>(
+        &self,
+        session_id: &str,
+        request: ChatMessageRequest,
+        mut emit: F,
+    ) -> Result<()>
+    where
+        F: FnMut(ChatStreamEvent),
+    {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
+
+        let Some(active) = sessions.get_mut(session_id) else {
+            bail!("Active chat session not found: {session_id}");
+        };
+
+        let turn_number = active.turns.len() + 1;
+
+        emit(runtime_event(format!(
+            "Running chat turn {turn_number} on active runtime..."
+        )));
+
+        let user_buffer = SensitiveBytes::new(request.prompt);
+        let mut full_prompt = build_chat_prompt(&active.turns, user_buffer.as_str());
+
+        write_turn_prompt(&active.session, turn_number, user_buffer.as_bytes())?;
+
+        emit(runtime_event("--- Model Output ---"));
+
+        let response_text = stream_completion_from_llama(
+            &active.runtime.completion_url(),
+            &full_prompt,
+            active.config.max_tokens.parse::<u32>()?,
+            &mut emit,
+        )?;
+
+        full_prompt.zeroize();
+
+        let assistant_buffer = SensitiveBytes::new(response_text);
+
+        write_turn_response(&active.session, turn_number, assistant_buffer.as_bytes())?;
+
+        active.turns.push(ChatTurn {
+            user: user_buffer,
+            assistant: assistant_buffer,
+        });
+
+        emit(audit_event(SanitizationOperation {
+            operation: "chat_turn_completed".to_string(),
+            status: "successful".to_string(),
+            details: format!(
+                "Completed chat turn {turn_number}. Runtime remains active until session end."
+            ),
+        }));
+
+        emit(complete_event(true));
+
+        Ok(())
     }
 
     pub fn end_session(&self, session_id: &str) -> Result<EndChatResponse> {
@@ -146,6 +262,11 @@ impl ChatSessionManager {
 
         let runtime_stopped = active.runtime.shutdown()?;
 
+        for turn in &mut active.turns {
+            turn.user.sanitize();
+            turn.assistant.sanitize();
+        }
+
         let (artifacts_detected, scan_operation) = scan_artifacts(&active.session.workspace)?;
 
         let mut sanitization_operations = vec![scan_operation];
@@ -162,11 +283,17 @@ impl ChatSessionManager {
         });
 
         sanitization_operations.push(SanitizationOperation {
+            operation: "chat_history_buffer_zeroization".to_string(),
+            status: "successful".to_string(),
+            details: "Zeroized Rust-owned in-memory chat turn buffers at session end.".to_string(),
+        });
+
+        sanitization_operations.push(SanitizationOperation {
             operation: "chat_session_lifecycle_end".to_string(),
             status: "successful".to_string(),
             details: format!(
                 "Chat session ended after {} turn(s). Runtime lifetime was scoped to this session.",
-                active.turns
+                active.turns.len()
             ),
         });
 
@@ -209,5 +336,159 @@ impl ChatSessionManager {
             runtime_stopped,
             report: parsed_report,
         })
+    }
+}
+
+fn build_chat_prompt(turns: &[ChatTurn], current_user_prompt: &str) -> String {
+    let mut prompt = String::new();
+
+    prompt.push_str("You are a helpful local assistant.\n\n");
+
+    for turn in turns {
+        prompt.push_str("User: ");
+        prompt.push_str(turn.user.as_str());
+        prompt.push_str("\n\nAssistant: ");
+        prompt.push_str(turn.assistant.as_str());
+        prompt.push_str("\n\n");
+    }
+
+    prompt.push_str("User: ");
+    prompt.push_str(current_user_prompt);
+    prompt.push_str("\n\nAssistant: ");
+
+    prompt
+}
+
+fn stream_completion_from_llama<F>(
+    completion_url: &str,
+    prompt: &str,
+    n_predict: u32,
+    emit: &mut F,
+) -> Result<String>
+where
+    F: FnMut(ChatStreamEvent),
+{
+    let client = Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()?;
+
+    let mut request = StreamingCompletionRequest {
+        prompt: prompt.to_string(),
+        n_predict,
+        stream: true,
+    };
+
+    let response = client.post(completion_url).json(&request).send()?;
+
+    request.sanitize();
+
+    let reader = BufReader::new(response);
+    let mut full_response = String::new();
+
+    for line_result in reader.lines() {
+        let line = line_result?;
+
+        if !line.starts_with("data:") {
+            continue;
+        }
+
+        let data = line.trim_start_matches("data:").trim();
+
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+
+        let parsed: serde_json::Value = match serde_json::from_str(data) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+
+        if let Some(content) = parsed.get("content").and_then(|value| value.as_str()) {
+            if !content.is_empty() {
+                full_response.push_str(content);
+                emit(model_event(content.to_string()));
+            }
+        }
+
+        let stopped = parsed
+            .get("stop")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+
+        if stopped {
+            break;
+        }
+    }
+
+    Ok(full_response)
+}
+
+fn write_turn_prompt(session: &Session, turn_number: usize, prompt: &[u8]) -> Result<()> {
+    fs::write(
+        session
+            .workspace
+            .join(format!("turn-{turn_number:04}-prompt.txt")),
+        prompt,
+    )?;
+
+    Ok(())
+}
+
+fn write_turn_response(session: &Session, turn_number: usize, response: &[u8]) -> Result<()> {
+    fs::write(
+        session
+            .workspace
+            .join(format!("turn-{turn_number:04}-response.txt")),
+        response,
+    )?;
+
+    Ok(())
+}
+
+fn runtime_event(message: impl Into<String>) -> ChatStreamEvent {
+    ChatStreamEvent {
+        event_type: "runtime".to_string(),
+        message: Some(message.into()),
+        text: None,
+        operation: None,
+        status: None,
+        details: None,
+        success: None,
+    }
+}
+
+fn model_event(text: impl Into<String>) -> ChatStreamEvent {
+    ChatStreamEvent {
+        event_type: "model".to_string(),
+        message: None,
+        text: Some(text.into()),
+        operation: None,
+        status: None,
+        details: None,
+        success: None,
+    }
+}
+
+fn audit_event(operation: SanitizationOperation) -> ChatStreamEvent {
+    ChatStreamEvent {
+        event_type: "audit".to_string(),
+        message: None,
+        text: None,
+        operation: Some(operation.operation),
+        status: Some(operation.status),
+        details: Some(operation.details),
+        success: None,
+    }
+}
+
+fn complete_event(success: bool) -> ChatStreamEvent {
+    ChatStreamEvent {
+        event_type: "complete".to_string(),
+        message: None,
+        text: None,
+        operation: None,
+        status: None,
+        details: None,
+        success: Some(success),
     }
 }

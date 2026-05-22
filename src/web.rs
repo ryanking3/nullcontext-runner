@@ -1,5 +1,5 @@
 use crate::audit::PrivacyReport;
-use crate::chat::{ChatSessionManager, StartChatRequest};
+use crate::chat::{ChatMessageRequest, ChatSessionManager, StartChatRequest};
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
@@ -117,6 +117,10 @@ pub async fn serve() -> Result<()> {
         .route("/api/chat/:session_id/end", post(end_chat_session))
         .route("/api/sessions", get(list_sessions))
         .route("/api/reports/:session_id", get(show_report))
+        .route(
+            "/api/chat/:session_id/message/stream",
+            post(stream_chat_message),
+        )
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -177,6 +181,67 @@ async fn end_chat_session(
         Ok(Err(error)) => json_error(StatusCode::NOT_FOUND, error.to_string()),
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
+}
+
+async fn stream_chat_message(
+    State(state): State<WebState>,
+    Path(session_id): Path<String>,
+    Json(request): Json<ChatMessageRequest>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let (tx, rx) = mpsc::channel::<StreamPayload>(512);
+    let manager = state.chat_manager.clone();
+
+    std::thread::spawn(move || {
+        let result = manager.stream_message(&session_id, request, |event| {
+            let payload = StreamPayload {
+                event_type: event.event_type,
+                message: event.message,
+                text: event.text,
+                operation: event.operation,
+                status: event.status,
+                details: event.details,
+                success: event.success,
+            };
+
+            let _ = tx.blocking_send(payload);
+        });
+
+        if let Err(error) = result {
+            let _ = tx.blocking_send(StreamPayload {
+                event_type: "error".to_string(),
+                message: Some(error.to_string()),
+                text: None,
+                operation: None,
+                status: None,
+                details: None,
+                success: None,
+            });
+
+            let _ = tx.blocking_send(StreamPayload {
+                event_type: "complete".to_string(),
+                message: None,
+                text: None,
+                operation: None,
+                status: None,
+                details: None,
+                success: Some(false),
+            });
+        }
+    });
+
+    let stream = ReceiverStream::new(rx).map(|payload| {
+        let json = serde_json::to_string(&payload).unwrap_or_else(|error| {
+            serde_json::json!({
+                "type": "error",
+                "message": format!("failed to serialize stream payload: {error}")
+            })
+            .to_string()
+        });
+
+        Ok(Event::default().data(json))
+    });
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 async fn run_session(Json(request): Json<RunRequest>) -> Response {
