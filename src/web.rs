@@ -1,4 +1,5 @@
 use crate::audit::PrivacyReport;
+use crate::chat::{ChatSessionManager, StartChatRequest};
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
@@ -34,6 +35,7 @@ use zeroize::Zeroize;
 #[derive(Debug, Clone)]
 struct WebState {
     home: Arc<String>,
+    chat_manager: ChatSessionManager,
 }
 
 #[derive(Debug, Serialize)]
@@ -103,12 +105,16 @@ pub async fn serve() -> Result<()> {
 
     let state = WebState {
         home: Arc::new(home),
+        chat_manager: ChatSessionManager::new(),
     };
 
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/run", post(run_session))
         .route("/api/run/stream", post(run_session_stream))
+        .route("/api/chat/start", post(start_chat_session))
+        .route("/api/chat/:session_id/status", get(chat_session_status))
+        .route("/api/chat/:session_id/end", post(end_chat_session))
         .route("/api/sessions", get(list_sessions))
         .route("/api/reports/:session_id", get(show_report))
         .layer(CorsLayer::permissive())
@@ -131,6 +137,46 @@ async fn health() -> Json<HealthResponse> {
         status: "ok".to_string(),
         service: "nullcontext".to_string(),
     })
+}
+
+async fn start_chat_session(
+    State(state): State<WebState>,
+    Json(request): Json<StartChatRequest>,
+) -> Response {
+    let manager = state.chat_manager.clone();
+    let home = state.home.as_ref().clone();
+
+    match tokio::task::spawn_blocking(move || manager.start_session(home, request)).await {
+        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+async fn chat_session_status(
+    State(state): State<WebState>,
+    Path(session_id): Path<String>,
+) -> Response {
+    let manager = state.chat_manager.clone();
+
+    match tokio::task::spawn_blocking(move || manager.status(&session_id)).await {
+        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Err(error)) => json_error(StatusCode::NOT_FOUND, error.to_string()),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+async fn end_chat_session(
+    State(state): State<WebState>,
+    Path(session_id): Path<String>,
+) -> Response {
+    let manager = state.chat_manager.clone();
+
+    match tokio::task::spawn_blocking(move || manager.end_session(&session_id)).await {
+        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Err(error)) => json_error(StatusCode::NOT_FOUND, error.to_string()),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
 }
 
 async fn run_session(Json(request): Json<RunRequest>) -> Response {

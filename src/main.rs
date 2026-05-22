@@ -1,4 +1,5 @@
 mod audit;
+mod chat;
 mod cleanup;
 mod config;
 mod inference;

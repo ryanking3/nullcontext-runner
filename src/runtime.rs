@@ -6,6 +6,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[derive(Debug)]
 pub struct ManagedRuntime {
     child: Child,
     base_url: String,
