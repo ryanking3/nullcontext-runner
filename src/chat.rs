@@ -1,4 +1,4 @@
-use crate::audit::PrivacyReport;
+use crate::audit::{PrivacyReport, SessionProfile, TurnArtifact};
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
@@ -65,6 +65,9 @@ pub struct ChatStatusResponse {
     pub persistent: bool,
     pub runtime_active: bool,
     pub turns: usize,
+    pub runtime_duration_ms: i64,
+    pub history_policy: String,
+    pub residual_risk: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -173,6 +176,8 @@ impl ChatSessionManager {
             bail!("Active chat session not found: {session_id}");
         };
 
+        let runtime_duration_ms = UtcNow::duration_since(active.session.started_at);
+
         Ok(ChatStatusResponse {
             session_id: active.session.id.clone(),
             workspace: active.session.workspace.display().to_string(),
@@ -180,6 +185,9 @@ impl ChatSessionManager {
             persistent: !active.config.ephemeral,
             runtime_active: true,
             turns: active.turns.len(),
+            runtime_duration_ms,
+            history_policy: active_history_policy(active.config.ephemeral),
+            residual_risk: active_runtime_risk(),
         })
     }
 
@@ -260,6 +268,10 @@ impl ChatSessionManager {
         println!("Ending active chat session...");
         println!("Session ID: {}", active.session.id);
 
+        let runtime_duration_ms = UtcNow::duration_since(active.session.started_at);
+        let turn_count = active.turns.len();
+        let turn_artifacts = build_turn_artifacts(&active.session, turn_count);
+
         let runtime_stopped = active.runtime.shutdown()?;
 
         for turn in &mut active.turns {
@@ -292,8 +304,7 @@ impl ChatSessionManager {
             operation: "chat_session_lifecycle_end".to_string(),
             status: "successful".to_string(),
             details: format!(
-                "Chat session ended after {} turn(s). Runtime lifetime was scoped to this session.",
-                active.turns.len()
+                "Chat session ended after {turn_count} turn(s). Runtime lifetime was scoped to this session."
             ),
         });
 
@@ -307,6 +318,22 @@ impl ChatSessionManager {
             CleanupReport::not_attempted(artifacts_detected, sanitization_operations)
         };
 
+        let profile = SessionProfile {
+            session_kind: "active_chat".to_string(),
+            runtime_lifetime: "session_scoped".to_string(),
+            turn_count,
+            runtime_duration_ms,
+            history_policy: active_history_policy(active.config.ephemeral),
+            persistence_policy: if active.config.ephemeral {
+                "ephemeral_workspace_deleted_at_session_end".to_string()
+            } else {
+                "persistent_workspace_and_report_retained".to_string()
+            },
+            prompt_source: active.config.prompt_source.as_str().to_string(),
+            turn_artifacts,
+            active_runtime_residual_risk: active_runtime_risk(),
+        };
+
         let report = PrivacyReport::new(
             active.session.id.clone(),
             active.session.started_at,
@@ -316,7 +343,8 @@ impl ChatSessionManager {
             active.config.gpu_layers.clone(),
             runtime_stopped,
             cleanup_report.clone(),
-        );
+        )
+        .with_session_profile(profile);
 
         let report_json = report.to_pretty_json()?;
         let parsed_report: serde_json::Value = serde_json::from_str(&report_json)?;
@@ -336,6 +364,15 @@ impl ChatSessionManager {
             runtime_stopped,
             report: parsed_report,
         })
+    }
+}
+
+struct UtcNow;
+
+impl UtcNow {
+    fn duration_since(started_at: chrono::DateTime<chrono::Utc>) -> i64 {
+        let now = chrono::Utc::now();
+        now.signed_duration_since(started_at).num_milliseconds()
     }
 }
 
@@ -443,6 +480,37 @@ fn write_turn_response(session: &Session, turn_number: usize, response: &[u8]) -
     )?;
 
     Ok(())
+}
+
+fn build_turn_artifacts(session: &Session, turn_count: usize) -> Vec<TurnArtifact> {
+    (1..=turn_count)
+        .map(|turn| TurnArtifact {
+            turn,
+            prompt_path: session
+                .workspace
+                .join(format!("turn-{turn:04}-prompt.txt"))
+                .display()
+                .to_string(),
+            response_path: session
+                .workspace
+                .join(format!("turn-{turn:04}-response.txt"))
+                .display()
+                .to_string(),
+        })
+        .collect()
+}
+
+fn active_history_policy(ephemeral: bool) -> String {
+    if ephemeral {
+        "continuous_context_in_memory_only_until_end_sanitize".to_string()
+    } else {
+        "continuous_context_in_memory_and_retained_workspace_until_explicit_cleanup".to_string()
+    }
+}
+
+fn active_runtime_risk() -> String {
+    "During an active chat session, llama.cpp remains loaded, KV/cache state may remain live, and prompts/responses remain recoverable from process memory until session end and cleanup."
+        .to_string()
 }
 
 fn runtime_event(message: impl Into<String>) -> ChatStreamEvent {
