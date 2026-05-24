@@ -545,3 +545,77 @@ pre {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.active-runtime-banner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 14px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 18px;
+  background: var(--panel);
+}
+
+.active-runtime-banner strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  text-transform: lowercase;
+}
+
+.active-runtime-banner p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.active-runtime-banner.active {
+  border-bottom-color: var(--warning);
+}
+
+.active-runtime-banner.inactive {
+  border-bottom-color: var(--border);
+}
+
+.runtime-stats {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.runtime-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.runtime-actions button {
+  min-width: 130px;
+}
+
+.danger-button {
+  border-color: var(--failed);
+  color: var(--failed);
+}
+
+.danger-button:hover:not(:disabled) {
+  background: var(--failed);
+  color: var(--bg);
+}
+
+@media (max-width: 1120px) {
+  .active-runtime-banner {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-stats {
+    grid-template-columns: repeat(3, max-content);
+  }
+
+  .runtime-actions {
+    justify-content: flex-start;
+  }
+}

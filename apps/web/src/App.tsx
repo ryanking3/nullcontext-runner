@@ -59,6 +59,9 @@ type ChatStatusResponse = {
   persistent: boolean;
   runtime_active: boolean;
   turns: number;
+  runtime_duration_ms?: number;
+  history_policy?: string;
+  residual_risk?: string;
 };
 
 type ChatEndResponse = {
@@ -82,6 +85,14 @@ function statusClass(status: string): string {
 
 function shortId(id: string): string {
   return id.slice(0, 8);
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
 }
 
 function parseSseBlock(block: string): StreamPayload | null {
@@ -120,6 +131,11 @@ function App() {
   const [activeChatWorkspace, setActiveChatWorkspace] = useState("");
   const [activeChatTurns, setActiveChatTurns] = useState(0);
   const [activeChatRuntimeActive, setActiveChatRuntimeActive] = useState(false);
+  const [activeChatStartedAt, setActiveChatStartedAt] = useState<number | null>(null);
+  const [activeRuntimeElapsedMs, setActiveRuntimeElapsedMs] = useState(0);
+  const [activeChatRisk, setActiveChatRisk] = useState(
+    "Runtime is inactive. No active chat KV/cache state is currently held by NullContext."
+  );
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [runtimeLogs, setRuntimeLogs] = useState("");
@@ -370,10 +386,16 @@ function App() {
 
       const data = (await response.json()) as ChatStartResponse;
 
+      setRuntimeMode("active-chat");
       setActiveChatSessionId(data.session_id);
       setActiveChatWorkspace(data.workspace);
       setActiveChatTurns(data.turns);
       setActiveChatRuntimeActive(data.runtime_active);
+      setActiveChatStartedAt(Date.now());
+      setActiveRuntimeElapsedMs(0);
+      setActiveChatRisk(
+        "Runtime is active. llama.cpp remains loaded, KV/cache state may remain live, and chat context remains in memory until End + Sanitize."
+      );
       setRunStatus("success");
 
       setRuntimeLogs((current) =>
@@ -402,6 +424,14 @@ function App() {
       setActiveChatTurns(data.turns);
       setActiveChatRuntimeActive(data.runtime_active);
       setActiveChatWorkspace(data.workspace);
+
+      if (typeof data.runtime_duration_ms === "number") {
+        setActiveRuntimeElapsedMs(data.runtime_duration_ms);
+      }
+
+      if (data.residual_risk) {
+        setActiveChatRisk(data.residual_risk);
+      }
     } catch {
       // Non-critical UI refresh failure.
     }
@@ -428,6 +458,11 @@ function App() {
 
       setActiveChatRuntimeActive(false);
       setActiveChatTurns(0);
+      setActiveChatStartedAt(null);
+      setActiveRuntimeElapsedMs(0);
+      setActiveChatRisk(
+        "Runtime is inactive. Active chat buffers were finalized according to the session cleanup policy."
+      );
       setPrivacyReport(JSON.stringify(data.report, null, 2));
       setRuntimeLogs((current) =>
         `${current}Ended active chat session ${data.session_id}\nRuntime stopped: ${data.runtime_stopped}\n`
@@ -525,6 +560,34 @@ function App() {
     loadSessions();
   }, []);
 
+  useEffect(() => {
+    if (!activeChatRuntimeActive || activeChatStartedAt === null) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setActiveRuntimeElapsedMs(Date.now() - activeChatStartedAt);
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [activeChatRuntimeActive, activeChatStartedAt]);
+
+  useEffect(() => {
+    function warnBeforeUnload(event: BeforeUnloadEvent) {
+      if (!activeChatRuntimeActive) {
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue =
+        "An active NullContext chat session is still running. End + Sanitize before leaving.";
+    }
+
+    window.addEventListener("beforeunload", warnBeforeUnload);
+
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [activeChatRuntimeActive]);
+
   return (
     <main className="shell">
       <aside className="sidebar">
@@ -571,7 +634,7 @@ function App() {
         </section>
 
         <section className="panel">
-          <div className="panel-title">session</div>
+          <div className="panel-title">session config</div>
 
           <label>
             mode
@@ -595,29 +658,6 @@ function App() {
             />
             persistent
           </label>
-
-          {runtimeMode === "active-chat" && (
-            <div className="active-chat-controls">
-              {!activeChatRuntimeActive ? (
-                <button onClick={startActiveChat} disabled={runStatus === "running"}>
-                  start session
-                </button>
-              ) : (
-                <button onClick={endActiveChat} disabled={runStatus === "running"}>
-                  end + sanitize
-                </button>
-              )}
-
-              {activeChatSessionId && (
-                <div className="session-meta">
-                  <div>id: {shortId(activeChatSessionId)}</div>
-                  <div>runtime: {activeChatRuntimeActive ? "active" : "stopped"}</div>
-                  <div>turns: {activeChatTurns}</div>
-                  <div className="truncate">workspace: {activeChatWorkspace}</div>
-                </div>
-              )}
-            </div>
-          )}
 
           <p className="microcopy">
             secure and air-gapped sessions are ephemeral. standard can retain workspace artifacts.
@@ -687,6 +727,49 @@ function App() {
             </p>
           </div>
         </header>
+
+        <section
+          className={
+            activeChatRuntimeActive
+              ? "active-runtime-banner active"
+              : "active-runtime-banner inactive"
+          }
+        >
+          <div>
+            <strong>
+              {runtimeMode === "one-shot"
+                ? "one-shot runtime"
+                : activeChatRuntimeActive
+                  ? "active chat runtime"
+                  : "active chat runtime inactive"}
+            </strong>
+            <p>{runtimeMode === "one-shot" ? "Each prompt starts and ends its own runtime." : activeChatRisk}</p>
+          </div>
+
+          <div className="runtime-stats">
+            <span>turns: {activeChatTurns}</span>
+            <span>duration: {formatDuration(activeRuntimeElapsedMs)}</span>
+            {activeChatSessionId && <span>id: {shortId(activeChatSessionId)}</span>}
+          </div>
+
+          {runtimeMode === "active-chat" && (
+            <div className="runtime-actions">
+              {!activeChatRuntimeActive ? (
+                <button onClick={startActiveChat} disabled={runStatus === "running"}>
+                  start session
+                </button>
+              ) : (
+                <button
+                  className="danger-button"
+                  onClick={endActiveChat}
+                  disabled={runStatus === "running"}
+                >
+                  end + sanitize
+                </button>
+              )}
+            </div>
+          )}
+        </section>
 
         <section className="chat-card">
           <div className="messages">
