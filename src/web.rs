@@ -115,12 +115,12 @@ pub async fn serve() -> Result<()> {
         .route("/api/chat/start", post(start_chat_session))
         .route("/api/chat/:session_id/status", get(chat_session_status))
         .route("/api/chat/:session_id/end", post(end_chat_session))
-        .route("/api/sessions", get(list_sessions))
-        .route("/api/reports/:session_id", get(show_report))
         .route(
             "/api/chat/:session_id/message/stream",
             post(stream_chat_message),
         )
+        .route("/api/sessions", get(list_sessions))
+        .route("/api/reports/:session_id", get(show_report))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -203,7 +203,7 @@ async fn stream_chat_message(
                 success: event.success,
             };
 
-            let _ = tx.blocking_send(payload);
+            tx.blocking_send(payload).is_ok()
         });
 
         if let Err(error) = result {
@@ -260,7 +260,7 @@ async fn run_session_stream(
 
     std::thread::spawn(move || {
         if let Err(error) = run_direct_streaming_session(home, request, tx.clone()) {
-            send_payload(
+            let _ = send_payload(
                 &tx,
                 StreamPayload {
                     event_type: "error".to_string(),
@@ -273,7 +273,7 @@ async fn run_session_stream(
                 },
             );
 
-            send_complete(&tx, false);
+            let _ = send_complete(&tx, false);
         }
     });
 
@@ -304,14 +304,14 @@ fn run_direct_streaming_session(
 
     let session = Session::create()?;
 
-    send_runtime(&tx, "Starting NullContext session...");
-    send_runtime(&tx, &format!("Session ID: {}", session.id));
-    send_runtime(&tx, &format!("Workspace: {}", session.workspace.display()));
-    send_runtime(
+    let _ = send_runtime(&tx, "Starting NullContext session...");
+    let _ = send_runtime(&tx, &format!("Session ID: {}", session.id));
+    let _ = send_runtime(&tx, &format!("Workspace: {}", session.workspace.display()));
+    let _ = send_runtime(
         &tx,
         &format!("Security mode: {}", config.security_mode.as_str()),
     );
-    send_runtime(
+    let _ = send_runtime(
         &tx,
         &format!("Prompt source: {}", config.prompt_source.as_str()),
     );
@@ -322,15 +322,15 @@ fn run_direct_streaming_session(
 
     let prompt_found_before = buffer_contains_pattern(config.prompt.as_bytes(), &prompt_probe);
 
-    send_runtime(&tx, "Launching llama-server...");
+    let _ = send_runtime(&tx, "Launching llama-server...");
 
     let mut runtime = ManagedRuntime::launch(&config)?;
 
-    send_runtime(&tx, "Runtime healthy.");
-    send_runtime(&tx, "Running streaming inference...");
-    send_runtime(&tx, "--- Model Output ---");
+    let _ = send_runtime(&tx, "Runtime healthy.");
+    let _ = send_runtime(&tx, "Running streaming inference...");
+    let _ = send_runtime(&tx, "--- Model Output ---");
 
-    let response_text = stream_completion_from_llama(
+    let (response_text, generation_completed) = stream_completion_from_llama(
         &runtime.completion_url(),
         config.prompt.as_str(),
         config.max_tokens.parse::<u32>()?,
@@ -338,6 +338,19 @@ fn run_direct_streaming_session(
     )?;
 
     let runtime_terminated = runtime.shutdown()?;
+
+    if !generation_completed {
+        let _ = send_audit(
+            &tx,
+            &SanitizationOperation {
+                operation: "one_shot_generation_cancelled".to_string(),
+                status: "warning".to_string(),
+                details:
+                    "One-shot generation was cancelled by the client. Runtime was shut down and cleanup continued."
+                        .to_string(),
+            },
+        );
+    }
 
     let mut response_buffer = SensitiveBytes::new(response_text);
 
@@ -405,7 +418,7 @@ fn run_direct_streaming_session(
         },
     );
 
-    send_runtime(&tx, "Sanitizing Rust-owned buffers...");
+    let _ = send_runtime(&tx, "Sanitizing Rust-owned buffers...");
 
     config.prompt.sanitize();
     response_buffer.sanitize();
@@ -442,12 +455,12 @@ fn run_direct_streaming_session(
     );
 
     let cleanup_report = if config.ephemeral {
-        send_runtime(&tx, "Session mode: ephemeral");
-        send_runtime(
+        let _ = send_runtime(&tx, "Session mode: ephemeral");
+        let _ = send_runtime(
             &tx,
             &format!("Detected {} workspace artifacts.", artifacts_detected.len()),
         );
-        send_runtime(&tx, "Cleaning up workspace...");
+        let _ = send_runtime(&tx, "Cleaning up workspace...");
 
         cleanup_ephemeral_workspace(
             &session.workspace,
@@ -455,13 +468,13 @@ fn run_direct_streaming_session(
             sanitization_operations,
         )
     } else {
-        send_runtime(&tx, "Session mode: persistent");
-        send_runtime(
+        let _ = send_runtime(&tx, "Session mode: persistent");
+        let _ = send_runtime(
             &tx,
             &format!("Detected {} workspace artifacts.", artifacts_detected.len()),
         );
-        send_runtime(&tx, "Workspace retained at:");
-        send_runtime(&tx, &session.workspace.display().to_string());
+        let _ = send_runtime(&tx, "Workspace retained at:");
+        let _ = send_runtime(&tx, &session.workspace.display().to_string());
 
         CleanupReport::not_attempted(artifacts_detected, sanitization_operations)
     };
@@ -471,7 +484,7 @@ fn run_direct_streaming_session(
             || operation.operation == "post_cleanup_workspace_verification"
             || operation.operation == "workspace_retention_policy"
         {
-            send_audit(&tx, operation);
+            let _ = send_audit(&tx, operation);
         }
     }
 
@@ -493,10 +506,10 @@ fn run_direct_streaming_session(
         register_persistent_session(&config.home, &session, &config, &cleanup_report)?;
     }
 
-    send_runtime(&tx, "--- Privacy Report v0 ---");
-    send_report_text(&tx, &report_json);
+    let _ = send_runtime(&tx, "--- Privacy Report v0 ---");
+    let _ = send_report_text(&tx, &report_json);
 
-    send_complete(&tx, true);
+    let _ = send_complete(&tx, generation_completed);
 
     Ok(())
 }
@@ -506,7 +519,7 @@ fn stream_completion_from_llama(
     prompt: &str,
     n_predict: u32,
     tx: &mpsc::Sender<StreamPayload>,
-) -> Result<String> {
+) -> Result<(String, bool)> {
     let client = Client::builder()
         .timeout(Duration::from_secs(300))
         .build()?;
@@ -545,7 +558,10 @@ fn stream_completion_from_llama(
         if let Some(content) = parsed.get("content").and_then(|value| value.as_str()) {
             if !content.is_empty() {
                 full_response.push_str(content);
-                send_model_text(tx, content);
+
+                if !send_model_text(tx, content) {
+                    return Ok((full_response, false));
+                }
             }
         }
 
@@ -559,7 +575,7 @@ fn stream_completion_from_llama(
         }
     }
 
-    Ok(full_response)
+    Ok((full_response, true))
 }
 
 fn emit_and_push(
@@ -567,7 +583,7 @@ fn emit_and_push(
     operations: &mut Vec<SanitizationOperation>,
     operation: SanitizationOperation,
 ) {
-    send_audit(tx, &operation);
+    let _ = send_audit(tx, &operation);
     operations.push(operation);
 }
 
@@ -613,7 +629,7 @@ fn run_cli_session(request: RunRequest) -> Result<RunResponse> {
     })
 }
 
-fn send_runtime(tx: &mpsc::Sender<StreamPayload>, message: &str) {
+fn send_runtime(tx: &mpsc::Sender<StreamPayload>, message: &str) -> bool {
     send_payload(
         tx,
         StreamPayload {
@@ -625,10 +641,10 @@ fn send_runtime(tx: &mpsc::Sender<StreamPayload>, message: &str) {
             details: None,
             success: None,
         },
-    );
+    )
 }
 
-fn send_model_text(tx: &mpsc::Sender<StreamPayload>, text: &str) {
+fn send_model_text(tx: &mpsc::Sender<StreamPayload>, text: &str) -> bool {
     send_payload(
         tx,
         StreamPayload {
@@ -640,10 +656,10 @@ fn send_model_text(tx: &mpsc::Sender<StreamPayload>, text: &str) {
             details: None,
             success: None,
         },
-    );
+    )
 }
 
-fn send_report_text(tx: &mpsc::Sender<StreamPayload>, text: &str) {
+fn send_report_text(tx: &mpsc::Sender<StreamPayload>, text: &str) -> bool {
     send_payload(
         tx,
         StreamPayload {
@@ -655,10 +671,10 @@ fn send_report_text(tx: &mpsc::Sender<StreamPayload>, text: &str) {
             details: None,
             success: None,
         },
-    );
+    )
 }
 
-fn send_audit(tx: &mpsc::Sender<StreamPayload>, operation: &SanitizationOperation) {
+fn send_audit(tx: &mpsc::Sender<StreamPayload>, operation: &SanitizationOperation) -> bool {
     send_payload(
         tx,
         StreamPayload {
@@ -670,10 +686,10 @@ fn send_audit(tx: &mpsc::Sender<StreamPayload>, operation: &SanitizationOperatio
             details: Some(operation.details.clone()),
             success: None,
         },
-    );
+    )
 }
 
-fn send_complete(tx: &mpsc::Sender<StreamPayload>, success: bool) {
+fn send_complete(tx: &mpsc::Sender<StreamPayload>, success: bool) -> bool {
     send_payload(
         tx,
         StreamPayload {
@@ -685,11 +701,11 @@ fn send_complete(tx: &mpsc::Sender<StreamPayload>, success: bool) {
             details: None,
             success: Some(success),
         },
-    );
+    )
 }
 
-fn send_payload(tx: &mpsc::Sender<StreamPayload>, payload: StreamPayload) {
-    let _ = tx.blocking_send(payload);
+fn send_payload(tx: &mpsc::Sender<StreamPayload>, payload: StreamPayload) -> bool {
+    tx.blocking_send(payload).is_ok()
 }
 
 async fn list_sessions(State(state): State<WebState>) -> Response {

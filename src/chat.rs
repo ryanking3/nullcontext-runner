@@ -198,7 +198,7 @@ impl ChatSessionManager {
         mut emit: F,
     ) -> Result<()>
     where
-        F: FnMut(ChatStreamEvent),
+        F: FnMut(ChatStreamEvent) -> bool,
     {
         let mut sessions = self
             .sessions
@@ -211,18 +211,23 @@ impl ChatSessionManager {
 
         let turn_number = active.turns.len() + 1;
 
-        emit(runtime_event(format!(
+        if !emit(runtime_event(format!(
             "Running chat turn {turn_number} on active runtime..."
-        )));
+        ))) {
+            return Ok(());
+        }
 
         let user_buffer = SensitiveBytes::new(request.prompt);
         let mut full_prompt = build_chat_prompt(&active.turns, user_buffer.as_str());
 
         write_turn_prompt(&active.session, turn_number, user_buffer.as_bytes())?;
 
-        emit(runtime_event("--- Model Output ---"));
+        if !emit(runtime_event("--- Model Output ---")) {
+            full_prompt.zeroize();
+            return Ok(());
+        }
 
-        let response_text = stream_completion_from_llama(
+        let (response_text, completed) = stream_completion_from_llama(
             &active.runtime.completion_url(),
             &full_prompt,
             active.config.max_tokens.parse::<u32>()?,
@@ -230,6 +235,20 @@ impl ChatSessionManager {
         )?;
 
         full_prompt.zeroize();
+
+        if !completed {
+            let _ = emit(audit_event(SanitizationOperation {
+                operation: "chat_turn_cancelled".to_string(),
+                status: "warning".to_string(),
+                details: format!(
+                    "Cancelled chat turn {turn_number}. Partial response was not committed to chat history."
+                ),
+            }));
+
+            let _ = emit(complete_event(false));
+
+            return Ok(());
+        }
 
         let assistant_buffer = SensitiveBytes::new(response_text);
 
@@ -240,7 +259,7 @@ impl ChatSessionManager {
             assistant: assistant_buffer,
         });
 
-        emit(audit_event(SanitizationOperation {
+        let _ = emit(audit_event(SanitizationOperation {
             operation: "chat_turn_completed".to_string(),
             status: "successful".to_string(),
             details: format!(
@@ -248,7 +267,7 @@ impl ChatSessionManager {
             ),
         }));
 
-        emit(complete_event(true));
+        let _ = emit(complete_event(true));
 
         Ok(())
     }
@@ -401,9 +420,9 @@ fn stream_completion_from_llama<F>(
     prompt: &str,
     n_predict: u32,
     emit: &mut F,
-) -> Result<String>
+) -> Result<(String, bool)>
 where
-    F: FnMut(ChatStreamEvent),
+    F: FnMut(ChatStreamEvent) -> bool,
 {
     let client = Client::builder()
         .timeout(Duration::from_secs(300))
@@ -443,7 +462,10 @@ where
         if let Some(content) = parsed.get("content").and_then(|value| value.as_str()) {
             if !content.is_empty() {
                 full_response.push_str(content);
-                emit(model_event(content.to_string()));
+
+                if !emit(model_event(content.to_string())) {
+                    return Ok((full_response, false));
+                }
             }
         }
 
@@ -457,7 +479,7 @@ where
         }
     }
 
-    Ok(full_response)
+    Ok((full_response, true))
 }
 
 fn write_turn_prompt(session: &Session, turn_number: usize, prompt: &[u8]) -> Result<()> {

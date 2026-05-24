@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
 const API_BASE = "http://127.0.0.1:3333";
@@ -116,6 +116,8 @@ function parseSseBlock(block: string): StreamPayload | null {
 }
 
 function App() {
+  const activeAbortController = useRef<AbortController | null>(null);
+
   const [theme, setTheme] = useState<Theme>("dark");
   const [serverStatus, setServerStatus] = useState<"checking" | "online" | "offline">("checking");
   const [healthCheckedAt, setHealthCheckedAt] = useState<string>("never");
@@ -286,7 +288,7 @@ function App() {
     }
   }
 
-  async function consumeSseResponse(response: Response) {
+  async function consumeSseResponse(response: Response, signal: AbortSignal) {
     if (!response.body) {
       throw new Error("Streaming response body was empty");
     }
@@ -297,6 +299,10 @@ function App() {
     let buffer = "";
 
     while (true) {
+      if (signal.aborted) {
+        break;
+      }
+
       const { value, done } = await reader.read();
 
       if (done) {
@@ -317,7 +323,7 @@ function App() {
       }
     }
 
-    if (buffer.trim()) {
+    if (!signal.aborted && buffer.trim()) {
       const payload = parseSseBlock(buffer);
 
       if (payload) {
@@ -326,11 +332,33 @@ function App() {
     }
   }
 
+  function stopGeneration() {
+    activeAbortController.current?.abort();
+    activeAbortController.current = null;
+
+    setRunStatus("failed");
+    setRuntimeLogs((current) => `${current}Generation stopped by user.\n`);
+
+    setAuditOperations((current) => [
+      ...current,
+      {
+        operation: "client_generation_stop",
+        status: "warning",
+        details:
+          runtimeMode === "active-chat"
+            ? "Client stopped the current active-chat generation. The chat runtime remains active."
+            : "Client stopped the one-shot generation. Backend cleanup should continue server-side.",
+      },
+    ]);
+  }
+
   async function runOneShot() {
     resetOneShotConversation();
     setRunStatus("running");
 
     const currentPrompt = prompt;
+    const controller = new AbortController();
+    activeAbortController.current = controller;
 
     setMessages([
       {
@@ -354,12 +382,21 @@ function App() {
           mode,
           persistent,
         }),
+        signal: controller.signal,
       });
 
-      await consumeSseResponse(response);
+      await consumeSseResponse(response, controller.signal);
     } catch (error) {
-      setStderr(String(error));
-      setRunStatus("failed");
+      if (controller.signal.aborted) {
+        setRunStatus("failed");
+      } else {
+        setStderr(String(error));
+        setRunStatus("failed");
+      }
+    } finally {
+      if (activeAbortController.current === controller) {
+        activeAbortController.current = null;
+      }
     }
   }
 
@@ -495,6 +532,8 @@ function App() {
     setAuditOperations([]);
 
     const currentPrompt = prompt;
+    const controller = new AbortController();
+    activeAbortController.current = controller;
 
     setMessages((current) => [
       ...current,
@@ -519,14 +558,26 @@ function App() {
           body: JSON.stringify({
             prompt: currentPrompt,
           }),
+          signal: controller.signal,
         }
       );
 
-      await consumeSseResponse(response);
-      setPrompt("");
+      await consumeSseResponse(response, controller.signal);
+
+      if (!controller.signal.aborted) {
+        setPrompt("");
+      }
     } catch (error) {
-      setStderr(String(error));
-      setRunStatus("failed");
+      if (controller.signal.aborted) {
+        setRunStatus("failed");
+      } else {
+        setStderr(String(error));
+        setRunStatus("failed");
+      }
+    } finally {
+      if (activeAbortController.current === controller) {
+        activeAbortController.current = null;
+      }
     }
   }
 
@@ -743,7 +794,11 @@ function App() {
                   ? "active chat runtime"
                   : "active chat runtime inactive"}
             </strong>
-            <p>{runtimeMode === "one-shot" ? "Each prompt starts and ends its own runtime." : activeChatRisk}</p>
+            <p>
+              {runtimeMode === "one-shot"
+                ? "Each prompt starts and ends its own runtime."
+                : activeChatRisk}
+            </p>
           </div>
 
           <div className="runtime-stats">
@@ -806,16 +861,21 @@ function App() {
               disabled={runtimeMode === "active-chat" && !activeChatRuntimeActive}
             />
 
-            <button
-              onClick={runSession}
-              disabled={
-                runStatus === "running" ||
-                prompt.trim() === "" ||
-                (runtimeMode === "active-chat" && !activeChatRuntimeActive)
-              }
-            >
-              {runStatus === "running" ? "running" : "send"}
-            </button>
+            {runStatus === "running" ? (
+              <button className="danger-button" onClick={stopGeneration}>
+                stop
+              </button>
+            ) : (
+              <button
+                onClick={runSession}
+                disabled={
+                  prompt.trim() === "" ||
+                  (runtimeMode === "active-chat" && !activeChatRuntimeActive)
+                }
+              >
+                send
+              </button>
+            )}
           </div>
         </section>
       </section>
