@@ -51,6 +51,8 @@ No cloud inference is required.
 - llama.cpp backend integration
 - local GGUF model support
 - stdin-based prompt ingestion
+- one-shot streaming inference
+- active chat sessions with runtime reuse
 - configurable inference modes
 - persistent and ephemeral sessions
 - configurable token limits
@@ -68,6 +70,8 @@ No cloud inference is required.
 - sanitization operation reporting
 - structured privacy reports
 - configurable retention behavior
+- explicit End + Sanitize workflow for active chat
+- residual risk reporting for long-lived runtimes
 
 ### Session Registry
 
@@ -91,11 +95,15 @@ The registry tracks:
 
 The current browser UI supports:
 
-- local prompt execution
+- one-shot prompt execution
+- active chat session start, stream, stop, and end
 - runtime lifecycle visualization
 - audit operation inspection
 - privacy report inspection
+- runtime log inspection
 - persistent session browsing
+- dark/light terminal-style UI
+- before-unload warning while active chat runtime is live
 - local-only API interaction
 - localhost-only execution
 
@@ -151,6 +159,38 @@ A typical session lifecycle:
 9. Session indexing (persistent only)
 ```
 
+### One-shot mode
+
+One prompt creates a full lifecycle:
+
+```text
+create session
+→ launch llama-server
+→ stream completion
+→ shutdown runtime
+→ scan artifacts
+→ sanitize Rust-owned buffers
+→ cleanup or retain workspace
+→ emit privacy report
+```
+
+### Active chat mode
+
+A chat session creates a long-lived runtime:
+
+```text
+start active session
+→ launch llama-server once
+→ send multiple messages through same runtime
+→ keep chat context in memory until session end
+→ end session explicitly
+→ shutdown runtime
+→ zeroize Rust-owned chat history
+→ scan artifacts
+→ cleanup or retain workspace
+→ emit privacy report
+```
+
 ---
 
 ## Current API
@@ -169,6 +209,16 @@ GET /api/health
 POST /api/run
 ```
 
+Runs a non-streaming one-shot session and returns collected stdout/stderr.
+
+### Stream Run Session
+
+```http
+POST /api/run/stream
+```
+
+Runs a streaming one-shot session and emits SSE-style `data:` JSON payloads.
+
 Example body:
 
 ```json
@@ -177,6 +227,47 @@ Example body:
   "mode": "secure",
   "persistent": false
 }
+```
+
+### Start Active Chat Session
+
+```http
+POST /api/chat/start
+```
+
+Example body:
+
+```json
+{
+  "mode": "secure",
+  "persistent": false
+}
+```
+
+### Active Chat Status
+
+```http
+GET /api/chat/:session_id/status
+```
+
+### Stream Active Chat Message
+
+```http
+POST /api/chat/:session_id/message/stream
+```
+
+Example body:
+
+```json
+{
+  "prompt": "Explain secure local inference in 2 short bullet points."
+}
+```
+
+### End Active Chat Session
+
+```http
+POST /api/chat/:session_id/end
 ```
 
 ### List Sessions
@@ -191,6 +282,18 @@ GET /api/sessions
 GET /api/reports/:session_id
 ```
 
+### Streaming Event Types
+
+Streaming endpoints emit SSE-style `data:` blocks containing JSON events. Current event types include:
+
+- `runtime`
+- `audit`
+- `model`
+- `report`
+- `stderr`
+- `error`
+- `complete`
+
 ---
 
 ## Current Limitations
@@ -204,6 +307,8 @@ NullContext does not currently guarantee:
 - cross-process memory sanitization
 - CUDA memory sanitization
 - forensic memory clearing outside Rust-owned buffers
+
+Active chat also keeps a long-lived llama.cpp runtime and in-memory context alive until the user explicitly ends the session.
 
 The privacy reports intentionally expose these residual risks.
 
@@ -351,6 +456,22 @@ Health check:
 http://127.0.0.1:3333/api/health
 ```
 
+Streaming one-shot example:
+
+```bash
+curl -N -X POST http://127.0.0.1:3333/api/run/stream \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Explain secure local inference in 2 short bullet points.","mode":"secure","persistent":false}'
+```
+
+Active chat example:
+
+```bash
+curl -X POST http://127.0.0.1:3333/api/chat/start \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"secure","persistent":false}'
+```
+
 ---
 
 ## Web UI
@@ -423,6 +544,9 @@ The project is functional and supports:
 - local inference
 - local browser UI
 - local API execution
+- one-shot streaming
+- active chat sessions
+- generation stop control
 - persistent sessions
 - artifact tracking
 - cleanup reporting
