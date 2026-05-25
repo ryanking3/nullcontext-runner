@@ -4,6 +4,7 @@ use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
 use crate::config::SessionConfig;
+use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::registry::{register_persistent_session, SessionRegistry};
 use crate::runtime::ManagedRuntime;
@@ -17,20 +18,17 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::Stream;
-use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::net::SocketAddr;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
-use zeroize::Zeroize;
 
 #[derive(Debug, Clone)]
 struct WebState {
@@ -88,19 +86,6 @@ struct StreamPayload {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     success: Option<bool>,
-}
-
-#[derive(Serialize)]
-struct StreamingCompletionRequest {
-    prompt: String,
-    n_predict: u32,
-    stream: bool,
-}
-
-impl StreamingCompletionRequest {
-    fn sanitize(&mut self) {
-        self.prompt.zeroize();
-    }
 }
 
 pub async fn serve() -> Result<()> {
@@ -367,12 +352,15 @@ fn run_direct_streaming_session(
     let _ = send_runtime(&tx, "Running streaming inference...");
     let _ = send_runtime(&tx, "--- Model Output ---");
 
-    let (response_text, generation_completed) = stream_completion_from_llama(
+    let (response_text, termination) = stream_completion_from_llama(
         &runtime.completion_url(),
         config.prompt.as_str(),
         config.max_tokens.parse::<u32>()?,
-        &tx,
+        || false,
+        |text| send_model_text(&tx, text),
     )?;
+
+    let generation_completed = termination == StreamTermination::Completed;
 
     let runtime_terminated = runtime.shutdown()?;
 
@@ -549,70 +537,6 @@ fn run_direct_streaming_session(
     let _ = send_complete(&tx, generation_completed);
 
     Ok(())
-}
-
-fn stream_completion_from_llama(
-    completion_url: &str,
-    prompt: &str,
-    n_predict: u32,
-    tx: &mpsc::Sender<StreamPayload>,
-) -> Result<(String, bool)> {
-    let client = Client::builder()
-        .timeout(Duration::from_secs(300))
-        .build()?;
-
-    let mut request = StreamingCompletionRequest {
-        prompt: prompt.to_string(),
-        n_predict,
-        stream: true,
-    };
-
-    let response = client.post(completion_url).json(&request).send()?;
-
-    request.sanitize();
-
-    let reader = BufReader::new(response);
-    let mut full_response = String::new();
-
-    for line_result in reader.lines() {
-        let line = line_result?;
-
-        if !line.starts_with("data:") {
-            continue;
-        }
-
-        let data = line.trim_start_matches("data:").trim();
-
-        if data.is_empty() || data == "[DONE]" {
-            continue;
-        }
-
-        let parsed: serde_json::Value = match serde_json::from_str(data) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-
-        if let Some(content) = parsed.get("content").and_then(|value| value.as_str()) {
-            if !content.is_empty() {
-                full_response.push_str(content);
-
-                if !send_model_text(tx, content) {
-                    return Ok((full_response, false));
-                }
-            }
-        }
-
-        let stopped = parsed
-            .get("stop")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false);
-
-        if stopped {
-            break;
-        }
-    }
-
-    Ok((full_response, true))
 }
 
 fn emit_and_push(

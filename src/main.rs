@@ -3,6 +3,7 @@ mod chat;
 mod cleanup;
 mod config;
 mod inference;
+mod llama_stream;
 mod memory_scan;
 mod registry;
 mod runtime;
