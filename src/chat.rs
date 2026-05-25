@@ -38,6 +38,75 @@ struct ChatTurn {
     assistant: SensitiveBytes,
 }
 
+#[derive(Debug)]
+struct ChatContextWindow {
+    prompt: String,
+    total_turns: usize,
+    included_turns: usize,
+    dropped_turns: usize,
+    approx_prompt_tokens: usize,
+    token_budget: usize,
+    turn_limit: usize,
+    truncated_by_turn_limit: bool,
+    truncated_by_token_budget: bool,
+    current_prompt_over_budget: bool,
+}
+
+impl ChatContextWindow {
+    fn audit_operation(&self) -> SanitizationOperation {
+        if self.dropped_turns == 0 && !self.current_prompt_over_budget {
+            return SanitizationOperation {
+                operation: "chat_context_window_prepared".to_string(),
+                status: "recorded".to_string(),
+                details: format!(
+                    "Prepared active chat context with all {} prior turn(s) included (approx {} / {} tokens, turn limit {}).",
+                    self.total_turns,
+                    self.approx_prompt_tokens,
+                    self.token_budget,
+                    self.turn_limit
+                ),
+            };
+        }
+
+        let mut reasons = Vec::new();
+
+        if self.truncated_by_turn_limit {
+            reasons.push("turn limit");
+        }
+
+        if self.truncated_by_token_budget {
+            reasons.push("approximate token budget");
+        }
+
+        if self.current_prompt_over_budget && !self.truncated_by_token_budget {
+            reasons.push("approximate token budget");
+        }
+
+        let mut details = format!(
+            "Prepared active chat context with {} of {} prior turn(s) included (approx {} / {} tokens, turn limit {}). Dropped {} oldest turn(s) due to {}.",
+            self.included_turns,
+            self.total_turns,
+            self.approx_prompt_tokens,
+            self.token_budget,
+            self.turn_limit,
+            self.dropped_turns,
+            reasons.join(" and ")
+        );
+
+        if self.current_prompt_over_budget {
+            details.push_str(
+                " The current prompt plus template framing alone exceeded the configured approximate token budget, so no prior turns were included."
+            );
+        }
+
+        SanitizationOperation {
+            operation: "chat_context_window_truncated".to_string(),
+            status: "warning".to_string(),
+            details,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct StartChatRequest {
     pub mode: Option<String>,
@@ -186,7 +255,7 @@ impl ChatSessionManager {
             runtime_active: !active.ending,
             turns: active.turns.len(),
             runtime_duration_ms,
-            history_policy: active_history_policy(active.config.ephemeral),
+            history_policy: active_history_policy(&active.config),
             residual_risk: active_runtime_risk(),
         })
     }
@@ -203,7 +272,7 @@ impl ChatSessionManager {
         let session_handle = self.session_handle(session_id)?;
         let user_buffer = SensitiveBytes::new(request.prompt);
 
-        let (turn_number, completion_url, max_tokens, mut full_prompt) = {
+        let (turn_number, completion_url, max_tokens, mut context_window) = {
             let mut active = session_handle
                 .lock()
                 .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
@@ -219,37 +288,45 @@ impl ChatSessionManager {
             let turn_number = active.turns.len() + 1;
             let completion_url = active.runtime.completion_url();
             let max_tokens = active.config.max_tokens.parse::<u32>()?;
-            let full_prompt = build_chat_prompt(
+            let context_window = prepare_chat_context(
                 active.config.chat_template,
                 &active.turns,
                 user_buffer.as_str(),
+                active.config.chat_context_token_budget,
+                active.config.chat_context_turn_limit,
             );
 
             write_turn_prompt(&active.session, turn_number, user_buffer.as_bytes())?;
 
             active.generation_active = true;
 
-            (turn_number, completion_url, max_tokens, full_prompt)
+            (turn_number, completion_url, max_tokens, context_window)
         };
 
         if !emit(runtime_event(format!(
             "Running chat turn {turn_number} on active runtime..."
         ))) {
-            full_prompt.zeroize();
+            context_window.prompt.zeroize();
             clear_generation_active(&session_handle)?;
             return Ok(());
         }
+
+        let _ = emit(audit_event(context_window.audit_operation()));
 
         if !emit(runtime_event("--- Model Output ---")) {
-            full_prompt.zeroize();
+            context_window.prompt.zeroize();
             clear_generation_active(&session_handle)?;
             return Ok(());
         }
 
-        let stream_result =
-            stream_completion_from_llama(&completion_url, &full_prompt, max_tokens, &mut emit);
+        let stream_result = stream_completion_from_llama(
+            &completion_url,
+            &context_window.prompt,
+            max_tokens,
+            &mut emit,
+        );
 
-        full_prompt.zeroize();
+        context_window.prompt.zeroize();
 
         let (response_text, completed) = match stream_result {
             Ok(result) => result,
@@ -406,7 +483,7 @@ impl ChatSessionManager {
             runtime_lifetime: "session_scoped".to_string(),
             turn_count,
             runtime_duration_ms,
-            history_policy: active_history_policy(active.config.ephemeral),
+            history_policy: active_history_policy(&active.config),
             persistence_policy: if active.config.ephemeral {
                 "ephemeral_workspace_deleted_at_session_end".to_string()
             } else {
@@ -472,83 +549,108 @@ impl UtcNow {
     }
 }
 
-fn build_chat_prompt(
+fn prepare_chat_context(
     template: ChatTemplate,
     turns: &[ChatTurn],
     current_user_prompt: &str,
-) -> String {
+    token_budget: usize,
+    turn_limit: usize,
+) -> ChatContextWindow {
+    let prefix = prompt_prefix(template);
+    let suffix = prompt_suffix(template, current_user_prompt);
+    let total_turns = turns.len();
+    let turn_limit = turns.len().min(turn_limit);
+    let char_budget = token_budget.saturating_mul(4);
+
+    let mut used_chars = text_char_count(&prefix) + text_char_count(&suffix);
+    let current_prompt_over_budget = used_chars > char_budget;
+    let mut rendered_turns_rev = Vec::new();
+    let mut truncated_by_token_budget = current_prompt_over_budget && total_turns > 0;
+
+    for turn in turns.iter().rev().take(turn_limit) {
+        let rendered_turn = render_chat_turn(template, turn);
+        let turn_chars = text_char_count(&rendered_turn);
+
+        if used_chars + turn_chars > char_budget {
+            truncated_by_token_budget = true;
+            break;
+        }
+
+        rendered_turns_rev.push(rendered_turn);
+        used_chars += turn_chars;
+    }
+
+    let included_turns = rendered_turns_rev.len();
+    let dropped_turns = total_turns.saturating_sub(included_turns);
+    let truncated_by_turn_limit = total_turns > turn_limit;
+
+    let mut prompt = prefix;
+
+    for rendered_turn in rendered_turns_rev.iter().rev() {
+        prompt.push_str(rendered_turn);
+    }
+
+    prompt.push_str(&suffix);
+
+    ChatContextWindow {
+        approx_prompt_tokens: approximate_token_count(&prompt),
+        prompt,
+        total_turns,
+        included_turns,
+        dropped_turns,
+        token_budget,
+        turn_limit,
+        truncated_by_turn_limit,
+        truncated_by_token_budget,
+        current_prompt_over_budget,
+    }
+}
+
+fn prompt_prefix(template: ChatTemplate) -> String {
     match template {
-        ChatTemplate::Generic => build_generic_chat_prompt(turns, current_user_prompt),
-        ChatTemplate::ChatMl => build_chatml_prompt(turns, current_user_prompt),
-        ChatTemplate::Llama3Instruct => build_llama3_prompt(turns, current_user_prompt),
+        ChatTemplate::Generic => "You are a helpful local assistant.\n\n".to_string(),
+        ChatTemplate::ChatMl => {
+            "<|im_start|>system\nYou are a helpful local assistant.<|im_end|>\n".to_string()
+        }
+        ChatTemplate::Llama3Instruct => {
+            let mut prompt = String::new();
+            prompt.push_str("<|begin_of_text|>");
+            prompt.push_str("<|start_header_id|>system<|end_header_id|>\n\n");
+            prompt.push_str("You are a helpful local assistant.");
+            prompt.push_str("<|eot_id|>");
+            prompt
+        }
     }
 }
 
-fn build_generic_chat_prompt(turns: &[ChatTurn], current_user_prompt: &str) -> String {
-    let mut prompt = String::new();
-
-    prompt.push_str("You are a helpful local assistant.\n\n");
-
-    for turn in turns {
-        prompt.push_str("User: ");
-        prompt.push_str(turn.user.as_str());
-        prompt.push_str("\n\nAssistant: ");
-        prompt.push_str(turn.assistant.as_str());
-        prompt.push_str("\n\n");
+fn prompt_suffix(template: ChatTemplate, current_user_prompt: &str) -> String {
+    match template {
+        ChatTemplate::Generic => format!("User: {current_user_prompt}\n\nAssistant: "),
+        ChatTemplate::ChatMl => {
+            format!("<|im_start|>user\n{current_user_prompt}<|im_end|>\n<|im_start|>assistant\n")
+        }
+        ChatTemplate::Llama3Instruct => format!(
+            "<|start_header_id|>user<|end_header_id|>\n\n{current_user_prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+        ),
     }
-
-    prompt.push_str("User: ");
-    prompt.push_str(current_user_prompt);
-    prompt.push_str("\n\nAssistant: ");
-
-    prompt
 }
 
-fn build_chatml_prompt(turns: &[ChatTurn], current_user_prompt: &str) -> String {
-    let mut prompt = String::new();
-
-    prompt.push_str("<|im_start|>system\nYou are a helpful local assistant.<|im_end|>\n");
-
-    for turn in turns {
-        prompt.push_str("<|im_start|>user\n");
-        prompt.push_str(turn.user.as_str());
-        prompt.push_str("<|im_end|>\n");
-        prompt.push_str("<|im_start|>assistant\n");
-        prompt.push_str(turn.assistant.as_str());
-        prompt.push_str("<|im_end|>\n");
+fn render_chat_turn(template: ChatTemplate, turn: &ChatTurn) -> String {
+    match template {
+        ChatTemplate::Generic => {
+            format!("User: {}\n\nAssistant: {}\n\n", turn.user.as_str(), turn.assistant.as_str())
+        }
+        ChatTemplate::ChatMl => format!(
+            "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n{}<|im_end|>\n",
+            turn.user.as_str(),
+            turn.assistant.as_str()
+        ),
+        ChatTemplate::Llama3Instruct => format!(
+            "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{}<|eot_id|>",
+            turn.user.as_str(),
+            turn.assistant.as_str()
+        ),
     }
-
-    prompt.push_str("<|im_start|>user\n");
-    prompt.push_str(current_user_prompt);
-    prompt.push_str("<|im_end|>\n");
-    prompt.push_str("<|im_start|>assistant\n");
-
-    prompt
-}
-
-fn build_llama3_prompt(turns: &[ChatTurn], current_user_prompt: &str) -> String {
-    let mut prompt = String::new();
-
-    prompt.push_str("<|begin_of_text|>");
-    prompt.push_str("<|start_header_id|>system<|end_header_id|>\n\n");
-    prompt.push_str("You are a helpful local assistant.");
-    prompt.push_str("<|eot_id|>");
-
-    for turn in turns {
-        prompt.push_str("<|start_header_id|>user<|end_header_id|>\n\n");
-        prompt.push_str(turn.user.as_str());
-        prompt.push_str("<|eot_id|>");
-        prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
-        prompt.push_str(turn.assistant.as_str());
-        prompt.push_str("<|eot_id|>");
-    }
-
-    prompt.push_str("<|start_header_id|>user<|end_header_id|>\n\n");
-    prompt.push_str(current_user_prompt);
-    prompt.push_str("<|eot_id|>");
-    prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
-
-    prompt
 }
 
 fn stream_completion_from_llama<F>(
@@ -650,6 +752,20 @@ fn clear_generation_active(session_handle: &Arc<Mutex<ActiveChatSession>>) -> Re
     Ok(())
 }
 
+fn text_char_count(text: &str) -> usize {
+    text.chars().count()
+}
+
+fn approximate_token_count(text: &str) -> usize {
+    let chars = text_char_count(text);
+
+    if chars == 0 {
+        0
+    } else {
+        chars.div_ceil(4)
+    }
+}
+
 fn build_turn_artifacts(session: &Session, turn_count: usize) -> Vec<TurnArtifact> {
     (1..=turn_count)
         .map(|turn| TurnArtifact {
@@ -668,11 +784,18 @@ fn build_turn_artifacts(session: &Session, turn_count: usize) -> Vec<TurnArtifac
         .collect()
 }
 
-fn active_history_policy(ephemeral: bool) -> String {
-    if ephemeral {
-        "continuous_context_in_memory_only_until_end_sanitize".to_string()
+fn active_history_policy(config: &SessionConfig) -> String {
+    let bounds = format!(
+        "turn_limit={}, approx_token_budget={}",
+        config.chat_context_turn_limit, config.chat_context_token_budget
+    );
+
+    if config.ephemeral {
+        format!("bounded_recent_context_in_memory_only_until_end_sanitize ({bounds})")
     } else {
-        "continuous_context_in_memory_and_retained_workspace_until_explicit_cleanup".to_string()
+        format!(
+            "bounded_recent_context_in_memory_and_retained_workspace_until_explicit_cleanup ({bounds})"
+        )
     }
 }
 

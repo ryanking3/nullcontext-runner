@@ -125,6 +125,8 @@ struct FileConfig {
     max_tokens: Option<u32>,
     gpu_layers: Option<u32>,
     chat_template: Option<String>,
+    chat_context_token_budget: Option<u32>,
+    chat_context_turn_limit: Option<usize>,
 }
 
 impl FileConfig {
@@ -139,6 +141,8 @@ impl FileConfig {
                 max_tokens: None,
                 gpu_layers: None,
                 chat_template: None,
+                chat_context_token_budget: None,
+                chat_context_turn_limit: None,
             });
         }
 
@@ -158,6 +162,8 @@ pub struct SessionConfig {
     pub llama_path: String,
     pub model_path: String,
     pub chat_template: ChatTemplate,
+    pub chat_context_token_budget: usize,
+    pub chat_context_turn_limit: usize,
     pub prompt: SensitiveBytes,
     pub prompt_source: PromptSource,
     pub max_tokens: String,
@@ -234,6 +240,9 @@ impl SessionConfig {
             llama_path,
             model_path,
             chat_template,
+            chat_context_token_budget: file_config.chat_context_token_budget.unwrap_or(2048)
+                as usize,
+            chat_context_turn_limit: file_config.chat_context_turn_limit.unwrap_or(12),
             prompt: SensitiveBytes::new(prompt),
             prompt_source: PromptSource::Web,
             max_tokens: file_config.max_tokens.unwrap_or(128).to_string(),
@@ -324,6 +333,9 @@ impl SessionConfig {
             llama_path,
             model_path,
             chat_template,
+            chat_context_token_budget: file_config.chat_context_token_budget.unwrap_or(2048)
+                as usize,
+            chat_context_turn_limit: file_config.chat_context_turn_limit.unwrap_or(12),
             prompt: prompt_bytes,
             prompt_source,
             max_tokens: file_config.max_tokens.unwrap_or(128).to_string(),
