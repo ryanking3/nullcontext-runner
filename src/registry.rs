@@ -30,6 +30,10 @@ pub struct SessionIndexEntry {
     pub prompt_source: String,
     pub history_stored: bool,
     pub backend: String,
+    #[serde(default)]
+    pub model_id: String,
+    #[serde(default)]
+    pub model_name: String,
     pub model_path: String,
     pub workspace: String,
     pub report_path: String,
@@ -199,6 +203,8 @@ impl SessionIndexEntry {
             prompt_source: config.prompt_source.as_str().to_string(),
             history_stored: !config.ephemeral,
             backend: "llama-server".to_string(),
+            model_id: config.model_id.clone(),
+            model_name: config.model_name.clone(),
             model_path: config.model_path.clone(),
             workspace: session.workspace.display().to_string(),
             report_path: report_path.display().to_string(),

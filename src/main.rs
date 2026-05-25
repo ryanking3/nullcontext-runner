@@ -48,6 +48,8 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
     println!("Session ID: {}", session.id);
     println!("Workspace: {}", session.workspace.display());
     println!("Security mode: {}", config.security_mode.as_str());
+    println!("Model: {} ({})", config.model_name, config.model_id);
+    println!("Model path: {}", config.model_path);
     println!("Prompt source: {}", config.prompt_source.as_str());
 
     session.write_prompt(config.prompt.as_bytes())?;

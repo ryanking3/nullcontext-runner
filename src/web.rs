@@ -3,7 +3,7 @@ use crate::chat::{CancelChatResponse, ChatMessageRequest, ChatSessionManager, St
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
-use crate::config::SessionConfig;
+use crate::config::{load_model_registry, SessionConfig};
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::registry::{
@@ -83,6 +83,7 @@ pub struct RunRequest {
     prompt: String,
     mode: Option<String>,
     persistent: Option<bool>,
+    model_id: Option<String>,
     chat_template: Option<String>,
     chat_context_token_budget: Option<u32>,
     chat_context_turn_limit: Option<usize>,
@@ -132,6 +133,7 @@ pub async fn serve() -> Result<()> {
 
     let app = Router::new()
         .route("/api/health", get(health))
+        .route("/api/models", get(list_models))
         .route("/api/run", post(run_session))
         .route("/api/run/stream", post(run_session_stream))
         .route("/api/chat/start", post(start_chat_session))
@@ -242,6 +244,19 @@ async fn health() -> Json<HealthResponse> {
         status: "ok".to_string(),
         service: "nullcontext".to_string(),
     })
+}
+
+async fn list_models(State(state): State<WebState>) -> Response {
+    match load_model_registry(&state.home) {
+        Ok(models) => Json(models).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: error.to_string(),
+            }),
+        )
+            .into_response(),
+    }
 }
 
 async fn start_chat_session(
@@ -431,6 +446,7 @@ fn run_direct_streaming_session(
         request.prompt,
         request.mode,
         persistent,
+        request.model_id,
         request.chat_template,
         request.chat_context_token_budget,
         request.chat_context_turn_limit,
@@ -445,6 +461,11 @@ fn run_direct_streaming_session(
         &tx,
         &format!("Security mode: {}", config.security_mode.as_str()),
     );
+    let _ = send_runtime(
+        &tx,
+        &format!("Model: {} ({})", config.model_name, config.model_id),
+    );
+    let _ = send_runtime(&tx, &format!("Model path: {}", config.model_path));
     let _ = send_runtime(
         &tx,
         &format!("Prompt source: {}", config.prompt_source.as_str()),
@@ -681,6 +702,10 @@ fn run_cli_session(request: RunRequest) -> Result<RunResponse> {
 
     if persistent {
         command.arg("--persistent");
+    }
+
+    if let Some(model_id) = request.model_id {
+        command.arg("--model").arg(model_id);
     }
 
     let mut child = command.spawn()?;

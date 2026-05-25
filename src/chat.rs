@@ -111,6 +111,7 @@ impl ChatContextWindow {
 pub struct StartChatRequest {
     pub mode: Option<String>,
     pub persistent: Option<bool>,
+    pub model_id: Option<String>,
     pub chat_template: Option<String>,
     pub chat_context_token_budget: Option<u32>,
     pub chat_context_turn_limit: Option<usize>,
@@ -127,6 +128,8 @@ pub struct StartChatResponse {
     pub workspace: String,
     pub security_mode: String,
     pub persistent: bool,
+    pub model_id: String,
+    pub model_name: String,
     pub runtime_active: bool,
     pub turns: usize,
     pub chat_template: String,
@@ -141,6 +144,8 @@ pub struct ChatStatusResponse {
     pub workspace: String,
     pub security_mode: String,
     pub persistent: bool,
+    pub model_id: String,
+    pub model_name: String,
     pub runtime_active: bool,
     pub turns: usize,
     pub runtime_duration_ms: i64,
@@ -209,6 +214,7 @@ impl ChatSessionManager {
             String::new(),
             request.mode,
             persistent,
+            request.model_id,
             request.chat_template,
             request.chat_context_token_budget,
             request.chat_context_turn_limit,
@@ -220,6 +226,8 @@ impl ChatSessionManager {
         println!("Session ID: {}", session.id);
         println!("Workspace: {}", session.workspace.display());
         println!("Security mode: {}", config.security_mode.as_str());
+        println!("Model: {} ({})", config.model_name, config.model_id);
+        println!("Model path: {}", config.model_path);
 
         let runtime = ManagedRuntime::launch(&config)?;
 
@@ -228,6 +236,8 @@ impl ChatSessionManager {
             workspace: session.workspace.display().to_string(),
             security_mode: config.security_mode.as_str().to_string(),
             persistent: !config.ephemeral,
+            model_id: config.model_id.clone(),
+            model_name: config.model_name.clone(),
             runtime_active: true,
             turns: 0,
             chat_template: config.chat_template.as_str().to_string(),
@@ -269,6 +279,8 @@ impl ChatSessionManager {
             workspace: active.session.workspace.display().to_string(),
             security_mode: active.config.security_mode.as_str().to_string(),
             persistent: !active.config.ephemeral,
+            model_id: active.config.model_id.clone(),
+            model_name: active.config.model_name.clone(),
             runtime_active: !active.ending,
             turns: active.turns.len(),
             runtime_duration_ms,

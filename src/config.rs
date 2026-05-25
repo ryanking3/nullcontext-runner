@@ -1,10 +1,11 @@
 use crate::sensitive::SensitiveBytes;
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::io::{self, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use zeroize::Zeroize;
 
 #[derive(Debug)]
@@ -126,15 +127,30 @@ impl ChatTemplate {
 }
 
 #[derive(Debug, Deserialize)]
+struct FileModelConfig {
+    id: String,
+    name: Option<String>,
+    description: Option<String>,
+    model_path: String,
+    max_tokens: Option<u32>,
+    gpu_layers: Option<u32>,
+    chat_template: Option<String>,
+    chat_context_token_budget: Option<u32>,
+    chat_context_turn_limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
 struct FileConfig {
     llama_path: Option<String>,
     model_path: Option<String>,
+    default_model: Option<String>,
     default_mode: Option<String>,
     max_tokens: Option<u32>,
     gpu_layers: Option<u32>,
     chat_template: Option<String>,
     chat_context_token_budget: Option<u32>,
     chat_context_turn_limit: Option<usize>,
+    models: Option<Vec<FileModelConfig>>,
 }
 
 impl FileConfig {
@@ -145,12 +161,14 @@ impl FileConfig {
             return Ok(Self {
                 llama_path: None,
                 model_path: None,
+                default_model: None,
                 default_mode: None,
                 max_tokens: None,
                 gpu_layers: None,
                 chat_template: None,
                 chat_context_token_budget: None,
                 chat_context_turn_limit: None,
+                models: None,
             });
         }
 
@@ -164,10 +182,32 @@ impl FileConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RegisteredModel {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub model_path: String,
+    pub max_tokens: u32,
+    pub gpu_layers: u32,
+    pub chat_template: String,
+    pub chat_context_token_budget: usize,
+    pub chat_context_turn_limit: usize,
+    pub default_selected: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelRegistrySnapshot {
+    pub default_model_id: String,
+    pub models: Vec<RegisteredModel>,
+}
+
 #[derive(Debug)]
 pub struct SessionConfig {
     pub home: String,
     pub llama_path: String,
+    pub model_id: String,
+    pub model_name: String,
     pub model_path: String,
     pub chat_template: ChatTemplate,
     pub chat_context_token_budget: usize,
@@ -178,6 +218,11 @@ pub struct SessionConfig {
     pub gpu_layers: String,
     pub ephemeral: bool,
     pub security_mode: SecurityMode,
+}
+
+pub fn load_model_registry(home: &str) -> Result<ModelRegistrySnapshot> {
+    let file_config = FileConfig::load(home)?;
+    build_model_registry(home, &file_config)
 }
 
 impl AppCommand {
@@ -219,11 +264,14 @@ impl SessionConfig {
         prompt: String,
         mode: Option<String>,
         persistent: bool,
+        model_id_override: Option<String>,
         chat_template_override: Option<String>,
         chat_context_token_budget_override: Option<u32>,
         chat_context_turn_limit_override: Option<usize>,
     ) -> Result<Self> {
         let file_config = FileConfig::load(&home)?;
+        let model_registry = build_model_registry(&home, &file_config)?;
+        let selected_model = resolve_selected_model(&model_registry, model_id_override.as_deref())?;
 
         let security_mode = SecurityMode::from_str(
             mode.as_deref()
@@ -239,40 +287,40 @@ impl SessionConfig {
 
         let llama_path = file_config
             .llama_path
-            .unwrap_or_else(|| format!("{home}/dev/llama.cpp/build/bin/llama-server"));
-        let model_path = file_config
-            .model_path
-            .unwrap_or_else(|| format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"));
+            .unwrap_or_else(|| default_llama_path(&home));
+        let model_path = selected_model.model_path.clone();
         let chat_template = ChatTemplate::resolve(
             chat_template_override
                 .as_deref()
-                .or(file_config.chat_template.as_deref()),
+                .or(Some(selected_model.chat_template.as_str())),
             &model_path,
         )?;
         let chat_context_token_budget = resolve_positive_u32(
             chat_context_token_budget_override,
-            file_config.chat_context_token_budget,
-            2048,
+            Some(selected_model.chat_context_token_budget as u32),
+            selected_model.chat_context_token_budget as u32,
             "chat_context_token_budget",
         )? as usize;
         let chat_context_turn_limit = resolve_positive_usize(
             chat_context_turn_limit_override,
-            file_config.chat_context_turn_limit,
-            12,
+            Some(selected_model.chat_context_turn_limit),
+            selected_model.chat_context_turn_limit,
             "chat_context_turn_limit",
         )?;
 
         Ok(Self {
             home: home.clone(),
             llama_path,
+            model_id: selected_model.id.clone(),
+            model_name: selected_model.name.clone(),
             model_path,
             chat_template,
             chat_context_token_budget,
             chat_context_turn_limit,
             prompt: SensitiveBytes::new(prompt),
             prompt_source: PromptSource::Web,
-            max_tokens: file_config.max_tokens.unwrap_or(128).to_string(),
-            gpu_layers: file_config.gpu_layers.unwrap_or(0).to_string(),
+            max_tokens: selected_model.max_tokens.to_string(),
+            gpu_layers: selected_model.gpu_layers.to_string(),
             ephemeral,
             security_mode,
         })
@@ -280,9 +328,11 @@ impl SessionConfig {
 
     fn from_args(home: String, mut args: Vec<String>) -> Result<Self> {
         let file_config = FileConfig::load(&home)?;
+        let model_registry = build_model_registry(&home, &file_config)?;
 
         let persistent = args.contains(&"--persistent".to_string());
         let use_stdin = args.contains(&"--stdin".to_string());
+        let mut model_id_override: Option<String> = None;
 
         let mut security_mode =
             SecurityMode::from_str(file_config.default_mode.as_deref().unwrap_or("secure"))?;
@@ -307,6 +357,16 @@ impl SessionConfig {
                     }
 
                     security_mode = SecurityMode::from_str(&args[i + 1])?;
+                    i += 2;
+                }
+                "--model" => {
+                    if i + 1 >= args.len() {
+                        args.zeroize();
+                        filtered_args.zeroize();
+                        bail!("--model requires a model id");
+                    }
+
+                    model_id_override = Some(args[i + 1].clone());
                     i += 2;
                 }
                 arg => {
@@ -344,43 +404,209 @@ impl SessionConfig {
             SecurityMode::Secure => true,
             SecurityMode::AirGapped => true,
         };
+        let selected_model = resolve_selected_model(&model_registry, model_id_override.as_deref())?;
 
         let llama_path = file_config
             .llama_path
-            .unwrap_or_else(|| format!("{home}/dev/llama.cpp/build/bin/llama-server"));
-        let model_path = file_config
-            .model_path
-            .unwrap_or_else(|| format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"));
+            .unwrap_or_else(|| default_llama_path(&home));
+        let model_path = selected_model.model_path.clone();
         let chat_template =
-            ChatTemplate::resolve(file_config.chat_template.as_deref(), &model_path)?;
+            ChatTemplate::resolve(Some(selected_model.chat_template.as_str()), &model_path)?;
         let chat_context_token_budget = resolve_positive_u32(
             None,
-            file_config.chat_context_token_budget,
-            2048,
+            Some(selected_model.chat_context_token_budget as u32),
+            selected_model.chat_context_token_budget as u32,
             "chat_context_token_budget",
         )? as usize;
         let chat_context_turn_limit = resolve_positive_usize(
             None,
-            file_config.chat_context_turn_limit,
-            12,
+            Some(selected_model.chat_context_turn_limit),
+            selected_model.chat_context_turn_limit,
             "chat_context_turn_limit",
         )?;
 
         Ok(Self {
             home: home.clone(),
             llama_path,
+            model_id: selected_model.id.clone(),
+            model_name: selected_model.name.clone(),
             model_path,
             chat_template,
             chat_context_token_budget,
             chat_context_turn_limit,
             prompt: prompt_bytes,
             prompt_source,
-            max_tokens: file_config.max_tokens.unwrap_or(128).to_string(),
-            gpu_layers: file_config.gpu_layers.unwrap_or(0).to_string(),
+            max_tokens: selected_model.max_tokens.to_string(),
+            gpu_layers: selected_model.gpu_layers.to_string(),
             ephemeral,
             security_mode,
         })
     }
+}
+
+fn build_model_registry(home: &str, file_config: &FileConfig) -> Result<ModelRegistrySnapshot> {
+    let configured_models = file_config.models.as_deref().unwrap_or(&[]);
+    let mut models = if configured_models.is_empty() {
+        vec![build_legacy_registered_model(home, file_config)?]
+    } else {
+        let mut seen_ids = HashSet::new();
+        let mut built = Vec::with_capacity(configured_models.len());
+
+        for file_model in configured_models {
+            if !seen_ids.insert(file_model.id.clone()) {
+                bail!("Duplicate model id in config.toml: {}", file_model.id);
+            }
+
+            built.push(build_registered_model(file_model, file_config)?);
+        }
+
+        built
+    };
+
+    let default_model_id = file_config
+        .default_model
+        .clone()
+        .unwrap_or_else(|| models[0].id.clone());
+
+    if !models.iter().any(|model| model.id == default_model_id) {
+        bail!("Configured default_model does not match any known model id: {default_model_id}");
+    }
+
+    for model in &mut models {
+        model.default_selected = model.id == default_model_id;
+    }
+
+    Ok(ModelRegistrySnapshot {
+        default_model_id,
+        models,
+    })
+}
+
+fn build_registered_model(
+    file_model: &FileModelConfig,
+    defaults: &FileConfig,
+) -> Result<RegisteredModel> {
+    let max_tokens = resolve_positive_u32(
+        file_model.max_tokens,
+        defaults.max_tokens,
+        128,
+        &format!("models.{}.max_tokens", file_model.id),
+    )?;
+    let chat_context_token_budget = resolve_positive_u32(
+        file_model.chat_context_token_budget,
+        defaults.chat_context_token_budget,
+        2048,
+        &format!("models.{}.chat_context_token_budget", file_model.id),
+    )? as usize;
+    let chat_context_turn_limit = resolve_positive_usize(
+        file_model.chat_context_turn_limit,
+        defaults.chat_context_turn_limit,
+        12,
+        &format!("models.{}.chat_context_turn_limit", file_model.id),
+    )?;
+    let chat_template = file_model
+        .chat_template
+        .clone()
+        .or_else(|| defaults.chat_template.clone())
+        .unwrap_or_else(|| "auto".to_string());
+
+    validate_chat_template_setting(&chat_template, &file_model.model_path)?;
+
+    Ok(RegisteredModel {
+        id: file_model.id.clone(),
+        name: file_model
+            .name
+            .clone()
+            .unwrap_or_else(|| default_model_name(&file_model.id, &file_model.model_path)),
+        description: file_model.description.clone(),
+        model_path: file_model.model_path.clone(),
+        max_tokens,
+        gpu_layers: file_model.gpu_layers.or(defaults.gpu_layers).unwrap_or(0),
+        chat_template,
+        chat_context_token_budget,
+        chat_context_turn_limit,
+        default_selected: false,
+    })
+}
+
+fn build_legacy_registered_model(home: &str, file_config: &FileConfig) -> Result<RegisteredModel> {
+    let model_path = file_config
+        .model_path
+        .clone()
+        .unwrap_or_else(|| default_model_path(home));
+    let max_tokens = resolve_positive_u32(None, file_config.max_tokens, 128, "max_tokens")?;
+    let chat_context_token_budget = resolve_positive_u32(
+        None,
+        file_config.chat_context_token_budget,
+        2048,
+        "chat_context_token_budget",
+    )? as usize;
+    let chat_context_turn_limit = resolve_positive_usize(
+        None,
+        file_config.chat_context_turn_limit,
+        12,
+        "chat_context_turn_limit",
+    )?;
+    let chat_template = file_config
+        .chat_template
+        .clone()
+        .unwrap_or_else(|| "auto".to_string());
+
+    validate_chat_template_setting(&chat_template, &model_path)?;
+
+    let default_id = file_config
+        .default_model
+        .clone()
+        .unwrap_or_else(|| "default".to_string());
+
+    Ok(RegisteredModel {
+        id: default_id.clone(),
+        name: default_model_name(&default_id, &model_path),
+        description: Some(
+            "Legacy single-model config synthesized into the model registry.".to_string(),
+        ),
+        model_path,
+        max_tokens,
+        gpu_layers: file_config.gpu_layers.unwrap_or(0),
+        chat_template,
+        chat_context_token_budget,
+        chat_context_turn_limit,
+        default_selected: true,
+    })
+}
+
+fn resolve_selected_model<'a>(
+    model_registry: &'a ModelRegistrySnapshot,
+    model_id_override: Option<&str>,
+) -> Result<&'a RegisteredModel> {
+    let model_id = model_id_override.unwrap_or(model_registry.default_model_id.as_str());
+
+    model_registry
+        .models
+        .iter()
+        .find(|model| model.id == model_id)
+        .ok_or_else(|| anyhow::anyhow!("Unknown model id: {model_id}"))
+}
+
+fn validate_chat_template_setting(value: &str, model_path: &str) -> Result<()> {
+    ChatTemplate::resolve(Some(value), model_path).map(|_| ())
+}
+
+fn default_llama_path(home: &str) -> String {
+    format!("{home}/dev/llama.cpp/build/bin/llama-server")
+}
+
+fn default_model_path(home: &str) -> String {
+    format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf")
+}
+
+fn default_model_name(id: &str, model_path: &str) -> String {
+    Path::new(model_path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| stem.replace('_', " "))
+        .filter(|stem| !stem.trim().is_empty())
+        .unwrap_or_else(|| id.to_string())
 }
 
 fn resolve_positive_u32(
