@@ -433,6 +433,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [registryDrawerOpen, setRegistryDrawerOpen] = useState(false);
   const [inspectorView, setInspectorView] = useState<InspectorView>("audit");
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
@@ -443,8 +444,10 @@ function App() {
   const [useModelContextDefaults, setUseModelContextDefaults] = useState(true);
   const [models, setModels] = useState<RegisteredModel[]>([]);
   const [selectedModelId, setSelectedModelId] = useState("");
+  const [inspectedModelId, setInspectedModelId] = useState("");
   const [modelsLoadedAt, setModelsLoadedAt] = useState("never");
   const [modelLoadError, setModelLoadError] = useState("");
+  const [modelQuery, setModelQuery] = useState("");
 
   const [activeChatSessionId, setActiveChatSessionId] = useState("");
   const [activeChatWorkspace, setActiveChatWorkspace] = useState("");
@@ -548,10 +551,22 @@ function App() {
 
         return nextModels[0]?.id ?? "";
       });
+      setInspectedModelId((current) => {
+        if (current && nextModels.some((model) => model.id === current)) {
+          return current;
+        }
+
+        if (nextModels.some((model) => model.id === data.default_model_id)) {
+          return data.default_model_id;
+        }
+
+        return nextModels[0]?.id ?? "";
+      });
     } catch (error) {
       setModels([]);
       setModelLoadError(String(error));
       setSelectedModelId("");
+      setInspectedModelId("");
     } finally {
       setModelsLoadedAt(new Date().toLocaleTimeString());
     }
@@ -841,17 +856,31 @@ function App() {
 
   function closeDrawers() {
     setConfigDrawerOpen(false);
+    setModelDrawerOpen(false);
     setRegistryDrawerOpen(false);
   }
 
   function openConfigDrawer() {
+    setModelDrawerOpen(false);
     setRegistryDrawerOpen(false);
     setConfigDrawerOpen(true);
     setCommandMenuOpen(false);
   }
 
+  function openModelDrawer() {
+    setConfigDrawerOpen(false);
+    setRegistryDrawerOpen(false);
+    setModelDrawerOpen(true);
+    setCommandMenuOpen(false);
+
+    if (!inspectedModelId && models.length > 0) {
+      setInspectedModelId(selectedModelId || models[0].id);
+    }
+  }
+
   function openRegistryDrawer() {
     setConfigDrawerOpen(false);
+    setModelDrawerOpen(false);
     setRegistryDrawerOpen(true);
     setCommandMenuOpen(false);
 
@@ -1513,6 +1542,27 @@ function App() {
     models.find((model) => model.id === selectedModelId) ??
     models.find((model) => model.default_selected) ??
     null;
+  const modelQueryText = modelQuery.trim().toLowerCase();
+  const filteredModels = models.filter((model) => {
+    if (!modelQueryText) {
+      return true;
+    }
+
+    return [
+      model.id,
+      model.name,
+      model.description ?? "",
+      model.model_path,
+      model.chat_template,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(modelQueryText);
+  });
+  const inspectedModel =
+    filteredModels.find((model) => model.id === inspectedModelId) ??
+    models.find((model) => model.id === inspectedModelId) ??
+    selectedModel;
   const effectiveTemplate = useModelTemplateDefault
     ? selectedModel?.chat_template || "auto"
     : chatTemplate;
@@ -1627,9 +1677,14 @@ function App() {
             <section className="panel">
               <div className="panel-header">
                 <div className="panel-title">session config</div>
-                <button className="ghost-button" onClick={openConfigDrawer}>
-                  open
-                </button>
+                <div className="drawer-actions">
+                  <button className="ghost-button" onClick={openModelDrawer}>
+                    models
+                  </button>
+                  <button className="ghost-button" onClick={openConfigDrawer}>
+                    open
+                  </button>
+                </div>
               </div>
 
               <div className="config-summary">
@@ -1812,6 +1867,13 @@ function App() {
 
                 {commandMenuOpen && (
                   <div className="popup-panel">
+                    <button
+                      onClick={() => {
+                        openModelDrawer();
+                      }}
+                    >
+                      open model drawer
+                    </button>
                     <button
                       onClick={() => {
                         openConfigDrawer();
@@ -2271,9 +2333,154 @@ function App() {
       )}
 
       <div
-        className={`drawer-backdrop${configDrawerOpen || registryDrawerOpen ? " open" : ""}`}
+        className={`drawer-backdrop${
+          configDrawerOpen || modelDrawerOpen || registryDrawerOpen ? " open" : ""
+        }`}
         onClick={closeDrawers}
       />
+      <aside className={`model-drawer${modelDrawerOpen ? " open" : ""}`}>
+        <div className="drawer-header">
+          <div>
+            <h3>model registry</h3>
+            <p>inspect registered models, compare runtime defaults, and choose the next session model</p>
+          </div>
+          <div className="drawer-actions">
+            <button className="ghost-button" onClick={loadModels}>
+              refresh
+            </button>
+            <button className="ghost-button" onClick={closeDrawers}>
+              close
+            </button>
+          </div>
+        </div>
+
+        <div className="drawer-body model-drawer-body">
+          <section className="panel model-list-panel">
+            <div className="panel-header">
+              <div className="panel-title">models</div>
+              <span className="mini-status">loaded:{modelsLoadedAt}</span>
+            </div>
+
+            <div className="registry-toolbar">
+              <label>
+                search
+                <input
+                  type="search"
+                  value={modelQuery}
+                  onChange={(event) => setModelQuery(event.target.value)}
+                  placeholder="name, id, path, template..."
+                />
+              </label>
+            </div>
+
+            {modelLoadError ? (
+              <p className="muted-text">model registry unavailable: {modelLoadError}</p>
+            ) : filteredModels.length === 0 ? (
+              <p className="muted-text">
+                {models.length === 0
+                  ? "no models are registered"
+                  : "no models match the current search"}
+              </p>
+            ) : (
+              <div className="session-list model-session-list">
+                {filteredModels.map((model) => (
+                  <button
+                    className={inspectedModelId === model.id ? "session-item selected" : "session-item"}
+                    key={model.id}
+                    onClick={() => setInspectedModelId(model.id)}
+                  >
+                    <div className="registry-session-header">
+                      <span>{model.name}</span>
+                      {selectedModelId === model.id ? (
+                        <span className="pill success">selected</span>
+                      ) : model.default_selected ? (
+                        <span className="pill neutral">default</span>
+                      ) : null}
+                    </div>
+                    <div className="registry-session-meta">
+                      <small>{model.id}</small>
+                      <small>{model.chat_template}</small>
+                    </div>
+                    <small>{model.max_tokens} tok · {model.gpu_layers} gpu layers</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="panel model-detail-panel">
+            <div className="panel-header">
+              <div className="panel-title">details</div>
+              {inspectedModel && <span className="mini-status">id:{inspectedModel.id}</span>}
+            </div>
+
+            {!inspectedModel ? (
+              <p className="muted-text">select a model to inspect its runtime defaults</p>
+            ) : (
+              <>
+                <div className="registry-lifecycle-summary">
+                  {selectedModelId === inspectedModel.id ? (
+                    <span className="pill success">selected for next session</span>
+                  ) : (
+                    <span className="pill neutral">available</span>
+                  )}
+                  {inspectedModel.default_selected && <span className="pill neutral">default</span>}
+                </div>
+
+                <dl className="registry-detail-grid">
+                  <dt>name</dt>
+                  <dd>{inspectedModel.name}</dd>
+                  <dt>id</dt>
+                  <dd>{inspectedModel.id}</dd>
+                  <dt>default template</dt>
+                  <dd>{inspectedModel.chat_template}</dd>
+                  <dt>max tokens</dt>
+                  <dd>{inspectedModel.max_tokens}</dd>
+                  <dt>gpu layers</dt>
+                  <dd>{inspectedModel.gpu_layers}</dd>
+                  <dt>context budget</dt>
+                  <dd>{inspectedModel.chat_context_token_budget}</dd>
+                  <dt>context turn limit</dt>
+                  <dd>{inspectedModel.chat_context_turn_limit}</dd>
+                  <dt>model path</dt>
+                  <dd className="registry-path">{inspectedModel.model_path}</dd>
+                </dl>
+
+                {inspectedModel.description && (
+                  <div className="report-risk-block model-description-block">
+                    <p>{inspectedModel.description}</p>
+                  </div>
+                )}
+
+                <div className="registry-actions">
+                  <button
+                    onClick={() => {
+                      setSelectedModelId(inspectedModel.id);
+                      setModelDrawerOpen(false);
+                    }}
+                  >
+                    use for next session
+                  </button>
+                  <button
+                    className="ghost-button"
+                    onClick={() => {
+                      setSelectedModelId(inspectedModel.id);
+                      openConfigDrawer();
+                    }}
+                  >
+                    select + open config
+                  </button>
+                </div>
+
+                <p className="microcopy">
+                  Model selection stays separate from live runtime state so you can inspect paths,
+                  templates, token limits, and context defaults before launching the next session.
+                </p>
+              </>
+            )}
+          </section>
+        </div>
+      </aside>
       <aside className={`config-drawer${configDrawerOpen ? " open" : ""}`}>
         <div className="drawer-header">
           <div>
@@ -2334,6 +2541,12 @@ function App() {
                 {selectedModel.model_path}
               </p>
             )}
+
+            <div className="drawer-actions">
+              <button className="ghost-button" onClick={openModelDrawer}>
+                browse model registry
+              </button>
+            </div>
 
             <label>
               mode
