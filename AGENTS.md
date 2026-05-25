@@ -146,6 +146,13 @@ A chat session creates a long-lived runtime:
 
 This is faster but has session-scoped residual risk. The UI must clearly expose that risk.
 
+Active chat currently also supports:
+
+- model-aware prompt template selection
+- bounded recent-context token budgeting
+- bounded recent-context turn limits
+- audit visibility when older turns are dropped from the prompt window
+
 ## API Routes
 
 Current routes:
@@ -190,6 +197,9 @@ model_path = "/Users/ryanking/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"
 default_mode = "secure"
 max_tokens = 64
 gpu_layers = 0
+chat_template = "auto"
+chat_context_token_budget = 2048
+chat_context_turn_limit = 12
 ```
 
 Example Windows CUDA config:
@@ -200,9 +210,19 @@ model_path = "C:\\models\\qwen2.5-7b\\qwen2.5-7b-instruct-q4_k_m-00001-of-00002.
 default_mode = "secure"
 max_tokens = 128
 gpu_layers = 999
+chat_template = "auto"
+chat_context_token_budget = 2048
+chat_context_turn_limit = 12
 ```
 
 Do not commit local config files or model files.
+
+Active chat config notes:
+
+- `chat_template` supports `auto`, `generic`, `chatml`, and `llama3-instruct`
+- `chat_context_token_budget` is an approximate recent-context budget
+- `chat_context_turn_limit` bounds how many recent prior turns can be included
+- both context settings must be greater than `0`
 
 ### Workspace Paths
 
@@ -291,7 +311,7 @@ Start active chat:
 ```bash
 curl -X POST http://127.0.0.1:3333/api/chat/start \
   -H "Content-Type: application/json" \
-  -d '{"mode":"secure","persistent":false}'
+  -d '{"mode":"secure","persistent":false,"chat_template":"auto","chat_context_token_budget":2048,"chat_context_turn_limit":12}'
 ```
 
 Send active chat message:
@@ -335,6 +355,9 @@ Manual verification should include:
 - active chat starts
 - active chat streams a message
 - active chat can send a follow-up
+- active chat template selection affects prompt formatting as expected
+- active chat context window truncates older turns when budget/turn limit is exceeded
+- active chat audit stream reports context-window preparation or truncation
 - active chat stop does not kill the session
 - active chat end generates report
 - persistent registry still works when using standard + persistent mode
@@ -367,6 +390,7 @@ Frontend:
 - Keep the UI local, minimal, terminal-like, and dark/light capable.
 - Avoid heavy UI libraries unless explicitly approved.
 - Keep active chat runtime risk visible.
+- Keep active chat template/context settings understandable and explicit.
 - Keep End + Sanitize prominent while active runtime is live.
 - Preserve stop button behavior.
 - Preserve before-unload warning while active chat runtime is live.
@@ -435,8 +459,6 @@ Do not commit:
 
 ## Known Technical Debt
 
-- Active chat prompt formatting is generic and should eventually use model-specific templates.
-- Context grows without truncation.
 - One-shot and active-chat streaming code duplicate logic.
 - Stop/cancel uses client abort and channel closure, not a dedicated llama.cpp cancel API.
 - Active session manager is in-memory only.

@@ -97,6 +97,8 @@ The current browser UI supports:
 
 - one-shot prompt execution
 - active chat session start, stream, stop, and end
+- selectable active chat prompt template
+- configurable active chat context token budget and turn limit
 - runtime lifecycle visualization
 - audit operation inspection
 - privacy report inspection
@@ -191,6 +193,12 @@ start active session
 → emit privacy report
 ```
 
+Active chat uses:
+
+- model-aware prompt templates
+- bounded recent-context management
+- audit visibility when older turns are dropped from the prompt window
+
 ---
 
 ## Current API
@@ -225,7 +233,10 @@ Example body:
 {
   "prompt": "Explain secure local inference.",
   "mode": "secure",
-  "persistent": false
+  "persistent": false,
+  "chat_template": "auto",
+  "chat_context_token_budget": 2048,
+  "chat_context_turn_limit": 12
 }
 ```
 
@@ -240,7 +251,10 @@ Example body:
 ```json
 {
   "mode": "secure",
-  "persistent": false
+  "persistent": false,
+  "chat_template": "auto",
+  "chat_context_token_budget": 2048,
+  "chat_context_turn_limit": 12
 }
 ```
 
@@ -263,6 +277,19 @@ Example body:
   "prompt": "Explain secure local inference in 2 short bullet points."
 }
 ```
+
+### Active Chat Template And Context Fields
+
+The active chat API supports these optional fields:
+
+- `chat_template`
+Values: `auto`, `generic`, `chatml`, `llama3-instruct`
+- `chat_context_token_budget`
+Approximate token budget for recent active-chat context selection
+- `chat_context_turn_limit`
+Maximum number of recent prior turns to include in active-chat context
+
+When `chat_template` is `auto`, NullContext resolves a template from `model_path`.
 
 ### End Active Chat Session
 
@@ -398,6 +425,12 @@ default_mode = "secure"
 max_tokens = 128
 
 gpu_layers = 999
+
+chat_template = "auto"
+
+chat_context_token_budget = 2048
+
+chat_context_turn_limit = 12
 ```
 
 ### Notes
@@ -411,6 +444,23 @@ means:
 ```text
 offload as many layers as possible onto the GPU
 ```
+
+Additional active chat options:
+
+```toml
+chat_template = "auto"
+chat_context_token_budget = 2048
+chat_context_turn_limit = 12
+```
+
+Template options:
+
+- `auto`
+- `generic`
+- `chatml`
+- `llama3-instruct`
+
+`chat_context_token_budget` and `chat_context_turn_limit` must both be greater than `0`.
 
 ### Workspace Paths
 
@@ -512,6 +562,14 @@ Default UI address:
 ```text
 http://localhost:5173
 ```
+
+The active chat session config panel lets you:
+
+- choose a prompt template or auto-detect it from the model path
+- set a bounded recent-context token budget
+- set a bounded recent-context turn limit
+
+After a session starts, the runtime banner shows the resolved template and active context policy.
 
 ---
 
