@@ -138,6 +138,7 @@ function App() {
   const [activeChatRisk, setActiveChatRisk] = useState(
     "Runtime is inactive. No active chat KV/cache state is currently held by NullContext."
   );
+  const [activeChatStopNotice, setActiveChatStopNotice] = useState("");
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [runtimeLogs, setRuntimeLogs] = useState("");
@@ -186,6 +187,7 @@ function App() {
   function resetOneShotConversation() {
     setMessages([]);
     resetRunPanels();
+    setActiveChatStopNotice("");
   }
 
   function appendAssistantText(text: string) {
@@ -338,6 +340,11 @@ function App() {
 
     setRunStatus("failed");
     setRuntimeLogs((current) => `${current}Generation stopped by user.\n`);
+    setActiveChatStopNotice(
+      runtimeMode === "active-chat"
+        ? "Stopped this active-chat generation. Any partial assistant text still visible in the transcript was not committed to backend chat history. The runtime remains active until you send another message or use End + Sanitize."
+        : ""
+    );
 
     setAuditOperations((current) => [
       ...current,
@@ -402,6 +409,7 @@ function App() {
 
   async function startActiveChat() {
     resetRunPanels();
+    setActiveChatStopNotice("");
     setRunStatus("running");
 
     try {
@@ -480,6 +488,7 @@ function App() {
     }
 
     setRunStatus("running");
+    setActiveChatStopNotice("");
 
     try {
       const response = await fetch(`${API_BASE}/api/chat/${activeChatSessionId}/end`, {
@@ -530,6 +539,7 @@ function App() {
     setPrivacyReport("");
     setStderr("");
     setAuditOperations([]);
+    setActiveChatStopNotice("");
 
     const currentPrompt = prompt;
     const controller = new AbortController();
@@ -832,6 +842,10 @@ function App() {
         </section>
 
         <section className="chat-card">
+          {activeChatStopNotice && (
+            <div className="notice-banner warning-banner">{activeChatStopNotice}</div>
+          )}
+
           <div className="messages">
             {messages.length === 0 && (
               <div className="empty-state">
