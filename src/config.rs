@@ -193,6 +193,9 @@ pub struct RegisteredModel {
     pub chat_template: String,
     pub chat_context_token_budget: usize,
     pub chat_context_turn_limit: usize,
+    pub selectable: bool,
+    pub validation_status: String,
+    pub validation_message: Option<String>,
     pub default_selected: bool,
 }
 
@@ -525,6 +528,9 @@ fn build_registered_model(
         chat_template,
         chat_context_token_budget,
         chat_context_turn_limit,
+        selectable: model_path_selectable(&file_model.model_path),
+        validation_status: model_validation_status(&file_model.model_path).to_string(),
+        validation_message: model_validation_message(&file_model.model_path),
         default_selected: false,
     })
 }
@@ -565,12 +571,15 @@ fn build_legacy_registered_model(home: &str, file_config: &FileConfig) -> Result
         description: Some(
             "Legacy single-model config synthesized into the model registry.".to_string(),
         ),
-        model_path,
+        model_path: model_path.clone(),
         max_tokens,
         gpu_layers: file_config.gpu_layers.unwrap_or(0),
         chat_template,
         chat_context_token_budget,
         chat_context_turn_limit,
+        selectable: model_path_selectable(&model_path),
+        validation_status: model_validation_status(&model_path).to_string(),
+        validation_message: model_validation_message(&model_path),
         default_selected: true,
     })
 }
@@ -581,11 +590,21 @@ fn resolve_selected_model<'a>(
 ) -> Result<&'a RegisteredModel> {
     let model_id = model_id_override.unwrap_or(model_registry.default_model_id.as_str());
 
-    model_registry
+    let model = model_registry
         .models
         .iter()
         .find(|model| model.id == model_id)
-        .ok_or_else(|| anyhow::anyhow!("Unknown model id: {model_id}"))
+        .ok_or_else(|| anyhow::anyhow!("Unknown model id: {model_id}"))?;
+
+    if !model.selectable {
+        let reason = model
+            .validation_message
+            .as_deref()
+            .unwrap_or("Model is not currently launchable.");
+        bail!("Model `{model_id}` is not selectable: {reason}");
+    }
+
+    Ok(model)
 }
 
 fn validate_chat_template_setting(value: &str, model_path: &str) -> Result<()> {
@@ -607,6 +626,38 @@ fn default_model_name(id: &str, model_path: &str) -> String {
         .map(|stem| stem.replace('_', " "))
         .filter(|stem| !stem.trim().is_empty())
         .unwrap_or_else(|| id.to_string())
+}
+
+fn model_path_selectable(model_path: &str) -> bool {
+    model_validation_status(model_path) == "ready"
+}
+
+fn model_validation_status(model_path: &str) -> &'static str {
+    let path = Path::new(model_path);
+
+    if !path.exists() {
+        return "missing";
+    }
+
+    if !path.is_file() {
+        return "not_file";
+    }
+
+    "ready"
+}
+
+fn model_validation_message(model_path: &str) -> Option<String> {
+    let path = Path::new(model_path);
+
+    if !path.exists() {
+        return Some(format!("Model path does not exist: {model_path}"));
+    }
+
+    if !path.is_file() {
+        return Some(format!("Model path is not a file: {model_path}"));
+    }
+
+    None
 }
 
 fn resolve_positive_u32(

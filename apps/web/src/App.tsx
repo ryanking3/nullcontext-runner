@@ -17,6 +17,9 @@ type RegisteredModel = {
   chat_template: string;
   chat_context_token_budget: number;
   chat_context_turn_limit: number;
+  selectable: boolean;
+  validation_status: string;
+  validation_message?: string | null;
   default_selected: boolean;
 };
 
@@ -291,6 +294,12 @@ function lifecycleStateClass(state: string): string {
   if (state === "orphaned") return "pill warning";
   if (state === "active") return "pill warning";
   return "pill neutral";
+}
+
+function modelValidationClass(status: string): string {
+  if (status === "ready") return "pill success";
+  if (status === "missing" || status === "not_file") return "pill failed";
+  return "pill warning";
 }
 
 function parsePositiveInteger(value: string): number | null {
@@ -2391,11 +2400,16 @@ function App() {
                   >
                     <div className="registry-session-header">
                       <span>{model.name}</span>
-                      {selectedModelId === model.id ? (
-                        <span className="pill success">selected</span>
-                      ) : model.default_selected ? (
-                        <span className="pill neutral">default</span>
-                      ) : null}
+                      <div className="drawer-actions">
+                        <span className={modelValidationClass(model.validation_status)}>
+                          {model.validation_status.replaceAll("_", " ")}
+                        </span>
+                        {selectedModelId === model.id ? (
+                          <span className="pill success">selected</span>
+                        ) : model.default_selected ? (
+                          <span className="pill neutral">default</span>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="registry-session-meta">
                       <small>{model.id}</small>
@@ -2419,6 +2433,9 @@ function App() {
             ) : (
               <>
                 <div className="registry-lifecycle-summary">
+                  <span className={modelValidationClass(inspectedModel.validation_status)}>
+                    {inspectedModel.validation_status.replaceAll("_", " ")}
+                  </span>
                   {selectedModelId === inspectedModel.id ? (
                     <span className="pill success">selected for next session</span>
                   ) : (
@@ -2434,6 +2451,8 @@ function App() {
                   <dd>{inspectedModel.id}</dd>
                   <dt>default template</dt>
                   <dd>{inspectedModel.chat_template}</dd>
+                  <dt>launchable</dt>
+                  <dd>{inspectedModel.selectable ? "yes" : "no"}</dd>
                   <dt>max tokens</dt>
                   <dd>{inspectedModel.max_tokens}</dd>
                   <dt>gpu layers</dt>
@@ -2452,12 +2471,19 @@ function App() {
                   </div>
                 )}
 
+                {inspectedModel.validation_message && (
+                  <div className="registry-action-banner failed">
+                    {inspectedModel.validation_message}
+                  </div>
+                )}
+
                 <div className="registry-actions">
                   <button
                     onClick={() => {
                       setSelectedModelId(inspectedModel.id);
                       setModelDrawerOpen(false);
                     }}
+                    disabled={!inspectedModel.selectable}
                   >
                     use for next session
                   </button>
@@ -2467,6 +2493,7 @@ function App() {
                       setSelectedModelId(inspectedModel.id);
                       openConfigDrawer();
                     }}
+                    disabled={!inspectedModel.selectable}
                   >
                     select + open config
                   </button>
@@ -2506,9 +2533,10 @@ function App() {
                     <option value="">no models available</option>
                   ) : (
                     models.map((model) => (
-                      <option key={model.id} value={model.id}>
+                      <option key={model.id} value={model.id} disabled={!model.selectable}>
                         {model.name}
                         {model.default_selected ? " · default" : ""}
+                        {!model.selectable ? " · unavailable" : ""}
                       </option>
                     ))
                   )}
@@ -2540,6 +2568,10 @@ function App() {
               <p className="microcopy truncate" title={selectedModel.model_path}>
                 {selectedModel.model_path}
               </p>
+            )}
+
+            {selectedModel && !selectedModel.selectable && selectedModel.validation_message && (
+              <p className="microcopy">{selectedModel.validation_message}</p>
             )}
 
             <div className="drawer-actions">
