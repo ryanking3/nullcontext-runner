@@ -54,6 +54,9 @@ pub struct RunRequest {
     prompt: String,
     mode: Option<String>,
     persistent: Option<bool>,
+    chat_template: Option<String>,
+    chat_context_token_budget: Option<u32>,
+    chat_context_turn_limit: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -299,8 +302,15 @@ fn run_direct_streaming_session(
 ) -> Result<()> {
     let persistent = request.persistent.unwrap_or(false);
 
-    let mut config =
-        SessionConfig::from_web_request(home, request.prompt, request.mode, persistent)?;
+    let mut config = SessionConfig::from_web_request(
+        home,
+        request.prompt,
+        request.mode,
+        persistent,
+        request.chat_template,
+        request.chat_context_token_budget,
+        request.chat_context_turn_limit,
+    )?;
 
     let session = Session::create()?;
 

@@ -111,6 +111,9 @@ impl ChatContextWindow {
 pub struct StartChatRequest {
     pub mode: Option<String>,
     pub persistent: Option<bool>,
+    pub chat_template: Option<String>,
+    pub chat_context_token_budget: Option<u32>,
+    pub chat_context_turn_limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +129,10 @@ pub struct StartChatResponse {
     pub persistent: bool,
     pub runtime_active: bool,
     pub turns: usize,
+    pub chat_template: String,
+    pub chat_context_token_budget: usize,
+    pub chat_context_turn_limit: usize,
+    pub history_policy: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -137,6 +144,9 @@ pub struct ChatStatusResponse {
     pub runtime_active: bool,
     pub turns: usize,
     pub runtime_duration_ms: i64,
+    pub chat_template: String,
+    pub chat_context_token_budget: usize,
+    pub chat_context_turn_limit: usize,
     pub history_policy: String,
     pub residual_risk: String,
 }
@@ -199,8 +209,15 @@ impl ChatSessionManager {
     ) -> Result<StartChatResponse> {
         let persistent = request.persistent.unwrap_or(false);
 
-        let config =
-            SessionConfig::from_web_request(home, String::new(), request.mode, persistent)?;
+        let config = SessionConfig::from_web_request(
+            home,
+            String::new(),
+            request.mode,
+            persistent,
+            request.chat_template,
+            request.chat_context_token_budget,
+            request.chat_context_turn_limit,
+        )?;
 
         let session = Session::create()?;
 
@@ -218,6 +235,10 @@ impl ChatSessionManager {
             persistent: !config.ephemeral,
             runtime_active: true,
             turns: 0,
+            chat_template: config.chat_template.as_str().to_string(),
+            chat_context_token_budget: config.chat_context_token_budget,
+            chat_context_turn_limit: config.chat_context_turn_limit,
+            history_policy: active_history_policy(&config),
         };
 
         let active = ActiveChatSession {
@@ -255,6 +276,9 @@ impl ChatSessionManager {
             runtime_active: !active.ending,
             turns: active.turns.len(),
             runtime_duration_ms,
+            chat_template: active.config.chat_template.as_str().to_string(),
+            chat_context_token_budget: active.config.chat_context_token_budget,
+            chat_context_turn_limit: active.config.chat_context_turn_limit,
             history_policy: active_history_policy(&active.config),
             residual_risk: active_runtime_risk(),
         })

@@ -47,6 +47,7 @@ body {
 }
 
 button,
+input,
 textarea,
 select {
   font: inherit;
@@ -72,6 +73,7 @@ button:disabled {
   opacity: 0.45;
 }
 
+input,
 select,
 textarea {
   width: 100%;
@@ -82,9 +84,14 @@ textarea {
   outline: none;
 }
 
+input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--border-strong);
+}
+
+input {
+  padding: 9px 10px;
 }
 
 select {
@@ -583,6 +590,14 @@ pre {
 }
 
 .runtime-path {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.runtime-meta {
+  display: grid;
+  gap: 4px;
   margin-top: 8px;
   color: var(--muted);
   font-size: 11px;

@@ -32,6 +32,7 @@ type AuditOperation = {
 type Theme = "dark" | "light";
 type RunStatus = "idle" | "running" | "success" | "failed";
 type RuntimeMode = "one-shot" | "active-chat";
+type ChatTemplateOption = "auto" | "generic" | "chatml" | "llama3-instruct";
 
 type StreamPayload = {
   type: string;
@@ -50,6 +51,10 @@ type ChatStartResponse = {
   persistent: boolean;
   runtime_active: boolean;
   turns: number;
+  chat_template: string;
+  chat_context_token_budget: number;
+  chat_context_turn_limit: number;
+  history_policy: string;
 };
 
 type ChatStatusResponse = {
@@ -60,6 +65,9 @@ type ChatStatusResponse = {
   runtime_active: boolean;
   turns: number;
   runtime_duration_ms?: number;
+  chat_template?: string;
+  chat_context_token_budget?: number;
+  chat_context_turn_limit?: number;
   history_policy?: string;
   residual_risk?: string;
 };
@@ -97,6 +105,16 @@ function formatDuration(ms: number): string {
   const seconds = totalSeconds % 60;
 
   return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+}
+
+function parsePositiveInteger(value: string): number | null {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
 }
 
 async function readApiError(response: Response, fallback: string): Promise<string> {
@@ -180,6 +198,9 @@ function App() {
   const [mode, setMode] = useState("secure");
   const [persistent, setPersistent] = useState(false);
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
+  const [chatTemplate, setChatTemplate] = useState<ChatTemplateOption>("auto");
+  const [chatContextTokenBudget, setChatContextTokenBudget] = useState("2048");
+  const [chatContextTurnLimit, setChatContextTurnLimit] = useState("12");
 
   const [activeChatSessionId, setActiveChatSessionId] = useState("");
   const [activeChatWorkspace, setActiveChatWorkspace] = useState("");
@@ -191,6 +212,12 @@ function App() {
     "Runtime is inactive. No active chat KV/cache state is currently held by NullContext."
   );
   const [activeChatStopNotice, setActiveChatStopNotice] = useState("");
+  const [activeChatResolvedTemplate, setActiveChatResolvedTemplate] = useState("");
+  const [activeChatHistoryPolicy, setActiveChatHistoryPolicy] = useState("");
+  const [activeChatContextBudget, setActiveChatContextBudget] = useState<number | null>(null);
+  const [activeChatContextTurnLimit, setActiveChatContextTurnLimit] = useState<number | null>(
+    null
+  );
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [runtimeLogs, setRuntimeLogs] = useState("");
@@ -411,6 +438,25 @@ function App() {
     ]);
   }
 
+  function readActiveChatConfigInputs() {
+    const tokenBudget = parsePositiveInteger(chatContextTokenBudget);
+    const turnLimit = parsePositiveInteger(chatContextTurnLimit);
+
+    if (tokenBudget === null) {
+      throw new Error("Active chat context token budget must be a whole number greater than 0.");
+    }
+
+    if (turnLimit === null) {
+      throw new Error("Active chat context turn limit must be a whole number greater than 0.");
+    }
+
+    return {
+      chat_template: chatTemplate,
+      chat_context_token_budget: tokenBudget,
+      chat_context_turn_limit: turnLimit,
+    };
+  }
+
   async function runOneShot() {
     resetOneShotConversation();
     setRunStatus("running");
@@ -431,6 +477,7 @@ function App() {
     ]);
 
     try {
+      const activeChatConfig = readActiveChatConfigInputs();
       const response = await fetch(`${API_BASE}/api/run/stream`, {
         method: "POST",
         headers: {
@@ -440,6 +487,7 @@ function App() {
           prompt: currentPrompt,
           mode,
           persistent,
+          ...activeChatConfig,
         }),
         signal: controller.signal,
       });
@@ -465,6 +513,7 @@ function App() {
     setRunStatus("running");
 
     try {
+      const activeChatConfig = readActiveChatConfigInputs();
       const response = await fetch(`${API_BASE}/api/chat/start`, {
         method: "POST",
         headers: {
@@ -473,6 +522,7 @@ function App() {
         body: JSON.stringify({
           mode,
           persistent,
+          ...activeChatConfig,
         }),
       });
 
@@ -493,6 +543,10 @@ function App() {
       setActiveChatRisk(
         "Runtime is active. llama.cpp remains loaded, KV/cache state may remain live, and chat context remains in memory until End + Sanitize."
       );
+      setActiveChatResolvedTemplate(data.chat_template);
+      setActiveChatHistoryPolicy(data.history_policy);
+      setActiveChatContextBudget(data.chat_context_token_budget);
+      setActiveChatContextTurnLimit(data.chat_context_turn_limit);
       setRunStatus("success");
 
       setRuntimeLogs((current) =>
@@ -524,6 +578,22 @@ function App() {
 
       if (typeof data.runtime_duration_ms === "number") {
         setActiveRuntimeElapsedMs(data.runtime_duration_ms);
+      }
+
+      if (data.chat_template) {
+        setActiveChatResolvedTemplate(data.chat_template);
+      }
+
+      if (typeof data.chat_context_token_budget === "number") {
+        setActiveChatContextBudget(data.chat_context_token_budget);
+      }
+
+      if (typeof data.chat_context_turn_limit === "number") {
+        setActiveChatContextTurnLimit(data.chat_context_turn_limit);
+      }
+
+      if (data.history_policy) {
+        setActiveChatHistoryPolicy(data.history_policy);
       }
 
       if (data.residual_risk) {
@@ -563,6 +633,10 @@ function App() {
       setActiveChatRisk(
         "Runtime is inactive. Active chat buffers were finalized according to the session cleanup policy."
       );
+      setActiveChatResolvedTemplate("");
+      setActiveChatHistoryPolicy("");
+      setActiveChatContextBudget(null);
+      setActiveChatContextTurnLimit(null);
       setPrivacyReport(JSON.stringify(data.report, null, 2));
       setRuntimeLogs((current) =>
         `${current}Ended active chat session ${data.session_id}\nRuntime stopped: ${data.runtime_stopped}\n`
@@ -779,8 +853,48 @@ function App() {
             persistent
           </label>
 
+          <label>
+            chat template
+            <select
+              value={chatTemplate}
+              onChange={(event) => setChatTemplate(event.target.value as ChatTemplateOption)}
+              disabled={activeChatRuntimeActive}
+            >
+              <option value="auto">auto-detect</option>
+              <option value="generic">generic</option>
+              <option value="chatml">chatml</option>
+              <option value="llama3-instruct">llama3-instruct</option>
+            </select>
+          </label>
+
+          <label>
+            context token budget
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={chatContextTokenBudget}
+              onChange={(event) => setChatContextTokenBudget(event.target.value)}
+              disabled={activeChatRuntimeActive}
+            />
+          </label>
+
+          <label>
+            context turn limit
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={chatContextTurnLimit}
+              onChange={(event) => setChatContextTurnLimit(event.target.value)}
+              disabled={activeChatRuntimeActive}
+            />
+          </label>
+
           <p className="microcopy">
             secure and air-gapped sessions are ephemeral. standard can retain workspace artifacts.
+            active chat uses the selected template and bounded recent-context window when the
+            session starts.
           </p>
         </section>
 
@@ -871,6 +985,17 @@ function App() {
             {runtimeMode === "active-chat" && activeChatWorkspace && (
               <div className="runtime-path truncate" title={activeChatWorkspace}>
                 workspace: {activeChatWorkspace}
+              </div>
+            )}
+            {runtimeMode === "active-chat" && activeChatHistoryPolicy && (
+              <div className="runtime-meta">
+                <div>template: {activeChatResolvedTemplate || "unknown"}</div>
+                {activeChatContextBudget !== null && activeChatContextTurnLimit !== null && (
+                  <div>
+                    context: {activeChatContextBudget} tok / {activeChatContextTurnLimit} turns
+                  </div>
+                )}
+                <div title={activeChatHistoryPolicy}>policy: {activeChatHistoryPolicy}</div>
               </div>
             )}
           </div>

@@ -89,6 +89,14 @@ impl ChatTemplate {
         }
     }
 
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Generic => "generic",
+            Self::ChatMl => "chatml",
+            Self::Llama3Instruct => "llama3-instruct",
+        }
+    }
+
     pub fn resolve(config_value: Option<&str>, model_path: &str) -> Result<Self> {
         if let Some(value) = config_value {
             if value == "auto" {
@@ -211,6 +219,9 @@ impl SessionConfig {
         prompt: String,
         mode: Option<String>,
         persistent: bool,
+        chat_template_override: Option<String>,
+        chat_context_token_budget_override: Option<u32>,
+        chat_context_turn_limit_override: Option<usize>,
     ) -> Result<Self> {
         let file_config = FileConfig::load(&home)?;
 
@@ -232,17 +243,32 @@ impl SessionConfig {
         let model_path = file_config
             .model_path
             .unwrap_or_else(|| format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"));
-        let chat_template =
-            ChatTemplate::resolve(file_config.chat_template.as_deref(), &model_path)?;
+        let chat_template = ChatTemplate::resolve(
+            chat_template_override
+                .as_deref()
+                .or(file_config.chat_template.as_deref()),
+            &model_path,
+        )?;
+        let chat_context_token_budget = resolve_positive_u32(
+            chat_context_token_budget_override,
+            file_config.chat_context_token_budget,
+            2048,
+            "chat_context_token_budget",
+        )? as usize;
+        let chat_context_turn_limit = resolve_positive_usize(
+            chat_context_turn_limit_override,
+            file_config.chat_context_turn_limit,
+            12,
+            "chat_context_turn_limit",
+        )?;
 
         Ok(Self {
             home: home.clone(),
             llama_path,
             model_path,
             chat_template,
-            chat_context_token_budget: file_config.chat_context_token_budget.unwrap_or(2048)
-                as usize,
-            chat_context_turn_limit: file_config.chat_context_turn_limit.unwrap_or(12),
+            chat_context_token_budget,
+            chat_context_turn_limit,
             prompt: SensitiveBytes::new(prompt),
             prompt_source: PromptSource::Web,
             max_tokens: file_config.max_tokens.unwrap_or(128).to_string(),
@@ -327,15 +353,26 @@ impl SessionConfig {
             .unwrap_or_else(|| format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"));
         let chat_template =
             ChatTemplate::resolve(file_config.chat_template.as_deref(), &model_path)?;
+        let chat_context_token_budget = resolve_positive_u32(
+            None,
+            file_config.chat_context_token_budget,
+            2048,
+            "chat_context_token_budget",
+        )? as usize;
+        let chat_context_turn_limit = resolve_positive_usize(
+            None,
+            file_config.chat_context_turn_limit,
+            12,
+            "chat_context_turn_limit",
+        )?;
 
         Ok(Self {
             home: home.clone(),
             llama_path,
             model_path,
             chat_template,
-            chat_context_token_budget: file_config.chat_context_token_budget.unwrap_or(2048)
-                as usize,
-            chat_context_turn_limit: file_config.chat_context_turn_limit.unwrap_or(12),
+            chat_context_token_budget,
+            chat_context_turn_limit,
             prompt: prompt_bytes,
             prompt_source,
             max_tokens: file_config.max_tokens.unwrap_or(128).to_string(),
@@ -344,4 +381,34 @@ impl SessionConfig {
             security_mode,
         })
     }
+}
+
+fn resolve_positive_u32(
+    override_value: Option<u32>,
+    config_value: Option<u32>,
+    default_value: u32,
+    field_name: &str,
+) -> Result<u32> {
+    let value = override_value.or(config_value).unwrap_or(default_value);
+
+    if value == 0 {
+        bail!("{field_name} must be greater than 0");
+    }
+
+    Ok(value)
+}
+
+fn resolve_positive_usize(
+    override_value: Option<usize>,
+    config_value: Option<usize>,
+    default_value: usize,
+    field_name: &str,
+) -> Result<usize> {
+    let value = override_value.or(config_value).unwrap_or(default_value);
+
+    if value == 0 {
+        bail!("{field_name} must be greater than 0");
+    }
+
+    Ok(value)
 }
