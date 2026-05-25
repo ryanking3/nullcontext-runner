@@ -335,7 +335,7 @@ pre {
 
 .session-item {
   display: grid;
-  gap: 2px;
+  gap: 6px;
   width: 100%;
   text-align: left;
   background: var(--input);
@@ -352,6 +352,19 @@ pre {
 
 .session-item small {
   color: var(--muted);
+}
+
+.registry-session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.registry-session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .segmented {
@@ -1026,6 +1039,28 @@ pre {
   min-width: 0;
   margin: 0;
   color: var(--text);
+}
+
+.registry-lifecycle-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.registry-action-banner {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  padding: 10px;
+  color: var(--muted);
+  background: var(--panel-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.registry-action-banner.failed {
+  border-color: var(--failed);
+  color: var(--failed);
 }
 
 .registry-path {

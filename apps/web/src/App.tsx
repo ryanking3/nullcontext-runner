@@ -7,6 +7,16 @@ type SessionRegistry = {
   sessions: SessionIndexEntry[];
 };
 
+type SessionLifecycleMetadata = {
+  state: string;
+  retention_policy: string;
+  retention_deadline?: string | null;
+  cleanup_requested_at?: string | null;
+  cleanup_completed_at?: string | null;
+  cleanup_reason?: string | null;
+  updated_at?: string | null;
+};
+
 type SessionIndexEntry = {
   session_id: string;
   started_at: string;
@@ -21,6 +31,7 @@ type SessionIndexEntry = {
   cleanup_attempted: boolean;
   cleanup_successful: boolean;
   workspace_deleted: boolean;
+  lifecycle: SessionLifecycleMetadata;
 };
 
 type AuditOperation = {
@@ -142,6 +153,21 @@ type ChatCancelResponse = {
   message: string;
 };
 
+type SessionLifecycleActionResponse = {
+  session_id: string;
+  lifecycle_state: string;
+  retention_policy: string;
+  cleanup_reason?: string | null;
+  cleanup_attempted: boolean;
+  cleanup_successful: boolean;
+  workspace_deleted: boolean;
+  workspace_exists: boolean;
+  report_exists: boolean;
+  workspace: string;
+  report_path: string;
+  message: string;
+};
+
 type ApiErrorResponse = {
   error?: string;
 };
@@ -199,6 +225,19 @@ function formatBytes(value: number): string {
   }
 
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function humanizeSnakeCase(value: string): string {
+  return value.replaceAll("_", " ");
+}
+
+function lifecycleStateClass(state: string): string {
+  if (state === "cleanup_succeeded") return "pill success";
+  if (state === "cleanup_failed") return "pill failed";
+  if (state === "cleanup_pending") return "pill warning";
+  if (state === "orphaned") return "pill warning";
+  if (state === "active") return "pill warning";
+  return "pill neutral";
 }
 
 function parsePositiveInteger(value: string): number | null {
@@ -375,6 +414,11 @@ function App() {
   const [selectedReport, setSelectedReport] = useState<string>("");
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [showRawReport, setShowRawReport] = useState(false);
+  const [registryActionPending, setRegistryActionPending] = useState<string | null>(null);
+  const [registryActionMessage, setRegistryActionMessage] = useState("");
+  const [registryActionFailed, setRegistryActionFailed] = useState(false);
+  const [registryActionResult, setRegistryActionResult] =
+    useState<SessionLifecycleActionResponse | null>(null);
   const [activeChatCancelPending, setActiveChatCancelPending] = useState(false);
   const [registryQuery, setRegistryQuery] = useState("");
   const [registryModeFilter, setRegistryModeFilter] = useState<RegistryModeFilter>("all");
@@ -1004,6 +1048,54 @@ function App() {
     openReport(sessionId);
   }
 
+  async function runRegistryLifecycleAction(
+    sessionId: string,
+    action: "cleanup" | "reconcile"
+  ) {
+    if (
+      action === "cleanup" &&
+      !window.confirm(
+        "Run lifecycle cleanup for this retained session now? NullContext will try to archive the report first and then delete the session workspace."
+      )
+    ) {
+      return;
+    }
+
+    setRegistryActionPending(action);
+    setRegistryActionFailed(false);
+    setRegistryActionMessage("");
+
+    try {
+      const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/${action}`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const error = await readApiError(
+          response,
+          `Failed to ${action} registry session lifecycle state.`
+        );
+        throw new Error(error);
+      }
+
+      const data = (await response.json()) as SessionLifecycleActionResponse;
+      setRegistryActionResult(data);
+      setRegistryActionMessage(data.message);
+      setSelectedSessionId(data.session_id);
+
+      await loadSessions();
+
+      if (selectedSessionId === data.session_id && inspectorView === "report") {
+        await openReport(data.session_id);
+      }
+    } catch (error) {
+      setRegistryActionFailed(true);
+      setRegistryActionMessage(String(error));
+    } finally {
+      setRegistryActionPending(null);
+    }
+  }
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
@@ -1221,6 +1313,10 @@ function App() {
   })[0];
   const selectedSession =
     filteredSessions.find((session) => session.session_id === selectedSessionId) ?? null;
+  const selectedLifecycleResult =
+    registryActionResult && registryActionResult.session_id === selectedSessionId
+      ? registryActionResult
+      : null;
   const currentReportRaw = selectedReport || privacyReport;
   const currentReport = parsePrivacyReport(currentReportRaw);
 
@@ -2138,9 +2234,17 @@ function App() {
                     key={session.session_id}
                     onClick={() => setSelectedSessionId(session.session_id)}
                   >
-                    <span>{shortId(session.session_id)}</span>
-                    <small>{session.security_mode}</small>
-                    <small>{new Date(session.started_at).toLocaleString()}</small>
+                    <div className="registry-session-header">
+                      <span>{shortId(session.session_id)}</span>
+                      <span className={lifecycleStateClass(session.lifecycle.state)}>
+                        {humanizeSnakeCase(session.lifecycle.state)}
+                      </span>
+                    </div>
+                    <div className="registry-session-meta">
+                      <small>{session.security_mode}</small>
+                      <small>{new Date(session.started_at).toLocaleString()}</small>
+                    </div>
+                    <small>{humanizeSnakeCase(session.lifecycle.retention_policy)}</small>
                   </button>
                 ))}
               </div>
@@ -2163,9 +2267,64 @@ function App() {
               </p>
             ) : (
               <>
+                <div className="registry-lifecycle-summary">
+                  <span className={lifecycleStateClass(selectedSession.lifecycle.state)}>
+                    {humanizeSnakeCase(selectedSession.lifecycle.state)}
+                  </span>
+                  <span className="pill neutral">
+                    {humanizeSnakeCase(selectedSession.lifecycle.retention_policy)}
+                  </span>
+                </div>
+
+                {registryActionMessage && (
+                  <div
+                    className={
+                      registryActionFailed
+                        ? "registry-action-banner failed"
+                        : "registry-action-banner"
+                    }
+                  >
+                    {registryActionMessage}
+                  </div>
+                )}
+
                 <dl className="registry-detail-grid">
                   <dt>started</dt>
                   <dd>{new Date(selectedSession.started_at).toLocaleString()}</dd>
+                  <dt>lifecycle state</dt>
+                  <dd>{humanizeSnakeCase(selectedSession.lifecycle.state)}</dd>
+                  <dt>retention policy</dt>
+                  <dd>{humanizeSnakeCase(selectedSession.lifecycle.retention_policy)}</dd>
+                  <dt>retention deadline</dt>
+                  <dd>
+                    {selectedSession.lifecycle.retention_deadline
+                      ? formatTimestamp(selectedSession.lifecycle.retention_deadline)
+                      : "none"}
+                  </dd>
+                  <dt>cleanup requested</dt>
+                  <dd>
+                    {selectedSession.lifecycle.cleanup_requested_at
+                      ? formatTimestamp(selectedSession.lifecycle.cleanup_requested_at)
+                      : "not requested"}
+                  </dd>
+                  <dt>cleanup completed</dt>
+                  <dd>
+                    {selectedSession.lifecycle.cleanup_completed_at
+                      ? formatTimestamp(selectedSession.lifecycle.cleanup_completed_at)
+                      : "not completed"}
+                  </dd>
+                  <dt>cleanup reason</dt>
+                  <dd>
+                    {selectedSession.lifecycle.cleanup_reason
+                      ? humanizeSnakeCase(selectedSession.lifecycle.cleanup_reason)
+                      : "none"}
+                  </dd>
+                  <dt>lifecycle updated</dt>
+                  <dd>
+                    {selectedSession.lifecycle.updated_at
+                      ? formatTimestamp(selectedSession.lifecycle.updated_at)
+                      : "unknown"}
+                  </dd>
                   <dt>mode</dt>
                   <dd>{selectedSession.security_mode}</dd>
                   <dt>prompt source</dt>
@@ -2188,19 +2347,43 @@ function App() {
                   <dd className="registry-path">{selectedSession.model_path}</dd>
                   <dt>report path</dt>
                   <dd className="registry-path">{selectedSession.report_path}</dd>
+                  {selectedLifecycleResult && (
+                    <>
+                      <dt>workspace exists</dt>
+                      <dd>{formatBoolean(selectedLifecycleResult.workspace_exists)}</dd>
+                      <dt>report exists</dt>
+                      <dd>{formatBoolean(selectedLifecycleResult.report_exists)}</dd>
+                    </>
+                  )}
                 </dl>
 
                 <div className="registry-actions">
-                  <button
-                    onClick={() => openSessionReport(selectedSession.session_id)}
-                  >
+                  <button onClick={() => openSessionReport(selectedSession.session_id)}>
                     open report in inspector
+                  </button>
+                  <button
+                    onClick={() =>
+                      runRegistryLifecycleAction(selectedSession.session_id, "reconcile")
+                    }
+                    disabled={registryActionPending !== null}
+                  >
+                    {registryActionPending === "reconcile" ? "reconciling..." : "reconcile"}
+                  </button>
+                  <button
+                    className="danger-button"
+                    onClick={() =>
+                      runRegistryLifecycleAction(selectedSession.session_id, "cleanup")
+                    }
+                    disabled={registryActionPending !== null}
+                  >
+                    {registryActionPending === "cleanup" ? "cleaning up..." : "cleanup now"}
                   </button>
                 </div>
 
                 <p className="microcopy">
-                  Registry browsing stays separate from the live runtime shell so report inspection
-                  doesn&apos;t compete with conversation and runtime controls.
+                  Registry browsing stays separate from the live runtime shell so report
+                  inspection and lifecycle actions don&apos;t compete with conversation and runtime
+                  controls.
                 </p>
               </>
             )}
