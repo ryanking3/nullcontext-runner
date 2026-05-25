@@ -570,6 +570,12 @@ pre {
   line-height: 1.4;
 }
 
+.runtime-path {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .active-runtime-banner.active {
   border-bottom-color: var(--warning);
 }

@@ -799,6 +799,11 @@ function App() {
                 ? "Each prompt starts and ends its own runtime."
                 : activeChatRisk}
             </p>
+            {runtimeMode === "active-chat" && activeChatWorkspace && (
+              <div className="runtime-path truncate" title={activeChatWorkspace}>
+                workspace: {activeChatWorkspace}
+              </div>
+            )}
           </div>
 
           <div className="runtime-stats">
