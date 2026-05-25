@@ -1,5 +1,5 @@
 use crate::audit::PrivacyReport;
-use crate::chat::{ChatMessageRequest, ChatSessionManager, StartChatRequest};
+use crate::chat::{CancelChatResponse, ChatMessageRequest, ChatSessionManager, StartChatRequest};
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
@@ -117,6 +117,7 @@ pub async fn serve() -> Result<()> {
         .route("/api/run/stream", post(run_session_stream))
         .route("/api/chat/start", post(start_chat_session))
         .route("/api/chat/:session_id/status", get(chat_session_status))
+        .route("/api/chat/:session_id/cancel", post(cancel_chat_generation))
         .route("/api/chat/:session_id/end", post(end_chat_session))
         .route(
             "/api/chat/:session_id/message/stream",
@@ -182,6 +183,32 @@ async fn end_chat_session(
     match tokio::task::spawn_blocking(move || manager.end_session(&session_id)).await {
         Ok(Ok(response)) => Json(response).into_response(),
         Ok(Err(error)) => json_error(StatusCode::NOT_FOUND, error.to_string()),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+async fn cancel_chat_generation(
+    State(state): State<WebState>,
+    Path(session_id): Path<String>,
+) -> Response {
+    let manager = state.chat_manager.clone();
+
+    match tokio::task::spawn_blocking(move || manager.cancel_generation(&session_id)).await {
+        Ok(Ok(response)) => Json::<CancelChatResponse>(response).into_response(),
+        Ok(Err(error)) => {
+            let message = error.to_string();
+            let status = if message.contains("No active chat generation is currently running") {
+                StatusCode::CONFLICT
+            } else if message.contains("Active chat session not found") {
+                StatusCode::NOT_FOUND
+            } else if message.contains("session is ending") {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+
+            json_error(status, message)
+        }
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use zeroize::Zeroize;
@@ -29,6 +30,7 @@ struct ActiveChatSession {
     runtime: ManagedRuntime,
     turns: Vec<ChatTurn>,
     generation_active: bool,
+    cancel_requested: Arc<AtomicBool>,
     ending: bool,
 }
 
@@ -158,6 +160,14 @@ pub struct EndChatResponse {
     pub report: serde_json::Value,
 }
 
+#[derive(Debug, Serialize)]
+pub struct CancelChatResponse {
+    pub session_id: String,
+    pub generation_active: bool,
+    pub cancel_requested: bool,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatStreamEvent {
     #[serde(rename = "type")]
@@ -193,6 +203,13 @@ impl StreamingCompletionRequest {
     fn sanitize(&mut self) {
         self.prompt.zeroize();
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamTermination {
+    Completed,
+    CancelRequested,
+    StreamClosed,
 }
 
 impl ChatSessionManager {
@@ -247,6 +264,7 @@ impl ChatSessionManager {
             runtime,
             turns: vec![],
             generation_active: false,
+            cancel_requested: Arc::new(AtomicBool::new(false)),
             ending: false,
         };
 
@@ -296,7 +314,7 @@ impl ChatSessionManager {
         let session_handle = self.session_handle(session_id)?;
         let user_buffer = SensitiveBytes::new(request.prompt);
 
-        let (turn_number, completion_url, max_tokens, mut context_window) = {
+        let (turn_number, completion_url, max_tokens, cancel_requested, mut context_window) = {
             let mut active = session_handle
                 .lock()
                 .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
@@ -323,8 +341,15 @@ impl ChatSessionManager {
             write_turn_prompt(&active.session, turn_number, user_buffer.as_bytes())?;
 
             active.generation_active = true;
+            active.cancel_requested.store(false, Ordering::SeqCst);
 
-            (turn_number, completion_url, max_tokens, context_window)
+            (
+                turn_number,
+                completion_url,
+                max_tokens,
+                active.cancel_requested.clone(),
+                context_window,
+            )
         };
 
         if !emit(runtime_event(format!(
@@ -347,12 +372,13 @@ impl ChatSessionManager {
             &completion_url,
             &context_window.prompt,
             max_tokens,
+            cancel_requested.as_ref(),
             &mut emit,
         );
 
         context_window.prompt.zeroize();
 
-        let (response_text, completed) = match stream_result {
+        let (response_text, termination) = match stream_result {
             Ok(result) => result,
             Err(error) => {
                 clear_generation_active(&session_handle)?;
@@ -360,15 +386,29 @@ impl ChatSessionManager {
             }
         };
 
-        if !completed {
+        if termination != StreamTermination::Completed {
             clear_generation_active(&session_handle)?;
 
-            let _ = emit(audit_event(SanitizationOperation {
-                operation: "chat_turn_cancelled".to_string(),
-                status: "warning".to_string(),
-                details: format!(
-                    "Cancelled chat turn {turn_number}. Partial response was not committed to chat history."
+            let (operation, details) = match termination {
+                StreamTermination::CancelRequested => (
+                    "chat_turn_cancelled",
+                    format!(
+                        "Cancelled chat turn {turn_number} after an explicit cancel request. Partial response was not committed to chat history."
+                    ),
                 ),
+                StreamTermination::StreamClosed => (
+                    "chat_turn_stream_closed",
+                    format!(
+                        "Stopped chat turn {turn_number} after the client stream closed. Partial response was not committed to chat history."
+                    ),
+                ),
+                StreamTermination::Completed => unreachable!(),
+            };
+
+            let _ = emit(audit_event(SanitizationOperation {
+                operation: operation.to_string(),
+                status: "warning".to_string(),
+                details,
             }));
 
             let _ = emit(complete_event(false));
@@ -411,6 +451,35 @@ impl ChatSessionManager {
         let _ = emit(complete_event(true));
 
         Ok(())
+    }
+
+    pub fn cancel_generation(&self, session_id: &str) -> Result<CancelChatResponse> {
+        let session_handle = self.session_handle(session_id)?;
+        let active = session_handle
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
+
+        if active.ending {
+            bail!("Active chat session is ending: {session_id}");
+        }
+
+        if !active.generation_active {
+            bail!("No active chat generation is currently running for session {session_id}");
+        }
+
+        let already_requested = active.cancel_requested.swap(true, Ordering::SeqCst);
+
+        Ok(CancelChatResponse {
+            session_id: active.session.id.clone(),
+            generation_active: true,
+            cancel_requested: true,
+            message: if already_requested {
+                "Cancellation was already requested for the current active chat generation."
+                    .to_string()
+            } else {
+                "Cancellation requested for the current active chat generation.".to_string()
+            },
+        })
     }
 
     pub fn end_session(&self, session_id: &str) -> Result<EndChatResponse> {
@@ -681,8 +750,9 @@ fn stream_completion_from_llama<F>(
     completion_url: &str,
     prompt: &str,
     n_predict: u32,
+    cancel_requested: &AtomicBool,
     emit: &mut F,
-) -> Result<(String, bool)>
+) -> Result<(String, StreamTermination)>
 where
     F: FnMut(ChatStreamEvent) -> bool,
 {
@@ -704,6 +774,10 @@ where
     let mut full_response = String::new();
 
     for line_result in reader.lines() {
+        if cancel_requested.load(Ordering::SeqCst) {
+            return Ok((full_response, StreamTermination::CancelRequested));
+        }
+
         let line = line_result?;
 
         if !line.starts_with("data:") {
@@ -723,10 +797,18 @@ where
 
         if let Some(content) = parsed.get("content").and_then(|value| value.as_str()) {
             if !content.is_empty() {
+                if cancel_requested.load(Ordering::SeqCst) {
+                    return Ok((full_response, StreamTermination::CancelRequested));
+                }
+
                 full_response.push_str(content);
 
                 if !emit(model_event(content.to_string())) {
-                    return Ok((full_response, false));
+                    if cancel_requested.load(Ordering::SeqCst) {
+                        return Ok((full_response, StreamTermination::CancelRequested));
+                    }
+
+                    return Ok((full_response, StreamTermination::StreamClosed));
                 }
             }
         }
@@ -741,7 +823,11 @@ where
         }
     }
 
-    Ok((full_response, true))
+    if cancel_requested.load(Ordering::SeqCst) {
+        return Ok((full_response, StreamTermination::CancelRequested));
+    }
+
+    Ok((full_response, StreamTermination::Completed))
 }
 
 fn write_turn_prompt(session: &Session, turn_number: usize, prompt: &[u8]) -> Result<()> {
@@ -772,6 +858,7 @@ fn clear_generation_active(session_handle: &Arc<Mutex<ActiveChatSession>>) -> Re
         .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
 
     active.generation_active = false;
+    active.cancel_requested.store(false, Ordering::SeqCst);
 
     Ok(())
 }

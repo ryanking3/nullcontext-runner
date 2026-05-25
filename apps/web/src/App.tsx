@@ -135,6 +135,13 @@ type ChatEndResponse = {
   report: unknown;
 };
 
+type ChatCancelResponse = {
+  session_id: string;
+  generation_active: boolean;
+  cancel_requested: boolean;
+  message: string;
+};
+
 type ApiErrorResponse = {
   error?: string;
 };
@@ -237,7 +244,10 @@ async function readApiError(response: Response, fallback: string): Promise<strin
   }
 }
 
-function formatActiveChatApiError(action: "start" | "message" | "end", message: string): string {
+function formatActiveChatApiError(
+  action: "start" | "message" | "cancel" | "end",
+  message: string
+): string {
   if (message.includes("generation is still in progress")) {
     return "The active chat runtime is still finishing the current generation. Wait for streaming to settle, or use Stop and then retry End + Sanitize once the session is idle.";
   }
@@ -248,6 +258,10 @@ function formatActiveChatApiError(action: "start" | "message" | "end", message: 
 
   if (message.includes("session is ending")) {
     return "This active chat session is already ending. Wait for End + Sanitize to complete before sending another message.";
+  }
+
+  if (message.includes("No active chat generation is currently running")) {
+    return "There is no active chat generation running right now, so there was nothing to cancel.";
   }
 
   if (message.includes("Active chat session not found")) {
@@ -361,6 +375,7 @@ function App() {
   const [selectedReport, setSelectedReport] = useState<string>("");
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [showRawReport, setShowRawReport] = useState(false);
+  const [activeChatCancelPending, setActiveChatCancelPending] = useState(false);
   const [registryQuery, setRegistryQuery] = useState("");
   const [registryModeFilter, setRegistryModeFilter] = useState<RegistryModeFilter>("all");
   const [registryOutcomeFilter, setRegistryOutcomeFilter] =
@@ -492,12 +507,28 @@ function App() {
         if (payload.message) {
           setStderr((current) => `${current}${payload.message}\n`);
         }
+        setActiveChatCancelPending(false);
         setRunStatus("failed");
         break;
       }
 
       case "complete": {
-        setRunStatus(payload.success ? "success" : "failed");
+        if (runtimeMode === "active-chat" && activeChatCancelPending && !payload.success) {
+          setRunStatus("idle");
+          setActiveChatCancelPending(false);
+          setActiveChatStopNotice(
+            "Cancelled this active-chat generation. Any partial assistant text still visible in the transcript was not committed to backend chat history. The runtime remains active until you send another message or use End + Sanitize."
+          );
+          setRuntimeLogs((current) => `${current}Active chat generation cancelled.\n`);
+        } else {
+          if (runtimeMode === "active-chat" && activeChatCancelPending && payload.success) {
+            setActiveChatStopNotice(
+              "Cancellation was requested, but the generation finished before the runtime stopped the turn."
+            );
+          }
+          setRunStatus(payload.success ? "success" : "failed");
+          setActiveChatCancelPending(false);
+        }
 
         if (persistent) {
           loadSessions();
@@ -560,7 +591,51 @@ function App() {
     }
   }
 
-  function stopGeneration() {
+  async function stopGeneration() {
+    if (runtimeMode === "active-chat" && activeChatSessionId) {
+      setActiveChatStopNotice(
+        "Cancellation requested for this active-chat generation. Waiting for the runtime to stop the current turn before clearing it from backend chat history."
+      );
+      setActiveChatCancelPending(true);
+
+      try {
+        const response = await fetch(`${API_BASE}/api/chat/${activeChatSessionId}/cancel`, {
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          const error = await readApiError(
+            response,
+            "Failed to cancel active chat generation."
+          );
+          throw new Error(formatActiveChatApiError("cancel", error));
+        }
+
+        const data = (await response.json()) as ChatCancelResponse;
+
+        setRuntimeLogs((current) => `${current}${data.message}\n`);
+        setAuditOperations((current) => [
+          ...current,
+          {
+            operation: "client_generation_cancel_requested",
+            status: "warning",
+            details:
+              "Client requested explicit cancellation for the current active-chat generation. The runtime will stop the current turn without committing it to chat history.",
+          },
+        ]);
+
+        return;
+      } catch (error) {
+        setActiveChatCancelPending(false);
+        setActiveChatStopNotice(String(error));
+        setStderr((current) => `${current}${String(error)}\n`);
+        setRuntimeLogs(
+          (current) =>
+            `${current}Active chat cancel request failed. Closing the client stream as a fallback.\n`
+        );
+      }
+    }
+
     activeAbortController.current?.abort();
     activeAbortController.current = null;
 
@@ -568,7 +643,7 @@ function App() {
     setRuntimeLogs((current) => `${current}Generation stopped by user.\n`);
     setActiveChatStopNotice(
       runtimeMode === "active-chat"
-        ? "Stopped this active-chat generation. Any partial assistant text still visible in the transcript was not committed to backend chat history. The runtime remains active until you send another message or use End + Sanitize."
+        ? "Stopped this active-chat generation by closing the client stream. Any partial assistant text still visible in the transcript was not committed to backend chat history. The runtime remains active until you send another message or use End + Sanitize."
         : ""
     );
 
@@ -579,7 +654,7 @@ function App() {
         status: "warning",
         details:
           runtimeMode === "active-chat"
-            ? "Client stopped the current active-chat generation. The chat runtime remains active."
+            ? "Client stopped the current active-chat generation by closing the stream. The chat runtime remains active."
             : "Client stopped the one-shot generation. Backend cleanup should continue server-side.",
       },
     ]);
@@ -679,6 +754,7 @@ function App() {
   async function startActiveChat() {
     resetRunPanels();
     setActiveChatStopNotice("");
+    setActiveChatCancelPending(false);
     setRunStatus("running");
     closeDrawers();
     setCommandMenuOpen(false);
@@ -782,6 +858,7 @@ function App() {
 
     setRunStatus("running");
     setActiveChatStopNotice("");
+    setActiveChatCancelPending(false);
     setCommandMenuOpen(false);
 
     try {
@@ -841,6 +918,7 @@ function App() {
     setStderr("");
     setAuditOperations([]);
     setActiveChatStopNotice("");
+    setActiveChatCancelPending(false);
     setCommandMenuOpen(false);
 
     const currentPrompt = prompt;
