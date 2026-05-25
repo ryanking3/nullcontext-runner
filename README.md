@@ -412,6 +412,19 @@ means:
 offload as many layers as possible onto the GPU
 ```
 
+### Workspace Paths
+
+NullContext session workspaces are created under the system temporary directory, in a `nullcontext` subdirectory.
+
+Typical examples:
+
+```text
+macOS/Linux: $TMPDIR/nullcontext or /tmp/nullcontext
+Windows: %TEMP%\nullcontext
+```
+
+The exact path is determined at runtime using Rust's `std::env::temp_dir()`.
+
 ---
 
 ## Backend Runtime
