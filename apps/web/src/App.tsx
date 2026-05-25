@@ -7,6 +7,24 @@ type SessionRegistry = {
   sessions: SessionIndexEntry[];
 };
 
+type RegisteredModel = {
+  id: string;
+  name: string;
+  description?: string | null;
+  model_path: string;
+  max_tokens: number;
+  gpu_layers: number;
+  chat_template: string;
+  chat_context_token_budget: number;
+  chat_context_turn_limit: number;
+  default_selected: boolean;
+};
+
+type ModelRegistrySnapshot = {
+  default_model_id: string;
+  models: RegisteredModel[];
+};
+
 type SessionLifecycleMetadata = {
   state: string;
   retention_policy: string;
@@ -24,6 +42,8 @@ type SessionIndexEntry = {
   prompt_source: string;
   history_stored: boolean;
   backend: string;
+  model_id?: string;
+  model_name?: string;
   model_path: string;
   workspace: string;
   report_path: string;
@@ -130,6 +150,8 @@ type ChatStartResponse = {
   workspace: string;
   security_mode: string;
   persistent: boolean;
+  model_id: string;
+  model_name: string;
   runtime_active: boolean;
   turns: number;
   chat_template: string;
@@ -143,6 +165,8 @@ type ChatStatusResponse = {
   workspace: string;
   security_mode: string;
   persistent: boolean;
+  model_id?: string;
+  model_name?: string;
   runtime_active: boolean;
   turns: number;
   runtime_duration_ms?: number;
@@ -415,9 +439,15 @@ function App() {
   const [chatTemplate, setChatTemplate] = useState<ChatTemplateOption>("auto");
   const [chatContextTokenBudget, setChatContextTokenBudget] = useState("2048");
   const [chatContextTurnLimit, setChatContextTurnLimit] = useState("12");
+  const [models, setModels] = useState<RegisteredModel[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [modelsLoadedAt, setModelsLoadedAt] = useState("never");
+  const [modelLoadError, setModelLoadError] = useState("");
 
   const [activeChatSessionId, setActiveChatSessionId] = useState("");
   const [activeChatWorkspace, setActiveChatWorkspace] = useState("");
+  const [activeChatModelId, setActiveChatModelId] = useState("");
+  const [activeChatModelName, setActiveChatModelName] = useState("");
   const [activeChatTurns, setActiveChatTurns] = useState(0);
   const [activeChatRuntimeActive, setActiveChatRuntimeActive] = useState(false);
   const [activeChatStartedAt, setActiveChatStartedAt] = useState<number | null>(null);
@@ -488,6 +518,40 @@ function App() {
       setSelectedSessionId("");
     } finally {
       setRegistryLoadedAt(new Date().toLocaleTimeString());
+    }
+  }
+
+  async function loadModels() {
+    try {
+      const response = await fetch(`${API_BASE}/api/models`);
+
+      if (!response.ok) {
+        const error = await readApiError(response, "Failed to load model registry.");
+        throw new Error(error);
+      }
+
+      const data = (await response.json()) as ModelRegistrySnapshot;
+      const nextModels = data.models ?? [];
+
+      setModels(nextModels);
+      setModelLoadError("");
+      setSelectedModelId((current) => {
+        if (current && nextModels.some((model) => model.id === current)) {
+          return current;
+        }
+
+        if (nextModels.some((model) => model.id === data.default_model_id)) {
+          return data.default_model_id;
+        }
+
+        return nextModels[0]?.id ?? "";
+      });
+    } catch (error) {
+      setModels([]);
+      setModelLoadError(String(error));
+      setSelectedModelId("");
+    } finally {
+      setModelsLoadedAt(new Date().toLocaleTimeString());
     }
   }
 
@@ -806,6 +870,7 @@ function App() {
           prompt: currentPrompt,
           mode,
           persistent,
+          model_id: selectedModelId || undefined,
           ...activeChatConfig,
         }),
         signal: controller.signal,
@@ -844,6 +909,7 @@ function App() {
         body: JSON.stringify({
           mode,
           persistent,
+          model_id: selectedModelId || undefined,
           ...activeChatConfig,
         }),
       });
@@ -858,6 +924,8 @@ function App() {
       setRuntimeMode("active-chat");
       setActiveChatSessionId(data.session_id);
       setActiveChatWorkspace(data.workspace);
+      setActiveChatModelId(data.model_id);
+      setActiveChatModelName(data.model_name);
       setActiveChatTurns(data.turns);
       setActiveChatRuntimeActive(data.runtime_active);
       setActiveChatStartedAt(Date.now());
@@ -897,6 +965,14 @@ function App() {
       setActiveChatTurns(data.turns);
       setActiveChatRuntimeActive(data.runtime_active);
       setActiveChatWorkspace(data.workspace);
+
+      if (data.model_id) {
+        setActiveChatModelId(data.model_id);
+      }
+
+      if (data.model_name) {
+        setActiveChatModelName(data.model_name);
+      }
 
       if (typeof data.runtime_duration_ms === "number") {
         setActiveRuntimeElapsedMs(data.runtime_duration_ms);
@@ -961,6 +1037,8 @@ function App() {
       setActiveChatHistoryPolicy("");
       setActiveChatContextBudget(null);
       setActiveChatContextTurnLimit(null);
+      setActiveChatModelId("");
+      setActiveChatModelName("");
       setShowRawReport(false);
       setPrivacyReport(JSON.stringify(data.report, null, 2));
       setRuntimeLogs((current) =>
@@ -1182,6 +1260,7 @@ function App() {
   useEffect(() => {
     checkHealth();
     loadSessions();
+    loadModels();
   }, []);
 
   useEffect(() => {
@@ -1381,6 +1460,8 @@ function App() {
         session.security_mode,
         session.prompt_source,
         session.backend,
+        session.model_id ?? "",
+        session.model_name ?? "",
         session.model_path,
         session.workspace,
         session.report_path,
@@ -1407,6 +1488,18 @@ function App() {
     registryActionResult && registryActionResult.session_id === selectedSessionId
       ? registryActionResult
       : null;
+  const selectedModel =
+    models.find((model) => model.id === selectedModelId) ??
+    models.find((model) => model.default_selected) ??
+    null;
+  const activeRuntimeModelName =
+    activeChatRuntimeActive && activeChatModelName
+      ? activeChatModelName
+      : selectedModel?.name || "unconfigured";
+  const activeRuntimeModelId =
+    activeChatRuntimeActive && activeChatModelId
+      ? activeChatModelId
+      : selectedModel?.id || "";
   const currentReportRaw = selectedReport || privacyReport;
   const currentReport = parsePrivacyReport(currentReportRaw);
 
@@ -1510,6 +1603,7 @@ function App() {
               </div>
 
               <div className="config-summary">
+                <span>model: {selectedModel?.name || "loading..."}</span>
                 <span>mode: {mode}</span>
                 <span>persistent: {persistent ? "on" : "off"}</span>
                 <span>template: {chatTemplate}</span>
@@ -1607,6 +1701,17 @@ function App() {
                 workspace: {activeChatWorkspace}
               </div>
             )}
+            <div className="runtime-meta">
+              <div>
+                model: {activeRuntimeModelName}
+                {activeRuntimeModelId ? ` (${activeRuntimeModelId})` : ""}
+              </div>
+              {!activeChatRuntimeActive && selectedModel && (
+                <div className="truncate" title={selectedModel.model_path}>
+                  path: {selectedModel.model_path}
+                </div>
+              )}
+            </div>
             {runtimeMode === "active-chat" && activeChatHistoryPolicy && (
               <div className="runtime-meta">
                 <div>template: {activeChatResolvedTemplate || "unknown"}</div>
@@ -1660,6 +1765,14 @@ function App() {
                       }}
                     >
                       open config drawer
+                    </button>
+                    <button
+                      onClick={() => {
+                        loadModels();
+                        setCommandMenuOpen(false);
+                      }}
+                    >
+                      refresh model registry
                     </button>
                     <button
                       onClick={() => {
@@ -2122,6 +2235,54 @@ function App() {
         <div className="drawer-body">
           <section className="panel">
             <label>
+              model
+              <div className="field-with-hint">
+                <select
+                  value={selectedModelId}
+                  onChange={(event) => setSelectedModelId(event.target.value)}
+                  disabled={activeChatRuntimeActive || models.length === 0}
+                >
+                  {models.length === 0 ? (
+                    <option value="">no models available</option>
+                  ) : (
+                    models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                        {model.default_selected ? " · default" : ""}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <Hint text="Pick which registered model this session should launch. Model selection is resolved before the runtime starts and stays fixed for the active chat session." />
+              </div>
+            </label>
+
+            {selectedModel ? (
+              <div className="config-summary">
+                <span>id: {selectedModel.id}</span>
+                <span>max tokens: {selectedModel.max_tokens}</span>
+                <span>gpu layers: {selectedModel.gpu_layers}</span>
+                <span>default template: {selectedModel.chat_template}</span>
+              </div>
+            ) : (
+              <p className="microcopy">
+                {modelLoadError
+                  ? `Model registry unavailable: ${modelLoadError}`
+                  : "No registered models were returned by the backend."}
+              </p>
+            )}
+
+            {selectedModel?.description && (
+              <p className="microcopy">{selectedModel.description}</p>
+            )}
+
+            {selectedModel && (
+              <p className="microcopy truncate" title={selectedModel.model_path}>
+                {selectedModel.model_path}
+              </p>
+            )}
+
+            <label>
               mode
               <select
                 value={mode}
@@ -2196,6 +2357,7 @@ function App() {
               Active chat uses the selected template and bounded recent-context window when the
               session starts. Change settings before starting the runtime.
             </p>
+            <p className="microcopy">models loaded: {modelsLoadedAt}</p>
           </section>
         </div>
       </aside>
@@ -2395,6 +2557,7 @@ function App() {
                       <small>{session.security_mode}</small>
                       <small>{new Date(session.started_at).toLocaleString()}</small>
                     </div>
+                    {session.model_name && <small>{session.model_name}</small>}
                     <small>{humanizeSnakeCase(session.lifecycle.retention_policy)}</small>
                   </button>
                 ))}
@@ -2484,6 +2647,10 @@ function App() {
                   <dd>{selectedSession.history_stored ? "yes" : "no"}</dd>
                   <dt>backend</dt>
                   <dd>{selectedSession.backend}</dd>
+                  <dt>model id</dt>
+                  <dd>{selectedSession.model_id || "legacy/default"}</dd>
+                  <dt>model name</dt>
+                  <dd>{selectedSession.model_name || "unknown"}</dd>
                   <dt>artifacts</dt>
                   <dd>{selectedSession.artifacts_detected}</dd>
                   <dt>cleanup attempted</dt>
