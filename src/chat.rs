@@ -19,7 +19,7 @@ use zeroize::Zeroize;
 
 #[derive(Debug, Clone)]
 pub struct ChatSessionManager {
-    sessions: Arc<Mutex<HashMap<String, ActiveChatSession>>>,
+    sessions: Arc<Mutex<HashMap<String, Arc<Mutex<ActiveChatSession>>>>>,
 }
 
 #[derive(Debug)]
@@ -28,6 +28,8 @@ struct ActiveChatSession {
     config: SessionConfig,
     runtime: ManagedRuntime,
     turns: Vec<ChatTurn>,
+    generation_active: bool,
+    ending: bool,
 }
 
 #[derive(Debug)]
@@ -154,6 +156,8 @@ impl ChatSessionManager {
             config,
             runtime,
             turns: vec![],
+            generation_active: false,
+            ending: false,
         };
 
         let mut sessions = self
@@ -161,20 +165,16 @@ impl ChatSessionManager {
             .lock()
             .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
 
-        sessions.insert(response.session_id.clone(), active);
+        sessions.insert(response.session_id.clone(), Arc::new(Mutex::new(active)));
 
         Ok(response)
     }
 
     pub fn status(&self, session_id: &str) -> Result<ChatStatusResponse> {
-        let sessions = self
-            .sessions
+        let session_handle = self.session_handle(session_id)?;
+        let active = session_handle
             .lock()
             .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
-
-        let Some(active) = sessions.get(session_id) else {
-            bail!("Active chat session not found: {session_id}");
-        };
 
         let runtime_duration_ms = UtcNow::duration_since(active.session.started_at);
 
@@ -183,7 +183,7 @@ impl ChatSessionManager {
             workspace: active.session.workspace.display().to_string(),
             security_mode: active.config.security_mode.as_str().to_string(),
             persistent: !active.config.ephemeral,
-            runtime_active: true,
+            runtime_active: !active.ending,
             turns: active.turns.len(),
             runtime_duration_ms,
             history_policy: active_history_policy(active.config.ephemeral),
@@ -200,43 +200,64 @@ impl ChatSessionManager {
     where
         F: FnMut(ChatStreamEvent) -> bool,
     {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
+        let session_handle = self.session_handle(session_id)?;
+        let user_buffer = SensitiveBytes::new(request.prompt);
 
-        let Some(active) = sessions.get_mut(session_id) else {
-            bail!("Active chat session not found: {session_id}");
+        let (turn_number, completion_url, max_tokens, mut full_prompt) = {
+            let mut active = session_handle
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
+
+            if active.ending {
+                bail!("Active chat session is ending: {session_id}");
+            }
+
+            if active.generation_active {
+                bail!("Active chat session is already generating: {session_id}");
+            }
+
+            let turn_number = active.turns.len() + 1;
+            let completion_url = active.runtime.completion_url();
+            let max_tokens = active.config.max_tokens.parse::<u32>()?;
+            let full_prompt = build_chat_prompt(&active.turns, user_buffer.as_str());
+
+            write_turn_prompt(&active.session, turn_number, user_buffer.as_bytes())?;
+
+            active.generation_active = true;
+
+            (turn_number, completion_url, max_tokens, full_prompt)
         };
-
-        let turn_number = active.turns.len() + 1;
 
         if !emit(runtime_event(format!(
             "Running chat turn {turn_number} on active runtime..."
         ))) {
+            full_prompt.zeroize();
+            clear_generation_active(&session_handle)?;
             return Ok(());
         }
-
-        let user_buffer = SensitiveBytes::new(request.prompt);
-        let mut full_prompt = build_chat_prompt(&active.turns, user_buffer.as_str());
-
-        write_turn_prompt(&active.session, turn_number, user_buffer.as_bytes())?;
 
         if !emit(runtime_event("--- Model Output ---")) {
             full_prompt.zeroize();
+            clear_generation_active(&session_handle)?;
             return Ok(());
         }
 
-        let (response_text, completed) = stream_completion_from_llama(
-            &active.runtime.completion_url(),
-            &full_prompt,
-            active.config.max_tokens.parse::<u32>()?,
-            &mut emit,
-        )?;
+        let stream_result =
+            stream_completion_from_llama(&completion_url, &full_prompt, max_tokens, &mut emit);
 
         full_prompt.zeroize();
 
+        let (response_text, completed) = match stream_result {
+            Ok(result) => result,
+            Err(error) => {
+                clear_generation_active(&session_handle)?;
+                return Err(error);
+            }
+        };
+
         if !completed {
+            clear_generation_active(&session_handle)?;
+
             let _ = emit(audit_event(SanitizationOperation {
                 operation: "chat_turn_cancelled".to_string(),
                 status: "warning".to_string(),
@@ -252,12 +273,27 @@ impl ChatSessionManager {
 
         let assistant_buffer = SensitiveBytes::new(response_text);
 
-        write_turn_response(&active.session, turn_number, assistant_buffer.as_bytes())?;
+        let commit_result = (|| -> Result<()> {
+            let mut active = session_handle
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
 
-        active.turns.push(ChatTurn {
-            user: user_buffer,
-            assistant: assistant_buffer,
-        });
+            write_turn_response(&active.session, turn_number, assistant_buffer.as_bytes())?;
+
+            active.turns.push(ChatTurn {
+                user: user_buffer,
+                assistant: assistant_buffer,
+            });
+
+            active.generation_active = false;
+
+            Ok(())
+        })();
+
+        if let Err(error) = commit_result {
+            clear_generation_active(&session_handle)?;
+            return Err(error);
+        }
 
         let _ = emit(audit_event(SanitizationOperation {
             operation: "chat_turn_completed".to_string(),
@@ -273,16 +309,40 @@ impl ChatSessionManager {
     }
 
     pub fn end_session(&self, session_id: &str) -> Result<EndChatResponse> {
+        let session_handle = self.session_handle(session_id)?;
+
+        {
+            let mut active = session_handle
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
+
+            if active.generation_active {
+                bail!(
+                    "Active chat generation is still in progress for session {session_id}. Stop the current generation and retry End + Sanitize once streaming has finished."
+                );
+            }
+
+            if active.ending {
+                bail!("Active chat session is already ending: {session_id}");
+            }
+
+            active.ending = true;
+        }
+
         let mut sessions = self
             .sessions
             .lock()
             .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
 
-        let Some(mut active) = sessions.remove(session_id) else {
+        if sessions.remove(session_id).is_none() {
             bail!("Active chat session not found: {session_id}");
-        };
+        }
 
         drop(sessions);
+
+        let mut active = session_handle
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
 
         println!("Ending active chat session...");
         println!("Session ID: {}", active.session.id);
@@ -379,10 +439,23 @@ impl ChatSessionManager {
         }
 
         Ok(EndChatResponse {
-            session_id: active.session.id,
+            session_id: active.session.id.clone(),
             runtime_stopped,
             report: parsed_report,
         })
+    }
+
+    fn session_handle(&self, session_id: &str) -> Result<Arc<Mutex<ActiveChatSession>>> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
+
+        let Some(active) = sessions.get(session_id) else {
+            bail!("Active chat session not found: {session_id}");
+        };
+
+        Ok(active.clone())
     }
 }
 
@@ -500,6 +573,16 @@ fn write_turn_response(session: &Session, turn_number: usize, response: &[u8]) -
             .join(format!("turn-{turn_number:04}-response.txt")),
         response,
     )?;
+
+    Ok(())
+}
+
+fn clear_generation_active(session_handle: &Arc<Mutex<ActiveChatSession>>) -> Result<()> {
+    let mut active = session_handle
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
+
+    active.generation_active = false;
 
     Ok(())
 }
