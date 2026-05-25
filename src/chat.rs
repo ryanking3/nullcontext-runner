@@ -2,7 +2,7 @@ use crate::audit::{PrivacyReport, SessionProfile, TurnArtifact};
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
-use crate::config::SessionConfig;
+use crate::config::{ChatTemplate, SessionConfig};
 use crate::registry::register_persistent_session;
 use crate::runtime::ManagedRuntime;
 use crate::sensitive::SensitiveBytes;
@@ -219,7 +219,11 @@ impl ChatSessionManager {
             let turn_number = active.turns.len() + 1;
             let completion_url = active.runtime.completion_url();
             let max_tokens = active.config.max_tokens.parse::<u32>()?;
-            let full_prompt = build_chat_prompt(&active.turns, user_buffer.as_str());
+            let full_prompt = build_chat_prompt(
+                active.config.chat_template,
+                &active.turns,
+                user_buffer.as_str(),
+            );
 
             write_turn_prompt(&active.session, turn_number, user_buffer.as_bytes())?;
 
@@ -468,7 +472,19 @@ impl UtcNow {
     }
 }
 
-fn build_chat_prompt(turns: &[ChatTurn], current_user_prompt: &str) -> String {
+fn build_chat_prompt(
+    template: ChatTemplate,
+    turns: &[ChatTurn],
+    current_user_prompt: &str,
+) -> String {
+    match template {
+        ChatTemplate::Generic => build_generic_chat_prompt(turns, current_user_prompt),
+        ChatTemplate::ChatMl => build_chatml_prompt(turns, current_user_prompt),
+        ChatTemplate::Llama3Instruct => build_llama3_prompt(turns, current_user_prompt),
+    }
+}
+
+fn build_generic_chat_prompt(turns: &[ChatTurn], current_user_prompt: &str) -> String {
     let mut prompt = String::new();
 
     prompt.push_str("You are a helpful local assistant.\n\n");
@@ -484,6 +500,53 @@ fn build_chat_prompt(turns: &[ChatTurn], current_user_prompt: &str) -> String {
     prompt.push_str("User: ");
     prompt.push_str(current_user_prompt);
     prompt.push_str("\n\nAssistant: ");
+
+    prompt
+}
+
+fn build_chatml_prompt(turns: &[ChatTurn], current_user_prompt: &str) -> String {
+    let mut prompt = String::new();
+
+    prompt.push_str("<|im_start|>system\nYou are a helpful local assistant.<|im_end|>\n");
+
+    for turn in turns {
+        prompt.push_str("<|im_start|>user\n");
+        prompt.push_str(turn.user.as_str());
+        prompt.push_str("<|im_end|>\n");
+        prompt.push_str("<|im_start|>assistant\n");
+        prompt.push_str(turn.assistant.as_str());
+        prompt.push_str("<|im_end|>\n");
+    }
+
+    prompt.push_str("<|im_start|>user\n");
+    prompt.push_str(current_user_prompt);
+    prompt.push_str("<|im_end|>\n");
+    prompt.push_str("<|im_start|>assistant\n");
+
+    prompt
+}
+
+fn build_llama3_prompt(turns: &[ChatTurn], current_user_prompt: &str) -> String {
+    let mut prompt = String::new();
+
+    prompt.push_str("<|begin_of_text|>");
+    prompt.push_str("<|start_header_id|>system<|end_header_id|>\n\n");
+    prompt.push_str("You are a helpful local assistant.");
+    prompt.push_str("<|eot_id|>");
+
+    for turn in turns {
+        prompt.push_str("<|start_header_id|>user<|end_header_id|>\n\n");
+        prompt.push_str(turn.user.as_str());
+        prompt.push_str("<|eot_id|>");
+        prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
+        prompt.push_str(turn.assistant.as_str());
+        prompt.push_str("<|eot_id|>");
+    }
+
+    prompt.push_str("<|start_header_id|>user<|end_header_id|>\n\n");
+    prompt.push_str(current_user_prompt);
+    prompt.push_str("<|eot_id|>");
+    prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
 
     prompt
 }

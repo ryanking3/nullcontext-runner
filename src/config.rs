@@ -72,6 +72,51 @@ impl PromptSource {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ChatTemplate {
+    Generic,
+    ChatMl,
+    Llama3Instruct,
+}
+
+impl ChatTemplate {
+    pub fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "generic" => Ok(Self::Generic),
+            "chatml" => Ok(Self::ChatMl),
+            "llama3" | "llama3-instruct" => Ok(Self::Llama3Instruct),
+            _ => bail!("Invalid chat template: {value}"),
+        }
+    }
+
+    pub fn resolve(config_value: Option<&str>, model_path: &str) -> Result<Self> {
+        if let Some(value) = config_value {
+            if value == "auto" {
+                return Ok(Self::detect(model_path));
+            }
+
+            return Self::from_str(value);
+        }
+
+        Ok(Self::detect(model_path))
+    }
+
+    fn detect(model_path: &str) -> Self {
+        let model_path = model_path.to_ascii_lowercase();
+
+        if model_path.contains("qwen") || model_path.contains("chatml") {
+            Self::ChatMl
+        } else if model_path.contains("llama-3")
+            || model_path.contains("llama3")
+            || model_path.contains("meta-llama-3")
+        {
+            Self::Llama3Instruct
+        } else {
+            Self::Generic
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct FileConfig {
     llama_path: Option<String>,
@@ -79,6 +124,7 @@ struct FileConfig {
     default_mode: Option<String>,
     max_tokens: Option<u32>,
     gpu_layers: Option<u32>,
+    chat_template: Option<String>,
 }
 
 impl FileConfig {
@@ -92,6 +138,7 @@ impl FileConfig {
                 default_mode: None,
                 max_tokens: None,
                 gpu_layers: None,
+                chat_template: None,
             });
         }
 
@@ -110,6 +157,7 @@ pub struct SessionConfig {
     pub home: String,
     pub llama_path: String,
     pub model_path: String,
+    pub chat_template: ChatTemplate,
     pub prompt: SensitiveBytes,
     pub prompt_source: PromptSource,
     pub max_tokens: String,
@@ -172,14 +220,20 @@ impl SessionConfig {
             SecurityMode::AirGapped => true,
         };
 
+        let llama_path = file_config
+            .llama_path
+            .unwrap_or_else(|| format!("{home}/dev/llama.cpp/build/bin/llama-server"));
+        let model_path = file_config
+            .model_path
+            .unwrap_or_else(|| format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"));
+        let chat_template =
+            ChatTemplate::resolve(file_config.chat_template.as_deref(), &model_path)?;
+
         Ok(Self {
             home: home.clone(),
-            llama_path: file_config
-                .llama_path
-                .unwrap_or_else(|| format!("{home}/dev/llama.cpp/build/bin/llama-server")),
-            model_path: file_config
-                .model_path
-                .unwrap_or_else(|| format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf")),
+            llama_path,
+            model_path,
+            chat_template,
             prompt: SensitiveBytes::new(prompt),
             prompt_source: PromptSource::Web,
             max_tokens: file_config.max_tokens.unwrap_or(128).to_string(),
@@ -256,14 +310,20 @@ impl SessionConfig {
             SecurityMode::AirGapped => true,
         };
 
+        let llama_path = file_config
+            .llama_path
+            .unwrap_or_else(|| format!("{home}/dev/llama.cpp/build/bin/llama-server"));
+        let model_path = file_config
+            .model_path
+            .unwrap_or_else(|| format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"));
+        let chat_template =
+            ChatTemplate::resolve(file_config.chat_template.as_deref(), &model_path)?;
+
         Ok(Self {
             home: home.clone(),
-            llama_path: file_config
-                .llama_path
-                .unwrap_or_else(|| format!("{home}/dev/llama.cpp/build/bin/llama-server")),
-            model_path: file_config
-                .model_path
-                .unwrap_or_else(|| format!("{home}/models/qwen2.5-0.5b-instruct-q4_k_m.gguf")),
+            llama_path,
+            model_path,
+            chat_template,
             prompt: prompt_bytes,
             prompt_source,
             max_tokens: file_config.max_tokens.unwrap_or(128).to_string(),
