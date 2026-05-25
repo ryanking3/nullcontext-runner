@@ -82,6 +82,14 @@ type RunStatus = "idle" | "running" | "success" | "failed";
 type RuntimeMode = "one-shot" | "active-chat";
 type ChatTemplateOption = "auto" | "generic" | "chatml" | "llama3-instruct";
 type InspectorView = "audit" | "runtime" | "report" | "stderr";
+type RegistryModeFilter = "all" | "secure" | "standard" | "air-gapped";
+type RegistryOutcomeFilter =
+  | "all"
+  | "cleanup-failed"
+  | "workspace-retained"
+  | "artifacts"
+  | "history-stored";
+type RegistrySortOrder = "newest" | "oldest";
 
 type StreamPayload = {
   type: string;
@@ -353,6 +361,11 @@ function App() {
   const [selectedReport, setSelectedReport] = useState<string>("");
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [showRawReport, setShowRawReport] = useState(false);
+  const [registryQuery, setRegistryQuery] = useState("");
+  const [registryModeFilter, setRegistryModeFilter] = useState<RegistryModeFilter>("all");
+  const [registryOutcomeFilter, setRegistryOutcomeFilter] =
+    useState<RegistryOutcomeFilter>("all");
+  const [registrySortOrder, setRegistrySortOrder] = useState<RegistrySortOrder>("newest");
 
   async function checkHealth() {
     setServerStatus("checking");
@@ -907,6 +920,12 @@ function App() {
     }
   }
 
+  function openSessionReport(sessionId: string) {
+    setInspectorView("report");
+    setInspectorOpen(true);
+    openReport(sessionId);
+  }
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
@@ -973,6 +992,83 @@ function App() {
     return () => window.removeEventListener("mousedown", closeCommandMenu);
   }, [commandMenuOpen]);
 
+  useEffect(() => {
+    const nextSessions = [...sessions]
+      .filter((session) => {
+        if (registryModeFilter !== "all" && session.security_mode !== registryModeFilter) {
+          return false;
+        }
+
+        switch (registryOutcomeFilter) {
+          case "cleanup-failed":
+            if (!session.cleanup_attempted || session.cleanup_successful) {
+              return false;
+            }
+            break;
+          case "workspace-retained":
+            if (session.workspace_deleted) {
+              return false;
+            }
+            break;
+          case "artifacts":
+            if (session.artifacts_detected <= 0) {
+              return false;
+            }
+            break;
+          case "history-stored":
+            if (!session.history_stored) {
+              return false;
+            }
+            break;
+          default:
+            break;
+        }
+
+        const query = registryQuery.trim().toLowerCase();
+
+        if (!query) {
+          return true;
+        }
+
+        return [
+          session.session_id,
+          session.security_mode,
+          session.prompt_source,
+          session.backend,
+          session.model_path,
+          session.workspace,
+          session.report_path,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort((left, right) => {
+        const leftTime = new Date(left.started_at).getTime();
+        const rightTime = new Date(right.started_at).getTime();
+
+        return registrySortOrder === "newest" ? rightTime - leftTime : leftTime - rightTime;
+      });
+
+    if (nextSessions.length === 0) {
+      if (selectedSessionId !== "") {
+        setSelectedSessionId("");
+      }
+      return;
+    }
+
+    if (!nextSessions.some((session) => session.session_id === selectedSessionId)) {
+      setSelectedSessionId(nextSessions[0].session_id);
+    }
+  }, [
+    registryModeFilter,
+    registryOutcomeFilter,
+    registryQuery,
+    registrySortOrder,
+    selectedSessionId,
+    sessions,
+  ]);
+
   const inspectorTabs: Array<{
     id: InspectorView;
     label: string;
@@ -984,8 +1080,69 @@ function App() {
     { id: "report", label: "report" },
     { id: "stderr", label: "stderr", disabled: !stderr },
   ];
+  const query = registryQuery.trim().toLowerCase();
+  const filteredSessions = [...sessions]
+    .filter((session) => {
+      if (registryModeFilter !== "all" && session.security_mode !== registryModeFilter) {
+        return false;
+      }
+
+      switch (registryOutcomeFilter) {
+        case "cleanup-failed":
+          if (!session.cleanup_attempted || session.cleanup_successful) {
+            return false;
+          }
+          break;
+        case "workspace-retained":
+          if (session.workspace_deleted) {
+            return false;
+          }
+          break;
+        case "artifacts":
+          if (session.artifacts_detected <= 0) {
+            return false;
+          }
+          break;
+        case "history-stored":
+          if (!session.history_stored) {
+            return false;
+          }
+          break;
+        default:
+          break;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      return [
+        session.session_id,
+        session.security_mode,
+        session.prompt_source,
+        session.backend,
+        session.model_path,
+        session.workspace,
+        session.report_path,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    })
+    .sort((left, right) => {
+      const leftTime = new Date(left.started_at).getTime();
+      const rightTime = new Date(right.started_at).getTime();
+
+      return registrySortOrder === "newest" ? rightTime - leftTime : leftTime - rightTime;
+    });
+  const latestSession = [...sessions].sort((left, right) => {
+    const leftTime = new Date(left.started_at).getTime();
+    const rightTime = new Date(right.started_at).getTime();
+
+    return rightTime - leftTime;
+  })[0];
   const selectedSession =
-    sessions.find((session) => session.session_id === selectedSessionId) ?? null;
+    filteredSessions.find((session) => session.session_id === selectedSessionId) ?? null;
   const currentReportRaw = selectedReport || privacyReport;
   const currentReport = parsePrivacyReport(currentReportRaw);
 
@@ -1741,11 +1898,159 @@ function App() {
               <span className="mini-status">loaded:{registryLoadedAt}</span>
             </div>
 
+            <div className="registry-toolbar">
+              <label>
+                search
+                <input
+                  type="search"
+                  value={registryQuery}
+                  onChange={(event) => setRegistryQuery(event.target.value)}
+                  placeholder="session id, backend, path..."
+                />
+              </label>
+
+              <div className="registry-filter-row">
+                <label>
+                  mode
+                  <select
+                    value={registryModeFilter}
+                    onChange={(event) =>
+                      setRegistryModeFilter(event.target.value as RegistryModeFilter)
+                    }
+                  >
+                    <option value="all">all</option>
+                    <option value="secure">secure</option>
+                    <option value="standard">standard</option>
+                    <option value="air-gapped">air-gapped</option>
+                  </select>
+                </label>
+
+                <label>
+                  outcome
+                  <select
+                    value={registryOutcomeFilter}
+                    onChange={(event) =>
+                      setRegistryOutcomeFilter(event.target.value as RegistryOutcomeFilter)
+                    }
+                  >
+                    <option value="all">all</option>
+                    <option value="cleanup-failed">cleanup failed</option>
+                    <option value="workspace-retained">workspace retained</option>
+                    <option value="artifacts">artifacts &gt; 0</option>
+                    <option value="history-stored">history stored</option>
+                  </select>
+                </label>
+
+                <label>
+                  sort
+                  <select
+                    value={registrySortOrder}
+                    onChange={(event) =>
+                      setRegistrySortOrder(event.target.value as RegistrySortOrder)
+                    }
+                  >
+                    <option value="newest">newest first</option>
+                    <option value="oldest">oldest first</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="registry-chip-row">
+                <button
+                  className={
+                    registryOutcomeFilter === "cleanup-failed" ? "selected chip-button" : "chip-button"
+                  }
+                  onClick={() =>
+                    setRegistryOutcomeFilter((current) =>
+                      current === "cleanup-failed" ? "all" : "cleanup-failed"
+                    )
+                  }
+                >
+                  cleanup failed
+                </button>
+                <button
+                  className={
+                    registryOutcomeFilter === "workspace-retained"
+                      ? "selected chip-button"
+                      : "chip-button"
+                  }
+                  onClick={() =>
+                    setRegistryOutcomeFilter((current) =>
+                      current === "workspace-retained" ? "all" : "workspace-retained"
+                    )
+                  }
+                >
+                  workspace retained
+                </button>
+                <button
+                  className={
+                    registryOutcomeFilter === "artifacts" ? "selected chip-button" : "chip-button"
+                  }
+                  onClick={() =>
+                    setRegistryOutcomeFilter((current) =>
+                      current === "artifacts" ? "all" : "artifacts"
+                    )
+                  }
+                >
+                  artifacts &gt; 0
+                </button>
+                <button
+                  className={
+                    registryOutcomeFilter === "history-stored"
+                      ? "selected chip-button"
+                      : "chip-button"
+                  }
+                  onClick={() =>
+                    setRegistryOutcomeFilter((current) =>
+                      current === "history-stored" ? "all" : "history-stored"
+                    )
+                  }
+                >
+                  history stored
+                </button>
+              </div>
+
+              <div className="registry-toolbar-meta">
+                <span>
+                  showing {filteredSessions.length} of {sessions.length}
+                </span>
+                <div className="registry-toolbar-actions">
+                  <button
+                    className="ghost-button"
+                    onClick={() => {
+                      setRegistryQuery("");
+                      setRegistryModeFilter("all");
+                      setRegistryOutcomeFilter("all");
+                      setRegistrySortOrder("newest");
+                    }}
+                  >
+                    clear filters
+                  </button>
+                  <button
+                    className="ghost-button"
+                    disabled={!latestSession}
+                    onClick={() => {
+                      if (!latestSession) {
+                        return;
+                      }
+
+                      setSelectedSessionId(latestSession.session_id);
+                      openSessionReport(latestSession.session_id);
+                    }}
+                  >
+                    latest report
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {sessions.length === 0 ? (
               <p className="muted-text">no persistent sessions</p>
+            ) : filteredSessions.length === 0 ? (
+              <p className="muted-text">no sessions match the current registry filters</p>
             ) : (
               <div className="session-list registry-session-list">
-                {sessions.map((session) => (
+                {filteredSessions.map((session) => (
                   <button
                     className={
                       selectedSessionId === session.session_id
@@ -1773,7 +2078,11 @@ function App() {
             </div>
 
             {!selectedSession ? (
-              <p className="muted-text">select a persistent session to inspect its metadata</p>
+              <p className="muted-text">
+                {filteredSessions.length === 0 && sessions.length > 0
+                  ? "adjust the registry filters to inspect a matching session"
+                  : "select a persistent session to inspect its metadata"}
+              </p>
             ) : (
               <>
                 <dl className="registry-detail-grid">
@@ -1805,11 +2114,7 @@ function App() {
 
                 <div className="registry-actions">
                   <button
-                    onClick={() => {
-                      setInspectorView("report");
-                      setInspectorOpen(true);
-                      openReport(selectedSession.session_id);
-                    }}
+                    onClick={() => openSessionReport(selectedSession.session_id)}
                   >
                     open report in inspector
                   </button>

@@ -960,6 +960,51 @@ pre {
   margin-bottom: 0;
 }
 
+.registry-toolbar {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.registry-filter-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.registry-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-button {
+  padding: 6px 8px;
+  font-size: 10px;
+  text-transform: lowercase;
+  background: var(--input);
+}
+
+.chip-button.selected {
+  background: var(--text);
+  color: var(--bg);
+}
+
+.registry-toolbar-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.registry-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .registry-session-list {
   max-height: calc(100vh - 220px);
   overflow: auto;
@@ -1162,6 +1207,15 @@ pre {
 
   .registry-drawer-body {
     grid-template-columns: 1fr;
+  }
+
+  .registry-filter-row {
+    grid-template-columns: 1fr;
+  }
+
+  .registry-toolbar-meta {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .registry-session-list {
