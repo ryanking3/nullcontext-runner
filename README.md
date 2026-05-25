@@ -70,6 +70,10 @@ No cloud inference is required.
 - sanitization operation reporting
 - structured privacy reports
 - configurable retention behavior
+- manual cleanup and reconcile actions for retained sessions
+- scheduled retention expiry cleanup
+- startup lifecycle reconciliation for orphaned sessions/workspaces
+- lifecycle-aware privacy reporting
 - explicit End + Sanitize workflow for active chat
 - residual risk reporting for long-lived runtimes
 
@@ -86,10 +90,24 @@ The registry tracks:
 - session IDs
 - timestamps
 - security mode
+- selected model IDs and names
 - workspace paths
 - report paths
 - cleanup state
+- lifecycle state
+- retention policies and deadlines
 - artifact counts
+
+### Model Registry
+
+The local model registry supports:
+
+- default model selection
+- named model IDs
+- per-model token, GPU, template, and context defaults
+- model switching in the browser UI and API
+- model file validation
+- llama-server runtime readiness reporting
 
 ### Local Web UI
 
@@ -97,6 +115,9 @@ The current browser UI supports:
 
 - one-shot prompt execution
 - active chat session start, stream, stop, and end
+- dedicated model registry browser
+- model selection for one-shot and active chat
+- model-default versus manual-override controls
 - selectable active chat prompt template
 - configurable active chat context token budget and turn limit
 - runtime lifecycle visualization
@@ -234,10 +255,17 @@ Example body:
   "prompt": "Explain secure local inference.",
   "mode": "secure",
   "persistent": false,
+  "model_id": "qwen-small",
   "chat_template": "auto",
   "chat_context_token_budget": 2048,
   "chat_context_turn_limit": 12
 }
+```
+
+### Model Registry
+
+```http
+GET /api/models
 ```
 
 ### Start Active Chat Session
@@ -252,6 +280,7 @@ Example body:
 {
   "mode": "secure",
   "persistent": false,
+  "model_id": "qwen-small",
   "chat_template": "auto",
   "chat_context_token_budget": 2048,
   "chat_context_turn_limit": 12
@@ -280,8 +309,10 @@ Example body:
 
 ### Active Chat Template And Context Fields
 
-The active chat API supports these optional fields:
+The one-shot and active chat APIs support these optional fields:
 
+- `model_id`
+Selects a registered model by ID
 - `chat_template`
 Values: `auto`, `generic`, `chatml`, `llama3-instruct`
 - `chat_context_token_budget`
@@ -289,7 +320,8 @@ Approximate token budget for recent active-chat context selection
 - `chat_context_turn_limit`
 Maximum number of recent prior turns to include in active-chat context
 
-When `chat_template` is `auto`, NullContext resolves a template from `model_path`.
+When `chat_template` is `auto`, NullContext resolves a template from the selected model path.
+If the UI is using model defaults, it omits these override fields and lets the selected model drive the effective template and context settings.
 
 ### End Active Chat Session
 
@@ -297,10 +329,34 @@ When `chat_template` is `auto`, NullContext resolves a template from `model_path
 POST /api/chat/:session_id/end
 ```
 
+### Cancel Active Chat Generation
+
+```http
+POST /api/chat/:session_id/cancel
+```
+
 ### List Sessions
 
 ```http
 GET /api/sessions
+```
+
+### Update Session Retention Policy
+
+```http
+POST /api/sessions/:session_id/retention
+```
+
+### Cleanup Retained Session
+
+```http
+POST /api/sessions/:session_id/cleanup
+```
+
+### Reconcile Session Lifecycle State
+
+```http
+POST /api/sessions/:session_id/reconcile
 ```
 
 ### Show Report
@@ -413,24 +469,37 @@ Configuration file:
 ~/.nullcontext/config.toml
 ```
 
-Example:
+Example model-registry config:
 
 ```toml
 llama_path = "C:\\dev\\llama.cpp\\build\\bin\\Release\\llama-server.exe"
-
-model_path = "C:\\models\\qwen2.5-7b\\qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
-
+default_model = "qwen-small"
 default_mode = "secure"
-
 max_tokens = 128
-
 gpu_layers = 999
-
 chat_template = "auto"
-
 chat_context_token_budget = 2048
-
 chat_context_turn_limit = 12
+
+[[models]]
+id = "qwen-small"
+name = "Qwen 2.5 0.5B Instruct"
+model_path = "C:\\models\\qwen2.5-0.5b\\qwen2.5-0.5b-instruct-q4_k_m.gguf"
+max_tokens = 128
+gpu_layers = 999
+chat_template = "chatml"
+chat_context_token_budget = 2048
+chat_context_turn_limit = 12
+
+[[models]]
+id = "llama3-8b"
+name = "Llama 3 8B Instruct"
+model_path = "C:\\models\\llama3-8b\\meta-llama-3-8b-instruct-q4_k_m.gguf"
+max_tokens = 256
+gpu_layers = 999
+chat_template = "llama3-instruct"
+chat_context_token_budget = 3072
+chat_context_turn_limit = 16
 ```
 
 ### Notes
@@ -461,6 +530,8 @@ Template options:
 - `llama3-instruct`
 
 `chat_context_token_budget` and `chat_context_turn_limit` must both be greater than `0`.
+
+Legacy single-model configs using only `model_path` are still supported. When no `[[models]]` array is present, NullContext synthesizes a default model entry automatically.
 
 ### Workspace Paths
 
@@ -565,11 +636,20 @@ http://localhost:5173
 
 The active chat session config panel lets you:
 
+- browse the registered model catalog
+- pick a model by ID/name before starting a session
+- use per-model defaults or manual overrides for template/context settings
 - choose a prompt template or auto-detect it from the model path
 - set a bounded recent-context token budget
 - set a bounded recent-context turn limit
 
-After a session starts, the runtime banner shows the resolved template and active context policy.
+The model browser also shows:
+
+- whether each model file path is launchable
+- whether the configured `llama-server` path is ready
+- the exact model path, template default, token limit, GPU setting, and context defaults
+
+After a session starts, the runtime banner shows the selected model plus the resolved template and active context policy.
 
 ---
 
@@ -597,10 +677,8 @@ The current development focus is:
 - Server-Sent Events
 - streaming token output
 - streaming audit events
-- retention policy systems
 - stronger memory hygiene primitives
 - VRAM inspection and analysis
-- model management
 - forensic artifact visibility
 - Linux-native low-level memory work
 
@@ -618,7 +696,10 @@ The project is functional and supports:
 - one-shot streaming
 - active chat sessions
 - generation stop control
+- explicit active chat cancellation
 - persistent sessions
+- lifecycle policy engine
+- structured model registry and model switching
 - artifact tracking
 - cleanup reporting
 - audit visualization

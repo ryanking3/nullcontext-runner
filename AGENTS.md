@@ -29,6 +29,8 @@ The project currently supports:
 - streamed token output
 - generation stop/cancel control
 - session registry for persistent sessions
+- lifecycle policy engine for retained sessions
+- structured model registry and model switching
 - workspace artifact scanning
 - cleanup reports
 - privacy reports
@@ -161,11 +163,16 @@ Current routes:
 GET  /api/health
 POST /api/run
 POST /api/run/stream
+GET  /api/models
 POST /api/chat/start
 GET  /api/chat/:session_id/status
+POST /api/chat/:session_id/cancel
 POST /api/chat/:session_id/message/stream
 POST /api/chat/:session_id/end
 GET  /api/sessions
+POST /api/sessions/:session_id/retention
+POST /api/sessions/:session_id/cleanup
+POST /api/sessions/:session_id/reconcile
 GET  /api/reports/:session_id
 ```
 
@@ -189,15 +196,24 @@ User config file:
 ~/.nullcontext/config.toml
 ```
 
-Example macOS config:
+Example model-registry config:
 
 ```toml
 llama_path = "/Users/ryanking/dev/llama.cpp/build/bin/llama-server"
-model_path = "/Users/ryanking/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+default_model = "qwen-small"
 default_mode = "secure"
-max_tokens = 64
 gpu_layers = 0
 chat_template = "auto"
+chat_context_token_budget = 2048
+chat_context_turn_limit = 12
+
+[[models]]
+id = "qwen-small"
+name = "Qwen 2.5 0.5B Instruct"
+model_path = "/Users/ryanking/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+max_tokens = 64
+gpu_layers = 0
+chat_template = "chatml"
 chat_context_token_budget = 2048
 chat_context_turn_limit = 12
 ```
@@ -206,11 +222,20 @@ Example Windows CUDA config:
 
 ```toml
 llama_path = "C:\\dev\\llama.cpp\\build\\bin\\Release\\llama-server.exe"
-model_path = "C:\\models\\qwen2.5-7b\\qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+default_model = "qwen-7b"
 default_mode = "secure"
-max_tokens = 128
 gpu_layers = 999
 chat_template = "auto"
+chat_context_token_budget = 2048
+chat_context_turn_limit = 12
+
+[[models]]
+id = "qwen-7b"
+name = "Qwen 2.5 7B Instruct"
+model_path = "C:\\models\\qwen2.5-7b\\qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+max_tokens = 128
+gpu_layers = 999
+chat_template = "chatml"
 chat_context_token_budget = 2048
 chat_context_turn_limit = 12
 ```
@@ -219,10 +244,12 @@ Do not commit local config files or model files.
 
 Active chat config notes:
 
+- `model_id` selects a registered model by ID
 - `chat_template` supports `auto`, `generic`, `chatml`, and `llama3-instruct`
 - `chat_context_token_budget` is an approximate recent-context budget
 - `chat_context_turn_limit` bounds how many recent prior turns can be included
 - both context settings must be greater than `0`
+- legacy single-model `model_path` configs are still supported and get synthesized into a default registry entry
 
 ### Workspace Paths
 
@@ -311,7 +338,7 @@ Start active chat:
 ```bash
 curl -X POST http://127.0.0.1:3333/api/chat/start \
   -H "Content-Type: application/json" \
-  -d '{"mode":"secure","persistent":false,"chat_template":"auto","chat_context_token_budget":2048,"chat_context_turn_limit":12}'
+  -d '{"mode":"secure","persistent":false,"model_id":"qwen-small","chat_template":"auto","chat_context_token_budget":2048,"chat_context_turn_limit":12}'
 ```
 
 Send active chat message:
@@ -352,6 +379,7 @@ Manual verification should include:
 - frontend loads
 - one-shot run works
 - one-shot stop works
+- active chat cancel endpoint works
 - active chat starts
 - active chat streams a message
 - active chat can send a follow-up
@@ -360,6 +388,10 @@ Manual verification should include:
 - active chat audit stream reports context-window preparation or truncation
 - active chat stop does not kill the session
 - active chat end generates report
+- lifecycle registry actions work for retained sessions
+- scheduled retention cleanup works
+- model registry drawer loads
+- invalid model paths are marked unavailable
 - persistent registry still works when using standard + persistent mode
 
 ## Coding Conventions
@@ -460,10 +492,7 @@ Do not commit:
 ## Known Technical Debt
 
 - One-shot and active-chat streaming code duplicate logic.
-- Stop/cancel uses client abort and channel closure, not a dedicated llama.cpp cancel API.
 - Active session manager is in-memory only.
 - Abandoned sessions after server crash need recovery strategy.
 - Tauri desktop shell is stale relative to web UI.
 - No automated tests.
-- Report viewer is raw JSON.
-- Registry cleanup/retention policy is not implemented.
