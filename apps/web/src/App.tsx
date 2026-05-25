@@ -70,6 +70,10 @@ type ChatEndResponse = {
   report: unknown;
 };
 
+type ApiErrorResponse = {
+  error?: string;
+};
+
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -93,6 +97,54 @@ function formatDuration(ms: number): string {
   const seconds = totalSeconds % 60;
 
   return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+}
+
+async function readApiError(response: Response, fallback: string): Promise<string> {
+  try {
+    const text = await response.text();
+
+    if (!text.trim()) {
+      return fallback;
+    }
+
+    try {
+      const data = JSON.parse(text) as ApiErrorResponse;
+
+      if (typeof data.error === "string" && data.error.trim()) {
+        return data.error;
+      }
+    } catch {
+      return text;
+    }
+
+    return text;
+  } catch {
+    return fallback;
+  }
+}
+
+function formatActiveChatApiError(action: "start" | "message" | "end", message: string): string {
+  if (message.includes("generation is still in progress")) {
+    return "The active chat runtime is still finishing the current generation. Wait for streaming to settle, or use Stop and then retry End + Sanitize once the session is idle.";
+  }
+
+  if (message.includes("already generating")) {
+    return "An active chat generation is already in progress for this session. Wait for it to finish before sending another message.";
+  }
+
+  if (message.includes("session is ending")) {
+    return "This active chat session is already ending. Wait for End + Sanitize to complete before sending another message.";
+  }
+
+  if (message.includes("Active chat session not found")) {
+    if (action === "end") {
+      return "This active chat session is no longer available. Refresh the UI state or start a new session.";
+    }
+
+    return "This active chat session is no longer available. Start a new session and try again.";
+  }
+
+  return message;
 }
 
 function parseSseBlock(block: string): StreamPayload | null {
@@ -425,8 +477,8 @@ function App() {
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error);
+        const error = await readApiError(response, "Failed to start active chat session.");
+        throw new Error(formatActiveChatApiError("start", error));
       }
 
       const data = (await response.json()) as ChatStartResponse;
@@ -496,8 +548,10 @@ function App() {
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error);
+        const error = await readApiError(response, "Failed to end active chat session.");
+        const friendlyError = formatActiveChatApiError("end", error);
+        setActiveChatStopNotice(friendlyError);
+        throw new Error(friendlyError);
       }
 
       const data = (await response.json()) as ChatEndResponse;
@@ -571,6 +625,11 @@ function App() {
           signal: controller.signal,
         }
       );
+
+      if (!response.ok) {
+        const error = await readApiError(response, "Failed to send active chat message.");
+        throw new Error(formatActiveChatApiError("message", error));
+      }
 
       await consumeSseResponse(response, controller.signal);
 
