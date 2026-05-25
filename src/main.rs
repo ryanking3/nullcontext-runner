@@ -20,7 +20,7 @@ use cleanup::{
 use config::{AppCommand, SessionConfig};
 use inference::run_inference;
 use memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
-use registry::{list_sessions, register_persistent_session, show_report};
+use registry::{list_sessions, register_persistent_session, show_report, SessionLifecycleMetadata};
 use session::Session;
 
 fn main() -> Result<()> {
@@ -145,6 +145,8 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
         CleanupReport::not_attempted(artifacts_detected, sanitization_operations)
     };
 
+    let lifecycle = SessionLifecycleMetadata::for_completed_session(&config, &cleanup_report);
+
     let report = PrivacyReport::new(
         session.id.clone(),
         session.started_at,
@@ -154,7 +156,8 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
         config.gpu_layers.clone(),
         inference_result.process_exited_cleanly,
         cleanup_report.clone(),
-    );
+    )
+    .with_lifecycle(&lifecycle);
 
     let report_json = report.to_pretty_json()?;
 

@@ -1,4 +1,4 @@
-use crate::audit::PrivacyReport;
+use crate::audit::{sync_report_lifecycle, PrivacyReport};
 use crate::chat::{CancelChatResponse, ChatMessageRequest, ChatSessionManager, StartChatRequest};
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
@@ -9,7 +9,7 @@ use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::registry::{
     archived_report_path, due_retention_cleanup_session_ids, ensure_registry_dirs,
     reconcile_registry_on_startup, register_persistent_session, CleanupReason, RetentionPolicy,
-    SessionIndexEntry, SessionRegistry,
+    SessionIndexEntry, SessionLifecycleMetadata, SessionRegistry,
 };
 use crate::runtime::ManagedRuntime;
 use crate::sensitive::SensitiveBytes;
@@ -202,6 +202,7 @@ fn spawn_retention_scheduler(home: Arc<String>) {
 
 fn emit_startup_reconciliation(home: &str) -> Result<()> {
     let summary = reconcile_registry_on_startup(home)?;
+    sync_registry_report_lifecycle(home)?;
 
     println!(
         "Lifecycle reconciliation: scanned {} session(s), changed {}, orphaned {}, cleanup-consistent {}, unchanged {}.",
@@ -221,6 +222,16 @@ fn emit_startup_reconciliation(home: &str) -> Result<()> {
             "  [lifecycle] ... and {} more session note(s)",
             summary.notes.len() - 8
         );
+    }
+
+    Ok(())
+}
+
+fn sync_registry_report_lifecycle(home: &str) -> Result<()> {
+    let registry = SessionRegistry::load(home)?;
+
+    for entry in registry.sessions {
+        sync_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
     }
 
     Ok(())
@@ -614,6 +625,8 @@ fn run_direct_streaming_session(
         }
     }
 
+    let lifecycle = SessionLifecycleMetadata::for_completed_session(&config, &cleanup_report);
+
     let report = PrivacyReport::new(
         session.id.clone(),
         session.started_at,
@@ -623,7 +636,8 @@ fn run_direct_streaming_session(
         config.gpu_layers.clone(),
         runtime_terminated,
         cleanup_report.clone(),
-    );
+    )
+    .with_lifecycle(&lifecycle);
 
     let report_json = report.to_pretty_json()?;
 
@@ -927,6 +941,8 @@ fn cleanup_persistent_session_with_reason(
         .find(session_id)
         .ok_or_else(|| anyhow::anyhow!("Session not found after cleanup save: {session_id}"))?;
 
+    sync_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
+
     Ok(build_lifecycle_action_response(entry, completion_message))
 }
 
@@ -970,6 +986,8 @@ fn update_registry_retention_policy(
     let entry = registry
         .find(session_id)
         .ok_or_else(|| anyhow::anyhow!("Session not found after retention update: {session_id}"))?;
+
+    sync_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
 
     let message = match retention_policy {
         RetentionPolicy::RetainUntilManualCleanup => {
@@ -1048,6 +1066,8 @@ fn reconcile_registry_session(
     let entry = registry
         .find(session_id)
         .ok_or_else(|| anyhow::anyhow!("Session not found after reconciliation: {session_id}"))?;
+
+    sync_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
 
     Ok(build_lifecycle_action_response(entry, &message))
 }

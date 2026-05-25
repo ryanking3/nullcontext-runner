@@ -75,6 +75,18 @@ type SessionProfile = {
   active_runtime_residual_risk: string;
 };
 
+type LifecycleReport = {
+  state: string;
+  retention_policy: string;
+  retention_deadline?: string | null;
+  cleanup_requested_at?: string | null;
+  cleanup_completed_at?: string | null;
+  cleanup_reason?: string | null;
+  updated_at?: string | null;
+  policy_summary: string;
+  decision_summary: string;
+};
+
 type PrivacyReportData = {
   session_id: string;
   started_at: string;
@@ -85,6 +97,7 @@ type PrivacyReportData = {
   process_exited_cleanly: boolean;
   cleanup: CleanupInfo;
   session_profile?: SessionProfile | null;
+  lifecycle?: LifecycleReport | null;
   residual_risk: string;
 };
 
@@ -1835,6 +1848,67 @@ function App() {
                           ]}
                         />
                       </section>
+
+                      {currentReport.lifecycle && (
+                        <section className="report-section">
+                          <div className="panel-title">lifecycle policy</div>
+                          <ReportGrid
+                            entries={[
+                              {
+                                label: "state",
+                                value: humanizeSnakeCase(currentReport.lifecycle.state),
+                              },
+                              {
+                                label: "retention policy",
+                                value: humanizeSnakeCase(
+                                  currentReport.lifecycle.retention_policy
+                                ),
+                              },
+                              {
+                                label: "retention deadline",
+                                value: currentReport.lifecycle.retention_deadline
+                                  ? formatTimestamp(currentReport.lifecycle.retention_deadline)
+                                  : "none",
+                              },
+                              {
+                                label: "cleanup requested",
+                                value: currentReport.lifecycle.cleanup_requested_at
+                                  ? formatTimestamp(currentReport.lifecycle.cleanup_requested_at)
+                                  : "none",
+                              },
+                              {
+                                label: "cleanup completed",
+                                value: currentReport.lifecycle.cleanup_completed_at
+                                  ? formatTimestamp(currentReport.lifecycle.cleanup_completed_at)
+                                  : "none",
+                              },
+                              {
+                                label: "cleanup reason",
+                                value: currentReport.lifecycle.cleanup_reason
+                                  ? humanizeSnakeCase(currentReport.lifecycle.cleanup_reason)
+                                  : "none",
+                              },
+                              {
+                                label: "lifecycle updated",
+                                value: currentReport.lifecycle.updated_at
+                                  ? formatTimestamp(currentReport.lifecycle.updated_at)
+                                  : "none",
+                              },
+                            ]}
+                          />
+
+                          <div className="report-risk-block">
+                            <p>
+                              <strong>policy summary:</strong>{" "}
+                              {currentReport.lifecycle.policy_summary}
+                            </p>
+                            <p>
+                              <strong>decision summary:</strong>{" "}
+                              {currentReport.lifecycle.decision_summary}
+                            </p>
+                          </div>
+                        </section>
+                      )}
 
                       {currentReport.session_profile && (
                         <section className="report-section">

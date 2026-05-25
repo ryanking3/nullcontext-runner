@@ -4,7 +4,7 @@ use crate::cleanup::{
 };
 use crate::config::{ChatTemplate, SessionConfig};
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
-use crate::registry::register_persistent_session;
+use crate::registry::{register_persistent_session, SessionLifecycleMetadata};
 use crate::runtime::ManagedRuntime;
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
@@ -565,6 +565,9 @@ impl ChatSessionManager {
             active_runtime_residual_risk: active_runtime_risk(),
         };
 
+        let lifecycle =
+            SessionLifecycleMetadata::for_completed_session(&active.config, &cleanup_report);
+
         let report = PrivacyReport::new(
             active.session.id.clone(),
             active.session.started_at,
@@ -575,6 +578,7 @@ impl ChatSessionManager {
             runtime_stopped,
             cleanup_report.clone(),
         )
+        .with_lifecycle(&lifecycle)
         .with_session_profile(profile);
 
         let report_json = report.to_pretty_json()?;

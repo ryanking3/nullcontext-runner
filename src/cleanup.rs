@@ -1,16 +1,16 @@
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactRecord {
     pub path: String,
     pub kind: String,
     pub size_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SanitizationOperation {
     pub operation: String,
     pub status: String,
@@ -24,7 +24,7 @@ pub fn log_sanitization_operation(operation: &SanitizationOperation) {
     );
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CleanupReport {
     pub attempted: bool,
     pub successful: bool,
