@@ -2,6 +2,7 @@ use crate::cleanup::CleanupReport;
 use crate::config::SessionConfig;
 use crate::session::Session;
 use anyhow::{Context, Result};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,6 +27,79 @@ pub struct SessionIndexEntry {
     pub cleanup_attempted: bool,
     pub cleanup_successful: bool,
     pub workspace_deleted: bool,
+    #[serde(default)]
+    pub lifecycle: SessionLifecycleMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionLifecycleState {
+    Active,
+    #[default]
+    CompletedRetained,
+    CleanupPending,
+    CleanupSucceeded,
+    CleanupFailed,
+    Orphaned,
+}
+
+impl SessionLifecycleState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::CompletedRetained => "completed_retained",
+            Self::CleanupPending => "cleanup_pending",
+            Self::CleanupSucceeded => "cleanup_succeeded",
+            Self::CleanupFailed => "cleanup_failed",
+            Self::Orphaned => "orphaned",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RetentionPolicy {
+    EphemeralImmediate,
+    #[default]
+    RetainUntilManualCleanup,
+    RetainForDuration,
+}
+
+impl RetentionPolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::EphemeralImmediate => "ephemeral_immediate",
+            Self::RetainUntilManualCleanup => "retain_until_manual_cleanup",
+            Self::RetainForDuration => "retain_for_duration",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CleanupReason {
+    EphemeralPolicy,
+    ManualOperatorRequest,
+    ScheduledRetentionExpiry,
+    StartupOrphanReconciliation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SessionLifecycleMetadata {
+    #[serde(default)]
+    pub state: SessionLifecycleState,
+    #[serde(default)]
+    pub retention_policy: RetentionPolicy,
+    #[serde(default)]
+    pub retention_deadline: Option<String>,
+    #[serde(default)]
+    pub cleanup_requested_at: Option<String>,
+    #[serde(default)]
+    pub cleanup_completed_at: Option<String>,
+    #[serde(default)]
+    pub cleanup_reason: Option<CleanupReason>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }
 
 impl SessionRegistry {
@@ -71,6 +145,13 @@ impl SessionRegistry {
     pub fn find(&self, session_id: &str) -> Option<&SessionIndexEntry> {
         self.sessions.iter().find(|s| s.session_id == session_id)
     }
+
+    #[allow(dead_code)]
+    pub fn find_mut(&mut self, session_id: &str) -> Option<&mut SessionIndexEntry> {
+        self.sessions
+            .iter_mut()
+            .find(|s| s.session_id == session_id)
+    }
 }
 
 impl SessionIndexEntry {
@@ -95,6 +176,71 @@ impl SessionIndexEntry {
             cleanup_attempted: cleanup.attempted,
             cleanup_successful: cleanup.successful,
             workspace_deleted: cleanup.workspace_deleted,
+            lifecycle: SessionLifecycleMetadata::for_completed_session(config, cleanup),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn mark_cleanup_pending(&mut self, reason: CleanupReason) {
+        self.lifecycle.state = SessionLifecycleState::CleanupPending;
+        self.lifecycle.cleanup_requested_at = Some(current_timestamp());
+        self.lifecycle.cleanup_reason = Some(reason);
+        self.lifecycle.updated_at = self.lifecycle.cleanup_requested_at.clone();
+    }
+
+    #[allow(dead_code)]
+    pub fn mark_cleanup_result(&mut self, cleanup: &CleanupReport, reason: CleanupReason) {
+        self.artifacts_detected = cleanup.artifacts_detected.len();
+        self.cleanup_attempted = cleanup.attempted;
+        self.cleanup_successful = cleanup.successful;
+        self.workspace_deleted = cleanup.workspace_deleted;
+        self.lifecycle.state = if cleanup.successful {
+            SessionLifecycleState::CleanupSucceeded
+        } else {
+            SessionLifecycleState::CleanupFailed
+        };
+        self.lifecycle.cleanup_completed_at = Some(current_timestamp());
+        self.lifecycle.cleanup_reason = Some(reason);
+        self.lifecycle.updated_at = self.lifecycle.cleanup_completed_at.clone();
+    }
+
+    #[allow(dead_code)]
+    pub fn mark_orphaned(&mut self) {
+        self.lifecycle.state = SessionLifecycleState::Orphaned;
+        self.lifecycle.updated_at = Some(current_timestamp());
+    }
+}
+
+impl SessionLifecycleMetadata {
+    pub fn for_completed_session(config: &SessionConfig, cleanup: &CleanupReport) -> Self {
+        let updated_at = Some(current_timestamp());
+
+        if config.ephemeral {
+            let state = if cleanup.successful {
+                SessionLifecycleState::CleanupSucceeded
+            } else {
+                SessionLifecycleState::CleanupFailed
+            };
+
+            return Self {
+                state,
+                retention_policy: RetentionPolicy::EphemeralImmediate,
+                retention_deadline: None,
+                cleanup_requested_at: None,
+                cleanup_completed_at: updated_at.clone(),
+                cleanup_reason: Some(CleanupReason::EphemeralPolicy),
+                updated_at,
+            };
+        }
+
+        Self {
+            state: SessionLifecycleState::CompletedRetained,
+            retention_policy: RetentionPolicy::RetainUntilManualCleanup,
+            retention_deadline: None,
+            cleanup_requested_at: None,
+            cleanup_completed_at: None,
+            cleanup_reason: None,
+            updated_at,
         }
     }
 }
@@ -128,6 +274,11 @@ pub fn list_sessions(home: &str) -> Result<()> {
         println!("Session ID: {}", session.session_id);
         println!("Started: {}", session.started_at);
         println!("Mode: {}", session.security_mode);
+        println!("Lifecycle state: {}", session.lifecycle.state.as_str());
+        println!(
+            "Retention policy: {}",
+            session.lifecycle.retention_policy.as_str()
+        );
         println!("Prompt source: {}", session.prompt_source);
         println!("Workspace: {}", session.workspace);
         println!("Report: {}", session.report_path);
@@ -168,4 +319,8 @@ fn registry_root(home: &str) -> PathBuf {
 
 fn registry_path(home: &str) -> PathBuf {
     registry_root(home).join("index.json")
+}
+
+fn current_timestamp() -> String {
+    Utc::now().to_rfc3339()
 }
