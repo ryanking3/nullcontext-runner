@@ -12,6 +12,16 @@ pub struct SessionRegistry {
     pub sessions: Vec<SessionIndexEntry>,
 }
 
+#[derive(Debug, Clone)]
+pub struct StartupReconciliationSummary {
+    pub scanned_sessions: usize,
+    pub changed_sessions: usize,
+    pub orphaned_sessions: usize,
+    pub cleanup_succeeded_consistent: usize,
+    pub unchanged_sessions: usize,
+    pub notes: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionIndexEntry {
     pub session_id: String,
@@ -218,6 +228,7 @@ impl SessionIndexEntry {
     #[allow(dead_code)]
     pub fn mark_orphaned(&mut self) {
         self.lifecycle.state = SessionLifecycleState::Orphaned;
+        self.lifecycle.cleanup_reason = Some(CleanupReason::StartupOrphanReconciliation);
         self.lifecycle.updated_at = Some(current_timestamp());
     }
 }
@@ -324,6 +335,55 @@ pub fn show_report(home: &str, session_id: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn reconcile_registry_on_startup(home: &str) -> Result<StartupReconciliationSummary> {
+    let mut registry = SessionRegistry::load(home)?;
+    let mut summary = StartupReconciliationSummary {
+        scanned_sessions: registry.sessions.len(),
+        changed_sessions: 0,
+        orphaned_sessions: 0,
+        cleanup_succeeded_consistent: 0,
+        unchanged_sessions: 0,
+        notes: Vec::new(),
+    };
+
+    for entry in &mut registry.sessions {
+        let message = reconcile_entry(entry);
+
+        match message {
+            ReconciliationOutcome::Changed(note) => {
+                summary.changed_sessions += 1;
+
+                if entry.lifecycle.state == SessionLifecycleState::Orphaned {
+                    summary.orphaned_sessions += 1;
+                }
+
+                summary
+                    .notes
+                    .push(format!("{}: {}", entry.session_id, note));
+            }
+            ReconciliationOutcome::CleanupConsistent(note) => {
+                summary.cleanup_succeeded_consistent += 1;
+                summary.unchanged_sessions += 1;
+                summary
+                    .notes
+                    .push(format!("{}: {}", entry.session_id, note));
+            }
+            ReconciliationOutcome::Unchanged(note) => {
+                summary.unchanged_sessions += 1;
+                summary
+                    .notes
+                    .push(format!("{}: {}", entry.session_id, note));
+            }
+        }
+    }
+
+    if summary.changed_sessions > 0 {
+        registry.save(home)?;
+    }
+
+    Ok(summary)
+}
+
 pub fn ensure_registry_dirs(home: &str) -> Result<()> {
     fs::create_dir_all(registry_root(home).join("reports"))?;
     Ok(())
@@ -345,4 +405,74 @@ fn registry_path(home: &str) -> PathBuf {
 
 fn current_timestamp() -> String {
     Utc::now().to_rfc3339()
+}
+
+enum ReconciliationOutcome {
+    Changed(String),
+    CleanupConsistent(String),
+    Unchanged(String),
+}
+
+fn reconcile_entry(entry: &mut SessionIndexEntry) -> ReconciliationOutcome {
+    let workspace_exists = Path::new(&entry.workspace).exists();
+    let report_exists = Path::new(&entry.report_path).exists();
+
+    if entry.lifecycle.state == SessionLifecycleState::CleanupPending {
+        entry.mark_orphaned();
+        return ReconciliationOutcome::Changed(
+            "Startup found a session still marked cleanup_pending; reclassified as orphaned."
+                .to_string(),
+        );
+    }
+
+    if entry.lifecycle.state == SessionLifecycleState::Active {
+        entry.mark_orphaned();
+        return ReconciliationOutcome::Changed(
+            "Startup found a registry entry still marked active; reclassified as orphaned because active in-memory state cannot be recovered after restart."
+                .to_string(),
+        );
+    }
+
+    if entry.cleanup_successful && !workspace_exists {
+        if !report_exists {
+            entry.mark_orphaned();
+            return ReconciliationOutcome::Changed(
+                "Cleanup had been recorded as successful and the workspace is gone, but the report path is missing; marked orphaned for investigation."
+                    .to_string(),
+            );
+        }
+
+        return ReconciliationOutcome::CleanupConsistent(
+            "Cleanup had already succeeded and startup confirmed the workspace remains removed."
+                .to_string(),
+        );
+    }
+
+    if !workspace_exists && !entry.cleanup_successful {
+        entry.mark_orphaned();
+        return ReconciliationOutcome::Changed(
+            "Workspace is missing even though lifecycle cleanup was not recorded as successful; marked orphaned."
+                .to_string(),
+        );
+    }
+
+    if workspace_exists && entry.cleanup_successful {
+        entry.mark_orphaned();
+        return ReconciliationOutcome::Changed(
+            "Workspace still exists even though cleanup was previously recorded as successful; marked orphaned."
+                .to_string(),
+        );
+    }
+
+    if !report_exists && !entry.cleanup_successful {
+        entry.mark_orphaned();
+        return ReconciliationOutcome::Changed(
+            "Report path is missing while cleanup was not recorded as successful; marked orphaned."
+                .to_string(),
+        );
+    }
+
+    ReconciliationOutcome::Unchanged(
+        "Registry paths are present and no startup lifecycle changes were needed.".to_string(),
+    )
 }

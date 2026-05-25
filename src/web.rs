@@ -7,8 +7,8 @@ use crate::config::SessionConfig;
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::registry::{
-    archived_report_path, ensure_registry_dirs, register_persistent_session, CleanupReason,
-    SessionIndexEntry, SessionRegistry,
+    archived_report_path, ensure_registry_dirs, reconcile_registry_on_startup,
+    register_persistent_session, CleanupReason, SessionIndexEntry, SessionRegistry,
 };
 use crate::runtime::ManagedRuntime;
 use crate::sensitive::SensitiveBytes;
@@ -110,6 +110,7 @@ struct StreamPayload {
 
 pub async fn serve() -> Result<()> {
     let home = home_dir()?;
+    emit_startup_reconciliation(&home)?;
 
     let state = WebState {
         home: Arc::new(home),
@@ -146,6 +147,32 @@ pub async fn serve() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     axum::serve(listener, app).await?;
+
+    Ok(())
+}
+
+fn emit_startup_reconciliation(home: &str) -> Result<()> {
+    let summary = reconcile_registry_on_startup(home)?;
+
+    println!(
+        "Lifecycle reconciliation: scanned {} session(s), changed {}, orphaned {}, cleanup-consistent {}, unchanged {}.",
+        summary.scanned_sessions,
+        summary.changed_sessions,
+        summary.orphaned_sessions,
+        summary.cleanup_succeeded_consistent,
+        summary.unchanged_sessions
+    );
+
+    for note in summary.notes.iter().take(8) {
+        println!("  [lifecycle] {note}");
+    }
+
+    if summary.notes.len() > 8 {
+        println!(
+            "  [lifecycle] ... and {} more session note(s)",
+            summary.notes.len() - 8
+        );
+    }
 
     Ok(())
 }
