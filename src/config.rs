@@ -200,8 +200,17 @@ pub struct RegisteredModel {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct RuntimeValidation {
+    pub llama_path: String,
+    pub selectable: bool,
+    pub validation_status: String,
+    pub validation_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ModelRegistrySnapshot {
     pub default_model_id: String,
+    pub runtime: RuntimeValidation,
     pub models: Vec<RegisteredModel>,
 }
 
@@ -448,6 +457,10 @@ impl SessionConfig {
 }
 
 fn build_model_registry(home: &str, file_config: &FileConfig) -> Result<ModelRegistrySnapshot> {
+    let llama_path = file_config
+        .llama_path
+        .clone()
+        .unwrap_or_else(|| default_llama_path(home));
     let configured_models = file_config.models.as_deref().unwrap_or(&[]);
     let mut models = if configured_models.is_empty() {
         vec![build_legacy_registered_model(home, file_config)?]
@@ -481,6 +494,12 @@ fn build_model_registry(home: &str, file_config: &FileConfig) -> Result<ModelReg
 
     Ok(ModelRegistrySnapshot {
         default_model_id,
+        runtime: RuntimeValidation {
+            llama_path: llama_path.clone(),
+            selectable: launcher_path_selectable(&llama_path),
+            validation_status: launcher_validation_status(&llama_path).to_string(),
+            validation_message: launcher_validation_message(&llama_path),
+        },
         models,
     })
 }
@@ -626,6 +645,38 @@ fn default_model_name(id: &str, model_path: &str) -> String {
         .map(|stem| stem.replace('_', " "))
         .filter(|stem| !stem.trim().is_empty())
         .unwrap_or_else(|| id.to_string())
+}
+
+fn launcher_path_selectable(llama_path: &str) -> bool {
+    launcher_validation_status(llama_path) == "ready"
+}
+
+fn launcher_validation_status(llama_path: &str) -> &'static str {
+    let path = Path::new(llama_path);
+
+    if !path.exists() {
+        return "missing";
+    }
+
+    if !path.is_file() {
+        return "not_file";
+    }
+
+    "ready"
+}
+
+fn launcher_validation_message(llama_path: &str) -> Option<String> {
+    let path = Path::new(llama_path);
+
+    if !path.exists() {
+        return Some(format!("llama-server path does not exist: {llama_path}"));
+    }
+
+    if !path.is_file() {
+        return Some(format!("llama-server path is not a file: {llama_path}"));
+    }
+
+    None
 }
 
 fn model_path_selectable(model_path: &str) -> bool {

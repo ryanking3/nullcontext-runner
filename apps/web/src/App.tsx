@@ -25,6 +25,12 @@ type RegisteredModel = {
 
 type ModelRegistrySnapshot = {
   default_model_id: string;
+  runtime: {
+    llama_path: string;
+    selectable: boolean;
+    validation_status: string;
+    validation_message?: string | null;
+  };
   models: RegisteredModel[];
 };
 
@@ -452,6 +458,8 @@ function App() {
   const [useModelTemplateDefault, setUseModelTemplateDefault] = useState(true);
   const [useModelContextDefaults, setUseModelContextDefaults] = useState(true);
   const [models, setModels] = useState<RegisteredModel[]>([]);
+  const [runtimeValidation, setRuntimeValidation] =
+    useState<ModelRegistrySnapshot["runtime"] | null>(null);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [inspectedModelId, setInspectedModelId] = useState("");
   const [modelsLoadedAt, setModelsLoadedAt] = useState("never");
@@ -548,6 +556,7 @@ function App() {
       const nextModels = data.models ?? [];
 
       setModels(nextModels);
+      setRuntimeValidation(data.runtime ?? null);
       setModelLoadError("");
       setSelectedModelId((current) => {
         if (current && nextModels.some((model) => model.id === current)) {
@@ -573,6 +582,7 @@ function App() {
       });
     } catch (error) {
       setModels([]);
+      setRuntimeValidation(null);
       setModelLoadError(String(error));
       setSelectedModelId("");
       setInspectedModelId("");
@@ -2365,6 +2375,25 @@ function App() {
 
         <div className="drawer-body model-drawer-body">
           <section className="panel model-list-panel">
+            {runtimeValidation && (
+              <div className="registry-action-banner">
+                <div className="registry-lifecycle-summary">
+                  <span className={modelValidationClass(runtimeValidation.validation_status)}>
+                    runtime {runtimeValidation.validation_status.replaceAll("_", " ")}
+                  </span>
+                  {runtimeValidation.selectable ? (
+                    <span className="pill success">launcher ready</span>
+                  ) : (
+                    <span className="pill failed">launcher unavailable</span>
+                  )}
+                </div>
+                <div className="registry-path">{runtimeValidation.llama_path}</div>
+                {runtimeValidation.validation_message && (
+                  <div className="microcopy">{runtimeValidation.validation_message}</div>
+                )}
+              </div>
+            )}
+
             <div className="panel-header">
               <div className="panel-title">models</div>
               <span className="mini-status">loaded:{modelsLoadedAt}</span>
@@ -2572,6 +2601,10 @@ function App() {
 
             {selectedModel && !selectedModel.selectable && selectedModel.validation_message && (
               <p className="microcopy">{selectedModel.validation_message}</p>
+            )}
+
+            {runtimeValidation && !runtimeValidation.selectable && (
+              <p className="microcopy">{runtimeValidation.validation_message || "llama-server is not ready to launch."}</p>
             )}
 
             <div className="drawer-actions">
