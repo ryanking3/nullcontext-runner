@@ -29,6 +29,54 @@ type AuditOperation = {
   details: string;
 };
 
+type ArtifactRecord = {
+  path: string;
+  kind: string;
+  size_bytes: number;
+};
+
+type CleanupInfo = {
+  attempted: boolean;
+  successful: boolean;
+  workspace_deleted: boolean;
+  files_removed: number;
+  directories_removed: number;
+  artifacts_detected: ArtifactRecord[];
+  sanitization_operations: AuditOperation[];
+  error?: string | null;
+};
+
+type TurnArtifact = {
+  turn: number;
+  prompt_path: string;
+  response_path: string;
+};
+
+type SessionProfile = {
+  session_kind: string;
+  runtime_lifetime: string;
+  turn_count: number;
+  runtime_duration_ms: number;
+  history_policy: string;
+  persistence_policy: string;
+  prompt_source: string;
+  turn_artifacts: TurnArtifact[];
+  active_runtime_residual_risk: string;
+};
+
+type PrivacyReportData = {
+  session_id: string;
+  started_at: string;
+  history_stored: boolean;
+  backend: string;
+  security_mode: string;
+  gpu_layers: string;
+  process_exited_cleanly: boolean;
+  cleanup: CleanupInfo;
+  session_profile?: SessionProfile | null;
+  residual_risk: string;
+};
+
 type Theme = "dark" | "light";
 type RunStatus = "idle" | "running" | "success" | "failed";
 type RuntimeMode = "one-shot" | "active-chat";
@@ -106,6 +154,36 @@ function formatDuration(ms: number): string {
   const seconds = totalSeconds % 60;
 
   return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+}
+
+function formatTimestamp(value: string): string {
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString();
+}
+
+function formatBoolean(value: boolean): string {
+  return value ? "yes" : "no";
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function parsePositiveInteger(value: string): number | null {
@@ -195,6 +273,35 @@ function parseSseBlock(block: string): StreamPayload | null {
   }
 }
 
+function parsePrivacyReport(raw: string): PrivacyReportData | null {
+  if (!raw.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as PrivacyReportData;
+  } catch {
+    return null;
+  }
+}
+
+function ReportGrid({
+  entries,
+}: {
+  entries: Array<{ label: string; value: string }>;
+}) {
+  return (
+    <dl className="report-grid">
+      {entries.map((entry) => (
+        <div className="report-grid-row" key={entry.label}>
+          <dt>{entry.label}</dt>
+          <dd>{entry.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function App() {
   const activeAbortController = useRef<AbortController | null>(null);
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
@@ -245,6 +352,7 @@ function App() {
   const [sessions, setSessions] = useState<SessionIndexEntry[]>([]);
   const [selectedReport, setSelectedReport] = useState<string>("");
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
+  const [showRawReport, setShowRawReport] = useState(false);
 
   async function checkHealth() {
     setServerStatus("checking");
@@ -286,6 +394,7 @@ function App() {
     setStderr("");
     setAuditOperations([]);
     setSelectedReport("");
+    setShowRawReport(false);
   }
 
   function resetOneShotConversation() {
@@ -687,6 +796,7 @@ function App() {
       setActiveChatHistoryPolicy("");
       setActiveChatContextBudget(null);
       setActiveChatContextTurnLimit(null);
+      setShowRawReport(false);
       setPrivacyReport(JSON.stringify(data.report, null, 2));
       setRuntimeLogs((current) =>
         `${current}Ended active chat session ${data.session_id}\nRuntime stopped: ${data.runtime_stopped}\n`
@@ -786,6 +896,7 @@ function App() {
 
   async function openReport(sessionId: string) {
     setSelectedSessionId(sessionId);
+    setShowRawReport(false);
 
     try {
       const response = await fetch(`${API_BASE}/api/reports/${sessionId}`);
@@ -875,6 +986,8 @@ function App() {
   ];
   const selectedSession =
     sessions.find((session) => session.session_id === selectedSessionId) ?? null;
+  const currentReportRaw = selectedReport || privacyReport;
+  const currentReport = parsePrivacyReport(currentReportRaw);
 
   return (
     <main
@@ -1272,7 +1385,233 @@ function App() {
               {inspectorView === "runtime" && <pre>{runtimeLogs || "no runtime logs yet"}</pre>}
 
               {inspectorView === "report" && (
-                <pre>{selectedReport || privacyReport || "no report selected"}</pre>
+                <>
+                  {!currentReportRaw ? (
+                    <p className="muted-text">no report selected</p>
+                  ) : currentReport ? (
+                    <div className="report-viewer">
+                      <div className="report-toolbar">
+                        <div className="report-toolbar-copy">
+                          <strong>privacy report</strong>
+                          <span>
+                            session {shortId(currentReport.session_id)} ·{" "}
+                            {formatTimestamp(currentReport.started_at)}
+                          </span>
+                        </div>
+
+                        <button
+                          className={showRawReport ? "selected" : ""}
+                          onClick={() => setShowRawReport((current) => !current)}
+                        >
+                          {showRawReport ? "hide raw json" : "view raw json"}
+                        </button>
+                      </div>
+
+                      <section className="report-section">
+                        <div className="panel-title">summary</div>
+                        <ReportGrid
+                          entries={[
+                            { label: "session id", value: currentReport.session_id },
+                            { label: "started", value: formatTimestamp(currentReport.started_at) },
+                            { label: "security mode", value: currentReport.security_mode },
+                            { label: "backend", value: currentReport.backend },
+                            { label: "gpu layers", value: currentReport.gpu_layers },
+                            {
+                              label: "history stored",
+                              value: formatBoolean(currentReport.history_stored),
+                            },
+                            {
+                              label: "process exited cleanly",
+                              value: formatBoolean(currentReport.process_exited_cleanly),
+                            },
+                          ]}
+                        />
+                      </section>
+
+                      {currentReport.session_profile && (
+                        <section className="report-section">
+                          <div className="panel-title">session profile</div>
+                          <ReportGrid
+                            entries={[
+                              {
+                                label: "session kind",
+                                value: currentReport.session_profile.session_kind,
+                              },
+                              {
+                                label: "runtime lifetime",
+                                value: currentReport.session_profile.runtime_lifetime,
+                              },
+                              {
+                                label: "turn count",
+                                value: String(currentReport.session_profile.turn_count),
+                              },
+                              {
+                                label: "runtime duration",
+                                value: formatDuration(
+                                  currentReport.session_profile.runtime_duration_ms
+                                ),
+                              },
+                              {
+                                label: "history policy",
+                                value: currentReport.session_profile.history_policy,
+                              },
+                              {
+                                label: "persistence policy",
+                                value: currentReport.session_profile.persistence_policy,
+                              },
+                              {
+                                label: "prompt source",
+                                value: currentReport.session_profile.prompt_source,
+                              },
+                            ]}
+                          />
+
+                          <details className="report-detail" open>
+                            <summary>
+                              <span>turn artifacts</span>
+                              <span className="pill neutral">
+                                {currentReport.session_profile.turn_artifacts.length}
+                              </span>
+                            </summary>
+                            {currentReport.session_profile.turn_artifacts.length === 0 ? (
+                              <p className="muted-text">no turn artifacts recorded</p>
+                            ) : (
+                              <div className="report-list">
+                                {currentReport.session_profile.turn_artifacts.map((artifact) => (
+                                  <div className="report-item" key={artifact.turn}>
+                                    <div className="report-item-header">
+                                      <strong>turn {artifact.turn}</strong>
+                                    </div>
+                                    <div className="report-path-list">
+                                      <div>{artifact.prompt_path}</div>
+                                      <div>{artifact.response_path}</div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </details>
+                        </section>
+                      )}
+
+                      <section className="report-section">
+                        <div className="panel-title">cleanup</div>
+                        <ReportGrid
+                          entries={[
+                            {
+                              label: "attempted",
+                              value: formatBoolean(currentReport.cleanup.attempted),
+                            },
+                            {
+                              label: "successful",
+                              value: formatBoolean(currentReport.cleanup.successful),
+                            },
+                            {
+                              label: "workspace deleted",
+                              value: formatBoolean(currentReport.cleanup.workspace_deleted),
+                            },
+                            {
+                              label: "files removed",
+                              value: String(currentReport.cleanup.files_removed),
+                            },
+                            {
+                              label: "directories removed",
+                              value: String(currentReport.cleanup.directories_removed),
+                            },
+                            {
+                              label: "cleanup error",
+                              value: currentReport.cleanup.error || "none",
+                            },
+                          ]}
+                        />
+                      </section>
+
+                      <details className="report-detail" open>
+                        <summary>
+                          <span>artifacts detected</span>
+                          <span className="pill neutral">
+                            {currentReport.cleanup.artifacts_detected.length}
+                          </span>
+                        </summary>
+                        {currentReport.cleanup.artifacts_detected.length === 0 ? (
+                          <p className="muted-text">no artifacts detected</p>
+                        ) : (
+                          <div className="report-list">
+                            {currentReport.cleanup.artifacts_detected.map((artifact) => (
+                              <div
+                                className="report-item"
+                                key={`${artifact.path}-${artifact.kind}-${artifact.size_bytes}`}
+                              >
+                                <div className="report-item-header">
+                                  <strong>{artifact.kind}</strong>
+                                  <span className="pill neutral">
+                                    {formatBytes(artifact.size_bytes)}
+                                  </span>
+                                </div>
+                                <div className="report-path-list">
+                                  <div>{artifact.path}</div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </details>
+
+                      <details className="report-detail" open>
+                        <summary>
+                          <span>sanitization operations</span>
+                          <span className="pill neutral">
+                            {currentReport.cleanup.sanitization_operations.length}
+                          </span>
+                        </summary>
+                        {currentReport.cleanup.sanitization_operations.length === 0 ? (
+                          <p className="muted-text">no sanitization operations recorded</p>
+                        ) : (
+                          <div className="audit-list">
+                            {currentReport.cleanup.sanitization_operations.map(
+                              (operation, index) => (
+                                <details
+                                  className="audit-item"
+                                  key={`${operation.operation}-${index}`}
+                                >
+                                  <summary>
+                                    <code>{operation.operation}</code>
+                                    <span className={statusClass(operation.status)}>
+                                      {operation.status}
+                                    </span>
+                                  </summary>
+                                  <p>{operation.details}</p>
+                                </details>
+                              )
+                            )}
+                          </div>
+                        )}
+                      </details>
+
+                      <section className="report-section">
+                        <div className="panel-title">residual risks</div>
+                        <div className="report-risk-block">
+                          <p>{currentReport.residual_risk}</p>
+                          {currentReport.session_profile?.active_runtime_residual_risk && (
+                            <p>{currentReport.session_profile.active_runtime_residual_risk}</p>
+                          )}
+                        </div>
+                      </section>
+
+                      {showRawReport && <pre>{currentReportRaw}</pre>}
+                    </div>
+                  ) : (
+                    <div className="report-viewer">
+                      <div className="report-toolbar">
+                        <div className="report-toolbar-copy">
+                          <strong>privacy report</strong>
+                          <span>raw output</span>
+                        </div>
+                      </div>
+                      <pre>{currentReportRaw}</pre>
+                    </div>
+                  )}
+                </>
               )}
 
               {inspectorView === "stderr" && (
