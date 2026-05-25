@@ -197,6 +197,7 @@ function parseSseBlock(block: string): StreamPayload | null {
 
 function App() {
   const activeAbortController = useRef<AbortController | null>(null);
+  const commandMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [theme, setTheme] = useState<Theme>("dark");
   const [serverStatus, setServerStatus] = useState<"checking" | "online" | "offline">("checking");
@@ -212,6 +213,7 @@ function App() {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   const [inspectorView, setInspectorView] = useState<InspectorView>("audit");
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [chatTemplate, setChatTemplate] = useState<ChatTemplateOption>("auto");
   const [chatContextTokenBudget, setChatContextTokenBudget] = useState("2048");
   const [chatContextTurnLimit, setChatContextTurnLimit] = useState("12");
@@ -492,6 +494,7 @@ function App() {
 
     try {
       const activeChatConfig = readActiveChatConfigInputs();
+      setCommandMenuOpen(false);
       const response = await fetch(`${API_BASE}/api/run/stream`, {
         method: "POST",
         headers: {
@@ -526,6 +529,7 @@ function App() {
     setActiveChatStopNotice("");
     setRunStatus("running");
     setConfigDrawerOpen(false);
+    setCommandMenuOpen(false);
 
     try {
       const activeChatConfig = readActiveChatConfigInputs();
@@ -626,6 +630,7 @@ function App() {
 
     setRunStatus("running");
     setActiveChatStopNotice("");
+    setCommandMenuOpen(false);
 
     try {
       const response = await fetch(`${API_BASE}/api/chat/${activeChatSessionId}/end`, {
@@ -683,6 +688,7 @@ function App() {
     setStderr("");
     setAuditOperations([]);
     setActiveChatStopNotice("");
+    setCommandMenuOpen(false);
 
     const currentPrompt = prompt;
     const controller = new AbortController();
@@ -801,6 +807,7 @@ function App() {
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setConfigDrawerOpen(false);
+        setCommandMenuOpen(false);
       }
     }
 
@@ -808,6 +815,22 @@ function App() {
 
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, []);
+
+  useEffect(() => {
+    function closeCommandMenu(event: MouseEvent) {
+      if (
+        commandMenuOpen &&
+        commandMenuRef.current &&
+        !commandMenuRef.current.contains(event.target as Node)
+      ) {
+        setCommandMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("mousedown", closeCommandMenu);
+
+    return () => window.removeEventListener("mousedown", closeCommandMenu);
+  }, [commandMenuOpen]);
 
   const inspectorTabs: Array<{
     id: InspectorView;
@@ -994,28 +1017,11 @@ function App() {
                 : "active runtime chat session"}
             </p>
           </div>
-          <div className="topbar-actions">
-            <button
-              className="ghost-button"
-              onClick={() => setSidebarCollapsed((current) => !current)}
-              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              {sidebarCollapsed ? "sidebar +" : "sidebar -"}
-            </button>
-            <button
-              className="ghost-button"
-              onClick={() => setConfigDrawerOpen(true)}
-              title="Open session configuration drawer"
-            >
-              config
-            </button>
-            <button
-              className="ghost-button"
-              onClick={() => setInspectorOpen((current) => !current)}
-              title={inspectorOpen ? "Hide inspector" : "Show inspector"}
-            >
-              {inspectorOpen ? "inspector -" : "inspector +"}
-            </button>
+          <div className="topbar-actions topbar-status">
+            <span className="mini-status">server:{serverStatus}</span>
+            <span className="mini-status">
+              {runtimeMode === "one-shot" ? "mode:one-shot" : "mode:active-chat"}
+            </span>
           </div>
         </header>
 
@@ -1057,29 +1063,85 @@ function App() {
             )}
           </div>
 
-          <div className="runtime-stats">
-            <span>turns: {activeChatTurns}</span>
-            <span>duration: {formatDuration(activeRuntimeElapsedMs)}</span>
-            {activeChatSessionId && <span>id: {shortId(activeChatSessionId)}</span>}
-          </div>
-
-          {runtimeMode === "active-chat" && (
-            <div className="runtime-actions">
-              {!activeChatRuntimeActive ? (
-                <button onClick={startActiveChat} disabled={runStatus === "running"}>
-                  start session
-                </button>
-              ) : (
-                <button
-                  className="danger-button"
-                  onClick={endActiveChat}
-                  disabled={runStatus === "running"}
-                >
-                  end + sanitize
-                </button>
-              )}
+          <div className="runtime-command-strip">
+            <div className="runtime-stats">
+              <span>turns: {activeChatTurns}</span>
+              <span>duration: {formatDuration(activeRuntimeElapsedMs)}</span>
+              {activeChatSessionId && <span>id: {shortId(activeChatSessionId)}</span>}
             </div>
-          )}
+
+            <div className="runtime-actions">
+              {runtimeMode === "active-chat" &&
+                (!activeChatRuntimeActive ? (
+                  <button onClick={startActiveChat} disabled={runStatus === "running"}>
+                    start session
+                  </button>
+                ) : (
+                  <button
+                    className="danger-button"
+                    onClick={endActiveChat}
+                    disabled={runStatus === "running"}
+                  >
+                    end + sanitize
+                  </button>
+                ))}
+
+              <div className="popup-menu" ref={commandMenuRef}>
+                <button
+                  className="ghost-button popup-trigger"
+                  onClick={() => setCommandMenuOpen((current) => !current)}
+                  title="Open runtime actions menu"
+                >
+                  actions
+                </button>
+
+                {commandMenuOpen && (
+                  <div className="popup-panel">
+                    <button
+                      onClick={() => {
+                        setConfigDrawerOpen(true);
+                        setCommandMenuOpen(false);
+                      }}
+                    >
+                      open config drawer
+                    </button>
+                    <button
+                      onClick={() => {
+                        setInspectorOpen((current) => !current);
+                        setCommandMenuOpen(false);
+                      }}
+                    >
+                      {inspectorOpen ? "hide inspector" : "show inspector"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSidebarCollapsed((current) => !current);
+                        setCommandMenuOpen(false);
+                      }}
+                    >
+                      {sidebarCollapsed ? "expand sidebar" : "collapse sidebar"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        checkHealth();
+                        setCommandMenuOpen(false);
+                      }}
+                    >
+                      check server
+                    </button>
+                    <button
+                      onClick={() => {
+                        loadSessions();
+                        setCommandMenuOpen(false);
+                      }}
+                    >
+                      refresh registry
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </section>
 
         <section className="chat-card">

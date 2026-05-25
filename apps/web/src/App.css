@@ -402,6 +402,20 @@ pre {
   gap: 8px;
 }
 
+.topbar-status {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.mini-status {
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+  color: var(--muted);
+  background: var(--input);
+  font-size: 10px;
+  text-transform: lowercase;
+}
+
 .chat-card {
   display: flex;
   flex: 1;
@@ -836,14 +850,63 @@ pre {
   white-space: nowrap;
 }
 
+.runtime-command-strip {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 14px;
+  align-items: center;
+  justify-content: end;
+}
+
 .runtime-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 8px;
 }
 
 .runtime-actions button {
   min-width: 130px;
+}
+
+.popup-menu {
+  position: relative;
+}
+
+.popup-trigger {
+  min-width: 0 !important;
+}
+
+.popup-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 25;
+  display: grid;
+  min-width: 190px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.18);
+}
+
+.popup-panel button {
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 9px 10px;
+  text-align: left;
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 400;
+}
+
+.popup-panel button:last-child {
+  border-bottom: 0;
+}
+
+.popup-panel button:hover:not(:disabled) {
+  background: var(--text);
+  color: var(--bg);
 }
 
 .danger-button {
@@ -859,6 +922,11 @@ pre {
 @media (max-width: 1120px) {
   .active-runtime-banner {
     grid-template-columns: 1fr;
+  }
+
+  .runtime-command-strip {
+    grid-template-columns: 1fr;
+    justify-content: stretch;
   }
 
   .runtime-stats {
