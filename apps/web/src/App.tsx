@@ -33,6 +33,7 @@ type Theme = "dark" | "light";
 type RunStatus = "idle" | "running" | "success" | "failed";
 type RuntimeMode = "one-shot" | "active-chat";
 type ChatTemplateOption = "auto" | "generic" | "chatml" | "llama3-instruct";
+type InspectorView = "audit" | "runtime" | "report" | "stderr";
 
 type StreamPayload = {
   type: string;
@@ -117,6 +118,15 @@ function parsePositiveInteger(value: string): number | null {
   return parsed;
 }
 
+function Hint({ text }: { text: string }) {
+  return (
+    <span className="hint" tabIndex={0}>
+      <span className="hint-trigger">?</span>
+      <span className="hint-bubble">{text}</span>
+    </span>
+  );
+}
+
 async function readApiError(response: Response, fallback: string): Promise<string> {
   try {
     const text = await response.text();
@@ -198,6 +208,10 @@ function App() {
   const [mode, setMode] = useState("secure");
   const [persistent, setPersistent] = useState(false);
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  const [inspectorView, setInspectorView] = useState<InspectorView>("audit");
   const [chatTemplate, setChatTemplate] = useState<ChatTemplateOption>("auto");
   const [chatContextTokenBudget, setChatContextTokenBudget] = useState("2048");
   const [chatContextTurnLimit, setChatContextTurnLimit] = useState("12");
@@ -511,6 +525,7 @@ function App() {
     resetRunPanels();
     setActiveChatStopNotice("");
     setRunStatus("running");
+    setConfigDrawerOpen(false);
 
     try {
       const activeChatConfig = readActiveChatConfigInputs();
@@ -782,172 +797,191 @@ function App() {
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [activeChatRuntimeActive]);
 
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setConfigDrawerOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
+
+  const inspectorTabs: Array<{
+    id: InspectorView;
+    label: string;
+    count?: number;
+    disabled?: boolean;
+  }> = [
+    { id: "audit", label: "audit", count: auditOperations.length },
+    { id: "runtime", label: "runtime" },
+    { id: "report", label: "report" },
+    { id: "stderr", label: "stderr", disabled: !stderr },
+  ];
+
   return (
-    <main className="shell">
-      <aside className="sidebar">
+    <main
+      className={`shell${sidebarCollapsed ? " sidebar-collapsed" : ""}${
+        inspectorOpen ? "" : " inspector-hidden"
+      }`}
+    >
+      <aside className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
         <div className="brand">
           <div className="logo">NC</div>
-          <div>
-            <h1>NullContext</h1>
-            <p>localhost runtime</p>
-          </div>
+          {!sidebarCollapsed && (
+            <div>
+              <h1>NullContext</h1>
+              <p>localhost runtime</p>
+            </div>
+          )}
         </div>
 
-        <section className="server-line">
-          <span className={`server-dot ${serverStatus}`} />
-          <span>server:{serverStatus}</span>
-          <button className="ghost-button" onClick={checkHealth}>
-            check
-          </button>
-        </section>
-        <p className="microcopy">last check: {healthCheckedAt}</p>
-
-        <section className="panel">
-          <div className="panel-title">runtime mode</div>
-
-          <div className="segmented">
+        {sidebarCollapsed ? (
+          <div className="sidebar-compact">
             <button
-              className={runtimeMode === "one-shot" ? "selected" : ""}
-              onClick={() => setRuntimeMode("one-shot")}
-              disabled={activeChatRuntimeActive}
+              className="ghost-button"
+              onClick={() => setSidebarCollapsed(false)}
+              title="Expand sidebar"
             >
-              one-shot
+              open
             </button>
             <button
-              className={runtimeMode === "active-chat" ? "selected" : ""}
-              onClick={() => setRuntimeMode("active-chat")}
+              className="ghost-button"
+              onClick={() => setConfigDrawerOpen(true)}
+              title="Open session config drawer"
             >
-              active chat
+              config
             </button>
-          </div>
-
-          <p className="microcopy">
-            one-shot cleans up every prompt. active chat keeps the runtime alive until end +
-            sanitize.
-          </p>
-        </section>
-
-        <section className="panel">
-          <div className="panel-title">session config</div>
-
-          <label>
-            mode
-            <select
-              value={mode}
-              onChange={(event) => setMode(event.target.value)}
-              disabled={activeChatRuntimeActive}
+            <button
+              className="ghost-button"
+              onClick={() => setInspectorOpen((current) => !current)}
+              title={inspectorOpen ? "Hide inspector" : "Show inspector"}
             >
-              <option value="secure">secure</option>
-              <option value="standard">standard</option>
-              <option value="air-gapped">air-gapped</option>
-            </select>
-          </label>
-
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={persistent}
-              disabled={mode !== "standard" || activeChatRuntimeActive}
-              onChange={(event) => setPersistent(event.target.checked)}
-            />
-            persistent
-          </label>
-
-          <label>
-            chat template
-            <select
-              value={chatTemplate}
-              onChange={(event) => setChatTemplate(event.target.value as ChatTemplateOption)}
-              disabled={activeChatRuntimeActive}
-            >
-              <option value="auto">auto-detect</option>
-              <option value="generic">generic</option>
-              <option value="chatml">chatml</option>
-              <option value="llama3-instruct">llama3-instruct</option>
-            </select>
-          </label>
-
-          <label>
-            context token budget
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={chatContextTokenBudget}
-              onChange={(event) => setChatContextTokenBudget(event.target.value)}
-              disabled={activeChatRuntimeActive}
-            />
-          </label>
-
-          <label>
-            context turn limit
-            <input
-              type="number"
-              min={1}
-              step={1}
-              value={chatContextTurnLimit}
-              onChange={(event) => setChatContextTurnLimit(event.target.value)}
-              disabled={activeChatRuntimeActive}
-            />
-          </label>
-
-          <p className="microcopy">
-            secure and air-gapped sessions are ephemeral. standard can retain workspace artifacts.
-            active chat uses the selected template and bounded recent-context window when the
-            session starts.
-          </p>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <div className="panel-title">registry</div>
-            <button className="ghost-button" onClick={loadSessions}>
-              refresh
+              inspect
             </button>
+            <button className="ghost-button" onClick={checkHealth} title="Check server health">
+              check
+            </button>
+            <div className="compact-status" title={`server ${serverStatus}`}>
+              <span className={`server-dot ${serverStatus}`} />
+              <span>{serverStatus}</span>
+            </div>
           </div>
+        ) : (
+          <>
+            <section className="server-line">
+              <span className={`server-dot ${serverStatus}`} />
+              <span>server:{serverStatus}</span>
+              <button className="ghost-button" onClick={checkHealth}>
+                check
+              </button>
+            </section>
+            <p className="microcopy">last check: {healthCheckedAt}</p>
 
-          <p className="microcopy">last refresh: {registryLoadedAt}</p>
+            <section className="panel">
+              <div className="panel-title">runtime mode</div>
 
-          <div className="session-list">
-            {sessions.length === 0 ? (
-              <p className="muted-text">no persistent sessions</p>
-            ) : (
-              sessions.map((session) => (
+              <div className="segmented">
                 <button
-                  className={
-                    selectedSessionId === session.session_id
-                      ? "session-item selected"
-                      : "session-item"
-                  }
-                  key={session.session_id}
-                  onClick={() => openReport(session.session_id)}
+                  className={runtimeMode === "one-shot" ? "selected" : ""}
+                  onClick={() => setRuntimeMode("one-shot")}
+                  disabled={activeChatRuntimeActive}
                 >
-                  <span>{shortId(session.session_id)}</span>
-                  <small>{session.security_mode}</small>
-                  <small>{new Date(session.started_at).toLocaleString()}</small>
+                  one-shot
                 </button>
-              ))
-            )}
-          </div>
-        </section>
+                <button
+                  className={runtimeMode === "active-chat" ? "selected" : ""}
+                  onClick={() => setRuntimeMode("active-chat")}
+                >
+                  active chat
+                </button>
+              </div>
 
-        <section className="panel">
-          <div className="panel-title">theme</div>
-          <div className="segmented">
-            <button
-              className={theme === "dark" ? "selected" : ""}
-              onClick={() => setTheme("dark")}
-            >
-              dark
-            </button>
-            <button
-              className={theme === "light" ? "selected" : ""}
-              onClick={() => setTheme("light")}
-            >
-              light
-            </button>
-          </div>
-        </section>
+              <p className="microcopy">
+                one-shot cleans up every prompt. active chat keeps the runtime alive until end +
+                sanitize.
+              </p>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header">
+                <div className="panel-title">session config</div>
+                <button className="ghost-button" onClick={() => setConfigDrawerOpen(true)}>
+                  open
+                </button>
+              </div>
+
+              <div className="config-summary">
+                <span>mode: {mode}</span>
+                <span>persistent: {persistent ? "on" : "off"}</span>
+                <span>template: {chatTemplate}</span>
+                <span>context: {chatContextTokenBudget} tok / {chatContextTurnLimit} turns</span>
+              </div>
+
+              <p className="microcopy">
+                Move detailed controls into the config drawer so the main shell stays focused on
+                runtime state and conversation flow.
+              </p>
+            </section>
+
+            <section className="panel">
+              <div className="panel-header">
+                <div className="panel-title">registry</div>
+                <button className="ghost-button" onClick={loadSessions}>
+                  refresh
+                </button>
+              </div>
+
+              <p className="microcopy">last refresh: {registryLoadedAt}</p>
+
+              <div className="session-list">
+                {sessions.length === 0 ? (
+                  <p className="muted-text">no persistent sessions</p>
+                ) : (
+                  sessions.map((session) => (
+                    <button
+                      className={
+                        selectedSessionId === session.session_id
+                          ? "session-item selected"
+                          : "session-item"
+                      }
+                      key={session.session_id}
+                      onClick={() => {
+                        setInspectorView("report");
+                        setInspectorOpen(true);
+                        openReport(session.session_id);
+                      }}
+                    >
+                      <span>{shortId(session.session_id)}</span>
+                      <small>{session.security_mode}</small>
+                      <small>{new Date(session.started_at).toLocaleString()}</small>
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-title">theme</div>
+              <div className="segmented">
+                <button
+                  className={theme === "dark" ? "selected" : ""}
+                  onClick={() => setTheme("dark")}
+                >
+                  dark
+                </button>
+                <button
+                  className={theme === "light" ? "selected" : ""}
+                  onClick={() => setTheme("light")}
+                >
+                  light
+                </button>
+              </div>
+            </section>
+          </>
+        )}
       </aside>
 
       <section className="main-column">
@@ -959,6 +993,29 @@ function App() {
                 ? "one-shot secure inference"
                 : "active runtime chat session"}
             </p>
+          </div>
+          <div className="topbar-actions">
+            <button
+              className="ghost-button"
+              onClick={() => setSidebarCollapsed((current) => !current)}
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {sidebarCollapsed ? "sidebar +" : "sidebar -"}
+            </button>
+            <button
+              className="ghost-button"
+              onClick={() => setConfigDrawerOpen(true)}
+              title="Open session configuration drawer"
+            >
+              config
+            </button>
+            <button
+              className="ghost-button"
+              onClick={() => setInspectorOpen((current) => !current)}
+              title={inspectorOpen ? "Hide inspector" : "Show inspector"}
+            >
+              {inspectorOpen ? "inspector -" : "inspector +"}
+            </button>
           </div>
         </header>
 
@@ -1083,43 +1140,160 @@ function App() {
         </section>
       </section>
 
-      <aside className="inspector">
-        <details className="panel" open>
-          <summary>audit operations ({auditOperations.length})</summary>
+      {inspectorOpen && (
+        <aside className="inspector">
+          <section className="panel inspector-shell">
+            <div className="panel-header">
+              <div className="panel-title">inspector</div>
+              <button className="ghost-button" onClick={() => setInspectorOpen(false)}>
+                hide
+              </button>
+            </div>
 
-          {auditOperations.length === 0 ? (
-            <p className="muted-text">audit operations appear during a run</p>
-          ) : (
-            <div className="audit-list">
-              {auditOperations.map((operation, index) => (
-                <details className="audit-item" key={`${operation.operation}-${index}`}>
-                  <summary>
-                    <code>{operation.operation}</code>
-                    <span className={statusClass(operation.status)}>{operation.status}</span>
-                  </summary>
-                  <p>{operation.details}</p>
-                </details>
+            <div className="inspector-tabs">
+              {inspectorTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  className={inspectorView === tab.id ? "selected" : ""}
+                  disabled={tab.disabled}
+                  onClick={() => setInspectorView(tab.id)}
+                  title={tab.disabled ? "No data yet" : undefined}
+                >
+                  {tab.label}
+                  {typeof tab.count === "number" ? ` (${tab.count})` : ""}
+                </button>
               ))}
             </div>
-          )}
-        </details>
 
-        <details className="panel" open>
-          <summary>runtime logs</summary>
-          <pre>{runtimeLogs || "no runtime logs yet"}</pre>
-        </details>
+            <div className="inspector-panel">
+              {inspectorView === "audit" && (
+                <>
+                  {auditOperations.length === 0 ? (
+                    <p className="muted-text">audit operations appear during a run</p>
+                  ) : (
+                    <div className="audit-list">
+                      {auditOperations.map((operation, index) => (
+                        <details className="audit-item" key={`${operation.operation}-${index}`}>
+                          <summary>
+                            <code>{operation.operation}</code>
+                            <span className={statusClass(operation.status)}>{operation.status}</span>
+                          </summary>
+                          <p>{operation.details}</p>
+                        </details>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
 
-        <details className="panel" open>
-          <summary>privacy report</summary>
-          <pre>{selectedReport || privacyReport || "no report selected"}</pre>
-        </details>
+              {inspectorView === "runtime" && <pre>{runtimeLogs || "no runtime logs yet"}</pre>}
 
-        {stderr && (
-          <details className="panel danger" open>
-            <summary>stderr</summary>
-            <pre>{stderr}</pre>
-          </details>
-        )}
+              {inspectorView === "report" && (
+                <pre>{selectedReport || privacyReport || "no report selected"}</pre>
+              )}
+
+              {inspectorView === "stderr" && (
+                <pre>{stderr || "no stderr captured"}</pre>
+              )}
+            </div>
+          </section>
+        </aside>
+      )}
+
+      <div
+        className={`drawer-backdrop${configDrawerOpen ? " open" : ""}`}
+        onClick={() => setConfigDrawerOpen(false)}
+      />
+      <aside className={`config-drawer${configDrawerOpen ? " open" : ""}`}>
+        <div className="drawer-header">
+          <div>
+            <h3>session config</h3>
+            <p>move detailed controls off the main page and keep the shell focused</p>
+          </div>
+          <button className="ghost-button" onClick={() => setConfigDrawerOpen(false)}>
+            close
+          </button>
+        </div>
+
+        <div className="drawer-body">
+          <section className="panel">
+            <label>
+              mode
+              <select
+                value={mode}
+                onChange={(event) => setMode(event.target.value)}
+                disabled={activeChatRuntimeActive}
+              >
+                <option value="secure">secure</option>
+                <option value="standard">standard</option>
+                <option value="air-gapped">air-gapped</option>
+              </select>
+            </label>
+
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={persistent}
+                disabled={mode !== "standard" || activeChatRuntimeActive}
+                onChange={(event) => setPersistent(event.target.checked)}
+              />
+              persistent
+              <Hint text="Persistent is only available in standard mode. Secure and air-gapped sessions remain ephemeral." />
+            </label>
+
+            <label>
+              chat template
+              <div className="field-with-hint">
+                <select
+                  value={chatTemplate}
+                  onChange={(event) => setChatTemplate(event.target.value as ChatTemplateOption)}
+                  disabled={activeChatRuntimeActive}
+                >
+                  <option value="auto">auto-detect</option>
+                  <option value="generic">generic</option>
+                  <option value="chatml">chatml</option>
+                  <option value="llama3-instruct">llama3-instruct</option>
+                </select>
+                <Hint text="Auto-detect resolves a template from the configured model path. Override it if a model needs a specific prompt format." />
+              </div>
+            </label>
+
+            <label>
+              context token budget
+              <div className="field-with-hint">
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={chatContextTokenBudget}
+                  onChange={(event) => setChatContextTokenBudget(event.target.value)}
+                  disabled={activeChatRuntimeActive}
+                />
+                <Hint text="Approximate recent-context budget used when building active chat prompts. Older turns are dropped first when the window overflows." />
+              </div>
+            </label>
+
+            <label>
+              context turn limit
+              <div className="field-with-hint">
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={chatContextTurnLimit}
+                  onChange={(event) => setChatContextTurnLimit(event.target.value)}
+                  disabled={activeChatRuntimeActive}
+                />
+                <Hint text="Maximum number of recent prior turns that can be included in the active-chat prompt window." />
+              </div>
+            </label>
+
+            <p className="microcopy">
+              Active chat uses the selected template and bounded recent-context window when the
+              session starts. Change settings before starting the runtime.
+            </p>
+          </section>
+        </div>
       </aside>
     </main>
   );
