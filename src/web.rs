@@ -7,8 +7,9 @@ use crate::config::SessionConfig;
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::registry::{
-    archived_report_path, ensure_registry_dirs, reconcile_registry_on_startup,
-    register_persistent_session, CleanupReason, SessionIndexEntry, SessionRegistry,
+    archived_report_path, due_retention_cleanup_session_ids, ensure_registry_dirs,
+    reconcile_registry_on_startup, register_persistent_session, CleanupReason, RetentionPolicy,
+    SessionIndexEntry, SessionRegistry,
 };
 use crate::runtime::ManagedRuntime;
 use crate::sensitive::SensitiveBytes;
@@ -29,10 +30,13 @@ use std::net::SocketAddr;
 use std::path::Path as FsPath;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
+
+const RETENTION_SWEEP_INTERVAL_SECONDS: u64 = 60;
 
 #[derive(Debug, Clone)]
 struct WebState {
@@ -56,6 +60,7 @@ struct SessionLifecycleActionResponse {
     session_id: String,
     lifecycle_state: String,
     retention_policy: String,
+    retention_deadline: Option<String>,
     cleanup_reason: Option<String>,
     cleanup_attempted: bool,
     cleanup_successful: bool,
@@ -65,6 +70,12 @@ struct SessionLifecycleActionResponse {
     workspace: String,
     report_path: String,
     message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateRetentionPolicyRequest {
+    retention_policy: String,
+    retain_for_minutes: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,6 +128,8 @@ pub async fn serve() -> Result<()> {
         chat_manager: ChatSessionManager::new(),
     };
 
+    spawn_retention_scheduler(state.home.clone());
+
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/run", post(run_session))
@@ -130,6 +143,10 @@ pub async fn serve() -> Result<()> {
             post(stream_chat_message),
         )
         .route("/api/sessions", get(list_sessions))
+        .route(
+            "/api/sessions/:session_id/retention",
+            post(update_retention_policy),
+        )
         .route("/api/sessions/:session_id/cleanup", post(cleanup_session))
         .route(
             "/api/sessions/:session_id/reconcile",
@@ -149,6 +166,38 @@ pub async fn serve() -> Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+fn spawn_retention_scheduler(home: Arc<String>) {
+    tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(Duration::from_secs(RETENTION_SWEEP_INTERVAL_SECONDS));
+
+        loop {
+            interval.tick().await;
+
+            let home = home.clone();
+
+            let result = tokio::task::spawn_blocking(move || run_retention_sweep(&home)).await;
+
+            match result {
+                Ok(Ok(swept)) if !swept.is_empty() => {
+                    println!(
+                        "Retention sweep cleaned {} session(s): {}",
+                        swept.len(),
+                        swept.join(", ")
+                    );
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => {
+                    println!("Retention sweep error: {error}");
+                }
+                Err(error) => {
+                    println!("Retention sweep task failed: {error}");
+                }
+            }
+        }
+    });
 }
 
 fn emit_startup_reconciliation(home: &str) -> Result<()> {
@@ -728,6 +777,24 @@ async fn list_sessions(State(state): State<WebState>) -> Response {
     }
 }
 
+async fn update_retention_policy(
+    State(state): State<WebState>,
+    Path(session_id): Path<String>,
+    Json(request): Json<UpdateRetentionPolicyRequest>,
+) -> Response {
+    let home = state.home.as_ref().clone();
+
+    match tokio::task::spawn_blocking(move || {
+        update_registry_retention_policy(&home, &session_id, request)
+    })
+    .await
+    {
+        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
 async fn cleanup_session(
     State(state): State<WebState>,
     Path(session_id): Path<String>,
@@ -794,6 +861,22 @@ fn cleanup_persistent_session(
     home: &str,
     session_id: &str,
 ) -> Result<SessionLifecycleActionResponse> {
+    cleanup_persistent_session_with_reason(
+        home,
+        session_id,
+        CleanupReason::ManualOperatorRequest,
+        "Manual lifecycle cleanup finished.",
+        "Operator requested immediate lifecycle cleanup for a retained session.",
+    )
+}
+
+fn cleanup_persistent_session_with_reason(
+    home: &str,
+    session_id: &str,
+    reason: CleanupReason,
+    completion_message: &str,
+    request_details: &str,
+) -> Result<SessionLifecycleActionResponse> {
     let mut registry = SessionRegistry::load(home)?;
     let entry = registry
         .find_mut(session_id)
@@ -804,7 +887,7 @@ fn cleanup_persistent_session(
 
     let archive_operation = archive_report_if_present(home, session_id, &current_report_path)?;
 
-    entry.mark_cleanup_pending(CleanupReason::ManualOperatorRequest);
+    entry.mark_cleanup_pending(reason.clone());
     registry.save(home)?;
 
     let workspace_path_buf = FsPath::new(&workspace_path).to_path_buf();
@@ -814,8 +897,7 @@ fn cleanup_persistent_session(
     operations.push(SanitizationOperation {
         operation: "lifecycle_cleanup_request".to_string(),
         status: "successful".to_string(),
-        details: "Operator requested immediate lifecycle cleanup for a retained session."
-            .to_string(),
+        details: request_details.to_string(),
     });
 
     if let Some(operation) = archive_operation {
@@ -836,7 +918,7 @@ fn cleanup_persistent_session(
             entry.report_path = archived_path;
         }
 
-        entry.mark_cleanup_result(&cleanup_report, CleanupReason::ManualOperatorRequest);
+        entry.mark_cleanup_result(&cleanup_report, reason);
     }
 
     registry.save(home)?;
@@ -845,10 +927,85 @@ fn cleanup_persistent_session(
         .find(session_id)
         .ok_or_else(|| anyhow::anyhow!("Session not found after cleanup save: {session_id}"))?;
 
-    Ok(build_lifecycle_action_response(
-        entry,
-        "Manual lifecycle cleanup finished.",
-    ))
+    Ok(build_lifecycle_action_response(entry, completion_message))
+}
+
+fn update_registry_retention_policy(
+    home: &str,
+    session_id: &str,
+    request: UpdateRetentionPolicyRequest,
+) -> Result<SessionLifecycleActionResponse> {
+    let retention_policy = RetentionPolicy::from_str(&request.retention_policy)?;
+
+    if retention_policy == RetentionPolicy::EphemeralImmediate {
+        anyhow::bail!(
+            "ephemeral_immediate is only valid for ephemeral sessions and cannot be assigned to a retained registry session"
+        );
+    }
+
+    let retention_deadline = match retention_policy {
+        RetentionPolicy::RetainUntilManualCleanup => None,
+        RetentionPolicy::RetainForDuration => {
+            let minutes = request.retain_for_minutes.ok_or_else(|| {
+                anyhow::anyhow!("retain_for_minutes is required for retain_for_duration")
+            })?;
+
+            if minutes == 0 {
+                anyhow::bail!("retain_for_minutes must be greater than 0");
+            }
+
+            Some((chrono::Utc::now() + chrono::Duration::minutes(minutes as i64)).to_rfc3339())
+        }
+        RetentionPolicy::EphemeralImmediate => None,
+    };
+
+    let mut registry = SessionRegistry::load(home)?;
+    let entry = registry
+        .find_mut(session_id)
+        .ok_or_else(|| anyhow::anyhow!("Session not found: {session_id}"))?;
+
+    entry.apply_retention_policy(retention_policy.clone(), retention_deadline);
+    registry.save(home)?;
+
+    let entry = registry
+        .find(session_id)
+        .ok_or_else(|| anyhow::anyhow!("Session not found after retention update: {session_id}"))?;
+
+    let message = match retention_policy {
+        RetentionPolicy::RetainUntilManualCleanup => {
+            "Updated session retention to manual cleanup.".to_string()
+        }
+        RetentionPolicy::RetainForDuration => format!(
+            "Updated session retention to expire at {}.",
+            entry
+                .lifecycle
+                .retention_deadline
+                .as_deref()
+                .unwrap_or("unknown")
+        ),
+        RetentionPolicy::EphemeralImmediate => unreachable!(),
+    };
+
+    Ok(build_lifecycle_action_response(entry, &message))
+}
+
+fn run_retention_sweep(home: &str) -> Result<Vec<String>> {
+    let due_sessions = due_retention_cleanup_session_ids(home)?;
+    let mut swept = Vec::new();
+
+    for session_id in due_sessions {
+        cleanup_persistent_session_with_reason(
+            home,
+            &session_id,
+            CleanupReason::ScheduledRetentionExpiry,
+            "Scheduled retention expiry cleanup finished.",
+            "Scheduled retention expiry triggered lifecycle cleanup for this retained session.",
+        )?;
+
+        swept.push(session_id);
+    }
+
+    Ok(swept)
 }
 
 fn reconcile_registry_session(
@@ -947,6 +1104,7 @@ fn build_lifecycle_action_response(
         session_id: entry.session_id.clone(),
         lifecycle_state: entry.lifecycle.state.as_str().to_string(),
         retention_policy: entry.lifecycle.retention_policy.as_str().to_string(),
+        retention_deadline: entry.lifecycle.retention_deadline.clone(),
         cleanup_reason: entry
             .lifecycle
             .cleanup_reason

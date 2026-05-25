@@ -157,6 +157,7 @@ type SessionLifecycleActionResponse = {
   session_id: string;
   lifecycle_state: string;
   retention_policy: string;
+  retention_deadline?: string | null;
   cleanup_reason?: string | null;
   cleanup_attempted: boolean;
   cleanup_successful: boolean;
@@ -225,6 +226,21 @@ function formatBytes(value: number): string {
   }
 
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function minutesUntil(timestamp: string | null | undefined): string {
+  if (!timestamp) {
+    return "60";
+  }
+
+  const parsed = new Date(timestamp);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "60";
+  }
+
+  const minutes = Math.max(1, Math.ceil((parsed.getTime() - Date.now()) / 60000));
+  return String(minutes);
 }
 
 function humanizeSnakeCase(value: string): string {
@@ -419,6 +435,8 @@ function App() {
   const [registryActionFailed, setRegistryActionFailed] = useState(false);
   const [registryActionResult, setRegistryActionResult] =
     useState<SessionLifecycleActionResponse | null>(null);
+  const [retentionPolicyDraft, setRetentionPolicyDraft] = useState("retain_until_manual_cleanup");
+  const [retentionMinutesDraft, setRetentionMinutesDraft] = useState("60");
   const [activeChatCancelPending, setActiveChatCancelPending] = useState(false);
   const [registryQuery, setRegistryQuery] = useState("");
   const [registryModeFilter, setRegistryModeFilter] = useState<RegistryModeFilter>("all");
@@ -1096,6 +1114,54 @@ function App() {
     }
   }
 
+  async function saveRegistryRetentionPolicy(sessionId: string) {
+    setRegistryActionPending("retention");
+    setRegistryActionFailed(false);
+    setRegistryActionMessage("");
+
+    try {
+      const retainForMinutes =
+        retentionPolicyDraft === "retain_for_duration"
+          ? parsePositiveInteger(retentionMinutesDraft)
+          : null;
+
+      if (retentionPolicyDraft === "retain_for_duration" && retainForMinutes === null) {
+        throw new Error("Retention minutes must be a whole number greater than 0.");
+      }
+
+      const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/retention`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          retention_policy: retentionPolicyDraft,
+          retain_for_minutes: retainForMinutes ?? undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await readApiError(
+          response,
+          "Failed to update session retention policy."
+        );
+        throw new Error(error);
+      }
+
+      const data = (await response.json()) as SessionLifecycleActionResponse;
+      setRegistryActionResult(data);
+      setRegistryActionMessage(data.message);
+      setSelectedSessionId(data.session_id);
+
+      await loadSessions();
+    } catch (error) {
+      setRegistryActionFailed(true);
+      setRegistryActionMessage(String(error));
+    } finally {
+      setRegistryActionPending(null);
+    }
+  }
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
@@ -1161,6 +1227,17 @@ function App() {
 
     return () => window.removeEventListener("mousedown", closeCommandMenu);
   }, [commandMenuOpen]);
+
+  useEffect(() => {
+    const currentSession = sessions.find((session) => session.session_id === selectedSessionId);
+
+    if (!currentSession) {
+      return;
+    }
+
+    setRetentionPolicyDraft(currentSession.lifecycle.retention_policy);
+    setRetentionMinutesDraft(minutesUntil(currentSession.lifecycle.retention_deadline));
+  }, [selectedSessionId, sessions]);
 
   useEffect(() => {
     const nextSessions = [...sessions]
@@ -2356,6 +2433,54 @@ function App() {
                     </>
                   )}
                 </dl>
+
+                <section className="registry-retention-controls">
+                  <div className="panel-title">retention policy</div>
+                  <div className="registry-filter-row">
+                    <label>
+                      policy
+                      <select
+                        value={retentionPolicyDraft}
+                        onChange={(event) => setRetentionPolicyDraft(event.target.value)}
+                        disabled={registryActionPending !== null}
+                      >
+                        <option value="retain_until_manual_cleanup">manual cleanup</option>
+                        <option value="retain_for_duration">timed retention</option>
+                      </select>
+                    </label>
+
+                    {retentionPolicyDraft === "retain_for_duration" && (
+                      <label>
+                        minutes
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={retentionMinutesDraft}
+                          onChange={(event) => setRetentionMinutesDraft(event.target.value)}
+                          disabled={registryActionPending !== null}
+                        />
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="registry-retention-meta">
+                    <span>
+                      current deadline:{" "}
+                      {selectedSession.lifecycle.retention_deadline
+                        ? formatTimestamp(selectedSession.lifecycle.retention_deadline)
+                        : "none"}
+                    </span>
+                    <button
+                      onClick={() => saveRegistryRetentionPolicy(selectedSession.session_id)}
+                      disabled={registryActionPending !== null}
+                    >
+                      {registryActionPending === "retention"
+                        ? "saving..."
+                        : "save retention policy"}
+                    </button>
+                  </div>
+                </section>
 
                 <div className="registry-actions">
                   <button onClick={() => openSessionReport(selectedSession.session_id)}>

@@ -83,6 +83,15 @@ impl RetentionPolicy {
             Self::RetainForDuration => "retain_for_duration",
         }
     }
+
+    pub fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "ephemeral_immediate" => Ok(Self::EphemeralImmediate),
+            "retain_until_manual_cleanup" => Ok(Self::RetainUntilManualCleanup),
+            "retain_for_duration" => Ok(Self::RetainForDuration),
+            _ => anyhow::bail!("Invalid retention policy: {value}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -229,6 +238,16 @@ impl SessionIndexEntry {
     pub fn mark_orphaned(&mut self) {
         self.lifecycle.state = SessionLifecycleState::Orphaned;
         self.lifecycle.cleanup_reason = Some(CleanupReason::StartupOrphanReconciliation);
+        self.lifecycle.updated_at = Some(current_timestamp());
+    }
+
+    pub fn apply_retention_policy(
+        &mut self,
+        retention_policy: RetentionPolicy,
+        retention_deadline: Option<String>,
+    ) {
+        self.lifecycle.retention_policy = retention_policy;
+        self.lifecycle.retention_deadline = retention_deadline;
         self.lifecycle.updated_at = Some(current_timestamp());
     }
 }
@@ -384,6 +403,29 @@ pub fn reconcile_registry_on_startup(home: &str) -> Result<StartupReconciliation
     Ok(summary)
 }
 
+pub fn due_retention_cleanup_session_ids(home: &str) -> Result<Vec<String>> {
+    let registry = SessionRegistry::load(home)?;
+    let now = Utc::now();
+
+    let due = registry
+        .sessions
+        .iter()
+        .filter(|entry| {
+            entry.lifecycle.retention_policy == RetentionPolicy::RetainForDuration
+                && entry.lifecycle.state == SessionLifecycleState::CompletedRetained
+                && entry
+                    .lifecycle
+                    .retention_deadline
+                    .as_deref()
+                    .and_then(parse_timestamp)
+                    .is_some_and(|deadline| deadline <= now)
+        })
+        .map(|entry| entry.session_id.clone())
+        .collect();
+
+    Ok(due)
+}
+
 pub fn ensure_registry_dirs(home: &str) -> Result<()> {
     fs::create_dir_all(registry_root(home).join("reports"))?;
     Ok(())
@@ -405,6 +447,12 @@ fn registry_path(home: &str) -> PathBuf {
 
 fn current_timestamp() -> String {
     Utc::now().to_rfc3339()
+}
+
+fn parse_timestamp(value: &str) -> Option<chrono::DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|value| value.with_timezone(&Utc))
 }
 
 enum ReconciliationOutcome {

@@ -1063,6 +1063,24 @@ pre {
   color: var(--failed);
 }
 
+.registry-retention-controls {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  padding: 10px;
+  background: var(--panel-soft);
+}
+
+.registry-retention-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .registry-path {
   overflow-wrap: anywhere;
 }
@@ -1249,6 +1267,11 @@ pre {
   }
 
   .registry-toolbar-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .registry-retention-meta {
     align-items: flex-start;
     flex-direction: column;
   }
