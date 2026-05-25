@@ -6,7 +6,10 @@ use crate::cleanup::{
 use crate::config::SessionConfig;
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
-use crate::registry::{register_persistent_session, SessionRegistry};
+use crate::registry::{
+    archived_report_path, ensure_registry_dirs, register_persistent_session, CleanupReason,
+    SessionIndexEntry, SessionRegistry,
+};
 use crate::runtime::ManagedRuntime;
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
@@ -23,6 +26,7 @@ use std::convert::Infallible;
 use std::fs;
 use std::io::Write;
 use std::net::SocketAddr;
+use std::path::Path as FsPath;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -45,6 +49,22 @@ struct HealthResponse {
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionLifecycleActionResponse {
+    session_id: String,
+    lifecycle_state: String,
+    retention_policy: String,
+    cleanup_reason: Option<String>,
+    cleanup_attempted: bool,
+    cleanup_successful: bool,
+    workspace_deleted: bool,
+    workspace_exists: bool,
+    report_exists: bool,
+    workspace: String,
+    report_path: String,
+    message: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +129,11 @@ pub async fn serve() -> Result<()> {
             post(stream_chat_message),
         )
         .route("/api/sessions", get(list_sessions))
+        .route("/api/sessions/:session_id/cleanup", post(cleanup_session))
+        .route(
+            "/api/sessions/:session_id/reconcile",
+            post(reconcile_session),
+        )
         .route("/api/reports/:session_id", get(show_report))
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -676,6 +701,34 @@ async fn list_sessions(State(state): State<WebState>) -> Response {
     }
 }
 
+async fn cleanup_session(
+    State(state): State<WebState>,
+    Path(session_id): Path<String>,
+) -> Response {
+    let home = state.home.as_ref().clone();
+
+    match tokio::task::spawn_blocking(move || cleanup_persistent_session(&home, &session_id)).await
+    {
+        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+async fn reconcile_session(
+    State(state): State<WebState>,
+    Path(session_id): Path<String>,
+) -> Response {
+    let home = state.home.as_ref().clone();
+
+    match tokio::task::spawn_blocking(move || reconcile_registry_session(&home, &session_id)).await
+    {
+        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
 async fn show_report(State(state): State<WebState>, Path(session_id): Path<String>) -> Response {
     let registry = match SessionRegistry::load(&state.home) {
         Ok(registry) => registry,
@@ -696,12 +749,191 @@ async fn show_report(State(state): State<WebState>, Path(session_id): Path<Strin
             Ok(json) => Json(json).into_response(),
             Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
         },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => json_error(
+            StatusCode::NOT_FOUND,
+            format!(
+                "Report file not found for session {session_id}. It may have been archived, removed during lifecycle cleanup, or the registry may need reconciliation."
+            ),
+        ),
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
 
 fn json_error(status: StatusCode, message: String) -> Response {
     (status, Json(ErrorResponse { error: message })).into_response()
+}
+
+fn cleanup_persistent_session(
+    home: &str,
+    session_id: &str,
+) -> Result<SessionLifecycleActionResponse> {
+    let mut registry = SessionRegistry::load(home)?;
+    let entry = registry
+        .find_mut(session_id)
+        .ok_or_else(|| anyhow::anyhow!("Session not found: {session_id}"))?;
+
+    let workspace_path = entry.workspace.clone();
+    let current_report_path = entry.report_path.clone();
+
+    let archive_operation = archive_report_if_present(home, session_id, &current_report_path)?;
+
+    entry.mark_cleanup_pending(CleanupReason::ManualOperatorRequest);
+    registry.save(home)?;
+
+    let workspace_path_buf = FsPath::new(&workspace_path).to_path_buf();
+    let (artifacts_detected, scan_operation) = scan_artifacts(&workspace_path_buf)?;
+    let mut operations = vec![scan_operation];
+
+    operations.push(SanitizationOperation {
+        operation: "lifecycle_cleanup_request".to_string(),
+        status: "successful".to_string(),
+        details: "Operator requested immediate lifecycle cleanup for a retained session."
+            .to_string(),
+    });
+
+    if let Some(operation) = archive_operation {
+        operations.push(operation);
+    }
+
+    let cleanup_report =
+        cleanup_ephemeral_workspace(&workspace_path_buf, artifacts_detected, operations);
+
+    {
+        let entry = registry
+            .find_mut(session_id)
+            .ok_or_else(|| anyhow::anyhow!("Session not found after cleanup: {session_id}"))?;
+
+        if let Some(archived_path) =
+            maybe_archived_report_path(home, session_id, &current_report_path)?
+        {
+            entry.report_path = archived_path;
+        }
+
+        entry.mark_cleanup_result(&cleanup_report, CleanupReason::ManualOperatorRequest);
+    }
+
+    registry.save(home)?;
+
+    let entry = registry
+        .find(session_id)
+        .ok_or_else(|| anyhow::anyhow!("Session not found after cleanup save: {session_id}"))?;
+
+    Ok(build_lifecycle_action_response(
+        entry,
+        "Manual lifecycle cleanup finished.",
+    ))
+}
+
+fn reconcile_registry_session(
+    home: &str,
+    session_id: &str,
+) -> Result<SessionLifecycleActionResponse> {
+    let mut registry = SessionRegistry::load(home)?;
+    let message = {
+        let entry = registry
+            .find_mut(session_id)
+            .ok_or_else(|| anyhow::anyhow!("Session not found: {session_id}"))?;
+
+        let workspace_exists = FsPath::new(&entry.workspace).exists();
+        let report_exists = FsPath::new(&entry.report_path).exists();
+
+        if entry.cleanup_successful && !workspace_exists {
+            entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            "Registry matches a cleaned-up session. Workspace is gone and lifecycle cleanup succeeded."
+                .to_string()
+        } else if !workspace_exists && !entry.cleanup_successful {
+            entry.mark_orphaned();
+            "Workspace is missing even though the session was not recorded as cleaned successfully. Marked session as orphaned."
+                .to_string()
+        } else if workspace_exists && entry.cleanup_successful {
+            entry.mark_orphaned();
+            "Workspace still exists even though cleanup was previously recorded as successful. Marked session as orphaned for investigation."
+                .to_string()
+        } else if !report_exists && !entry.cleanup_successful {
+            entry.mark_orphaned();
+            "Report file is missing while lifecycle cleanup was not recorded as successful. Marked session as orphaned."
+                .to_string()
+        } else {
+            entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            "Registry paths are present and no reconciliation changes were needed.".to_string()
+        }
+    };
+
+    registry.save(home)?;
+
+    let entry = registry
+        .find(session_id)
+        .ok_or_else(|| anyhow::anyhow!("Session not found after reconciliation: {session_id}"))?;
+
+    Ok(build_lifecycle_action_response(entry, &message))
+}
+
+fn archive_report_if_present(
+    home: &str,
+    session_id: &str,
+    current_report_path: &str,
+) -> Result<Option<SanitizationOperation>> {
+    let source = FsPath::new(current_report_path);
+
+    if !source.exists() {
+        return Ok(None);
+    }
+
+    ensure_registry_dirs(home)?;
+
+    let archived_path = archived_report_path(home, session_id);
+    fs::copy(source, &archived_path)?;
+
+    Ok(Some(SanitizationOperation {
+        operation: "lifecycle_report_archive".to_string(),
+        status: "successful".to_string(),
+        details: format!(
+            "Archived report before manual cleanup to {}.",
+            archived_path.display()
+        ),
+    }))
+}
+
+fn maybe_archived_report_path(
+    home: &str,
+    session_id: &str,
+    previous_report_path: &str,
+) -> Result<Option<String>> {
+    let archived_path = archived_report_path(home, session_id);
+
+    if archived_path.exists() {
+        return Ok(Some(archived_path.display().to_string()));
+    }
+
+    if FsPath::new(previous_report_path).exists() {
+        return Ok(Some(previous_report_path.to_string()));
+    }
+
+    Ok(None)
+}
+
+fn build_lifecycle_action_response(
+    entry: &SessionIndexEntry,
+    message: &str,
+) -> SessionLifecycleActionResponse {
+    SessionLifecycleActionResponse {
+        session_id: entry.session_id.clone(),
+        lifecycle_state: entry.lifecycle.state.as_str().to_string(),
+        retention_policy: entry.lifecycle.retention_policy.as_str().to_string(),
+        cleanup_reason: entry
+            .lifecycle
+            .cleanup_reason
+            .as_ref()
+            .map(|reason| reason.as_str().to_string()),
+        cleanup_attempted: entry.cleanup_attempted,
+        cleanup_successful: entry.cleanup_successful,
+        workspace_deleted: entry.workspace_deleted,
+        workspace_exists: FsPath::new(&entry.workspace).exists(),
+        report_exists: FsPath::new(&entry.report_path).exists(),
+        workspace: entry.workspace.clone(),
+        report_path: entry.report_path.clone(),
+        message: message.to_string(),
+    }
 }
 
 fn home_dir() -> Result<String> {

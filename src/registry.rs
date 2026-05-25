@@ -84,6 +84,17 @@ pub enum CleanupReason {
     StartupOrphanReconciliation,
 }
 
+impl CleanupReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::EphemeralPolicy => "ephemeral_policy",
+            Self::ManualOperatorRequest => "manual_operator_request",
+            Self::ScheduledRetentionExpiry => "scheduled_retention_expiry",
+            Self::StartupOrphanReconciliation => "startup_orphan_reconciliation",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionLifecycleMetadata {
     #[serde(default)]
@@ -311,6 +322,17 @@ pub fn show_report(home: &str, session_id: &str) -> Result<()> {
     println!("{}", report);
 
     Ok(())
+}
+
+pub fn ensure_registry_dirs(home: &str) -> Result<()> {
+    fs::create_dir_all(registry_root(home).join("reports"))?;
+    Ok(())
+}
+
+pub fn archived_report_path(home: &str, session_id: &str) -> PathBuf {
+    registry_root(home)
+        .join("reports")
+        .join(format!("{session_id}.json"))
 }
 
 fn registry_root(home: &str) -> PathBuf {
