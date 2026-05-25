@@ -212,6 +212,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  const [registryDrawerOpen, setRegistryDrawerOpen] = useState(false);
   const [inspectorView, setInspectorView] = useState<InspectorView>("audit");
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [chatTemplate, setChatTemplate] = useState<ChatTemplateOption>("auto");
@@ -262,9 +263,18 @@ function App() {
     try {
       const response = await fetch(`${API_BASE}/api/sessions`);
       const data = (await response.json()) as SessionRegistry;
-      setSessions(data.sessions ?? []);
+      const nextSessions = data.sessions ?? [];
+      setSessions(nextSessions);
+      setSelectedSessionId((current) => {
+        if (current && nextSessions.some((session) => session.session_id === current)) {
+          return current;
+        }
+
+        return nextSessions[0]?.session_id ?? "";
+      });
     } catch {
       setSessions([]);
+      setSelectedSessionId("");
     } finally {
       setRegistryLoadedAt(new Date().toLocaleTimeString());
     }
@@ -276,7 +286,6 @@ function App() {
     setStderr("");
     setAuditOperations([]);
     setSelectedReport("");
-    setSelectedSessionId("");
   }
 
   function resetOneShotConversation() {
@@ -473,6 +482,27 @@ function App() {
     };
   }
 
+  function closeDrawers() {
+    setConfigDrawerOpen(false);
+    setRegistryDrawerOpen(false);
+  }
+
+  function openConfigDrawer() {
+    setRegistryDrawerOpen(false);
+    setConfigDrawerOpen(true);
+    setCommandMenuOpen(false);
+  }
+
+  function openRegistryDrawer() {
+    setConfigDrawerOpen(false);
+    setRegistryDrawerOpen(true);
+    setCommandMenuOpen(false);
+
+    if (!selectedSessionId && sessions.length > 0) {
+      setSelectedSessionId(sessions[0].session_id);
+    }
+  }
+
   async function runOneShot() {
     resetOneShotConversation();
     setRunStatus("running");
@@ -528,7 +558,7 @@ function App() {
     resetRunPanels();
     setActiveChatStopNotice("");
     setRunStatus("running");
-    setConfigDrawerOpen(false);
+    closeDrawers();
     setCommandMenuOpen(false);
 
     try {
@@ -806,7 +836,7 @@ function App() {
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setConfigDrawerOpen(false);
+        closeDrawers();
         setCommandMenuOpen(false);
       }
     }
@@ -843,6 +873,8 @@ function App() {
     { id: "report", label: "report" },
     { id: "stderr", label: "stderr", disabled: !stderr },
   ];
+  const selectedSession =
+    sessions.find((session) => session.session_id === selectedSessionId) ?? null;
 
   return (
     <main
@@ -872,10 +904,17 @@ function App() {
             </button>
             <button
               className="ghost-button"
-              onClick={() => setConfigDrawerOpen(true)}
+              onClick={openConfigDrawer}
               title="Open session config drawer"
             >
               config
+            </button>
+            <button
+              className="ghost-button"
+              onClick={openRegistryDrawer}
+              title="Open session registry drawer"
+            >
+              registry
             </button>
             <button
               className="ghost-button"
@@ -931,7 +970,7 @@ function App() {
             <section className="panel">
               <div className="panel-header">
                 <div className="panel-title">session config</div>
-                <button className="ghost-button" onClick={() => setConfigDrawerOpen(true)}>
+                <button className="ghost-button" onClick={openConfigDrawer}>
                   open
                 </button>
               </div>
@@ -952,38 +991,22 @@ function App() {
             <section className="panel">
               <div className="panel-header">
                 <div className="panel-title">registry</div>
-                <button className="ghost-button" onClick={loadSessions}>
-                  refresh
+                <button className="ghost-button" onClick={openRegistryDrawer}>
+                  browse
                 </button>
               </div>
 
-              <p className="microcopy">last refresh: {registryLoadedAt}</p>
-
-              <div className="session-list">
-                {sessions.length === 0 ? (
-                  <p className="muted-text">no persistent sessions</p>
-                ) : (
-                  sessions.map((session) => (
-                    <button
-                      className={
-                        selectedSessionId === session.session_id
-                          ? "session-item selected"
-                          : "session-item"
-                      }
-                      key={session.session_id}
-                      onClick={() => {
-                        setInspectorView("report");
-                        setInspectorOpen(true);
-                        openReport(session.session_id);
-                      }}
-                    >
-                      <span>{shortId(session.session_id)}</span>
-                      <small>{session.security_mode}</small>
-                      <small>{new Date(session.started_at).toLocaleString()}</small>
-                    </button>
-                  ))
-                )}
+              <div className="config-summary">
+                <span>
+                  sessions: {sessions.length} persistent{sessions.length === 1 ? " run" : " runs"}
+                </span>
+                <span>last refresh: {registryLoadedAt}</span>
               </div>
+
+              <p className="microcopy">
+                Open the registry drawer to inspect retained sessions, workspace paths, cleanup
+                outcomes, and stored reports without crowding the main shell.
+              </p>
             </section>
 
             <section className="panel">
@@ -1099,11 +1122,17 @@ function App() {
                   <div className="popup-panel">
                     <button
                       onClick={() => {
-                        setConfigDrawerOpen(true);
-                        setCommandMenuOpen(false);
+                        openConfigDrawer();
                       }}
                     >
                       open config drawer
+                    </button>
+                    <button
+                      onClick={() => {
+                        openRegistryDrawer();
+                      }}
+                    >
+                      open registry drawer
                     </button>
                     <button
                       onClick={() => {
@@ -1128,14 +1157,6 @@ function App() {
                       }}
                     >
                       check server
-                    </button>
-                    <button
-                      onClick={() => {
-                        loadSessions();
-                        setCommandMenuOpen(false);
-                      }}
-                    >
-                      refresh registry
                     </button>
                   </div>
                 )}
@@ -1263,8 +1284,8 @@ function App() {
       )}
 
       <div
-        className={`drawer-backdrop${configDrawerOpen ? " open" : ""}`}
-        onClick={() => setConfigDrawerOpen(false)}
+        className={`drawer-backdrop${configDrawerOpen || registryDrawerOpen ? " open" : ""}`}
+        onClick={closeDrawers}
       />
       <aside className={`config-drawer${configDrawerOpen ? " open" : ""}`}>
         <div className="drawer-header">
@@ -1272,7 +1293,7 @@ function App() {
             <h3>session config</h3>
             <p>move detailed controls off the main page and keep the shell focused</p>
           </div>
-          <button className="ghost-button" onClick={() => setConfigDrawerOpen(false)}>
+          <button className="ghost-button" onClick={closeDrawers}>
             close
           </button>
         </div>
@@ -1354,6 +1375,113 @@ function App() {
               Active chat uses the selected template and bounded recent-context window when the
               session starts. Change settings before starting the runtime.
             </p>
+          </section>
+        </div>
+      </aside>
+
+      <aside className={`registry-drawer${registryDrawerOpen ? " open" : ""}`}>
+        <div className="drawer-header">
+          <div>
+            <h3>session registry</h3>
+            <p>browse retained sessions and open stored reports without packing the sidebar</p>
+          </div>
+          <div className="drawer-actions">
+            <button className="ghost-button" onClick={loadSessions}>
+              refresh
+            </button>
+            <button className="ghost-button" onClick={closeDrawers}>
+              close
+            </button>
+          </div>
+        </div>
+
+        <div className="drawer-body registry-drawer-body">
+          <section className="panel registry-list-panel">
+            <div className="panel-header">
+              <div className="panel-title">sessions</div>
+              <span className="mini-status">loaded:{registryLoadedAt}</span>
+            </div>
+
+            {sessions.length === 0 ? (
+              <p className="muted-text">no persistent sessions</p>
+            ) : (
+              <div className="session-list registry-session-list">
+                {sessions.map((session) => (
+                  <button
+                    className={
+                      selectedSessionId === session.session_id
+                        ? "session-item selected"
+                        : "session-item"
+                    }
+                    key={session.session_id}
+                    onClick={() => setSelectedSessionId(session.session_id)}
+                  >
+                    <span>{shortId(session.session_id)}</span>
+                    <small>{session.security_mode}</small>
+                    <small>{new Date(session.started_at).toLocaleString()}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="panel registry-detail-panel">
+            <div className="panel-header">
+              <div className="panel-title">details</div>
+              {selectedSession && (
+                <span className="mini-status">id:{shortId(selectedSession.session_id)}</span>
+              )}
+            </div>
+
+            {!selectedSession ? (
+              <p className="muted-text">select a persistent session to inspect its metadata</p>
+            ) : (
+              <>
+                <dl className="registry-detail-grid">
+                  <dt>started</dt>
+                  <dd>{new Date(selectedSession.started_at).toLocaleString()}</dd>
+                  <dt>mode</dt>
+                  <dd>{selectedSession.security_mode}</dd>
+                  <dt>prompt source</dt>
+                  <dd>{selectedSession.prompt_source}</dd>
+                  <dt>history stored</dt>
+                  <dd>{selectedSession.history_stored ? "yes" : "no"}</dd>
+                  <dt>backend</dt>
+                  <dd>{selectedSession.backend}</dd>
+                  <dt>artifacts</dt>
+                  <dd>{selectedSession.artifacts_detected}</dd>
+                  <dt>cleanup attempted</dt>
+                  <dd>{selectedSession.cleanup_attempted ? "yes" : "no"}</dd>
+                  <dt>cleanup successful</dt>
+                  <dd>{selectedSession.cleanup_successful ? "yes" : "no"}</dd>
+                  <dt>workspace deleted</dt>
+                  <dd>{selectedSession.workspace_deleted ? "yes" : "no"}</dd>
+                  <dt>workspace</dt>
+                  <dd className="registry-path">{selectedSession.workspace}</dd>
+                  <dt>model path</dt>
+                  <dd className="registry-path">{selectedSession.model_path}</dd>
+                  <dt>report path</dt>
+                  <dd className="registry-path">{selectedSession.report_path}</dd>
+                </dl>
+
+                <div className="registry-actions">
+                  <button
+                    onClick={() => {
+                      setInspectorView("report");
+                      setInspectorOpen(true);
+                      openReport(selectedSession.session_id);
+                    }}
+                  >
+                    open report in inspector
+                  </button>
+                </div>
+
+                <p className="microcopy">
+                  Registry browsing stays separate from the live runtime shell so report inspection
+                  doesn&apos;t compete with conversation and runtime controls.
+                </p>
+              </>
+            )}
           </section>
         </div>
       </aside>

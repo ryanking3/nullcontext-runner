@@ -753,6 +753,26 @@ pre {
   transform: translateX(0);
 }
 
+.registry-drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 21;
+  display: flex;
+  width: min(760px, calc(100vw - 18px));
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 12px 0 30px rgb(0 0 0 / 0.2);
+  transform: translateX(-100%);
+  transition: transform 180ms ease;
+}
+
+.registry-drawer.open {
+  transform: translateX(0);
+}
+
 .drawer-header {
   display: flex;
   align-items: flex-start;
@@ -778,6 +798,57 @@ pre {
 .drawer-body {
   overflow: auto;
   padding: 16px;
+}
+
+.drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.registry-drawer-body {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.registry-list-panel,
+.registry-detail-panel {
+  margin-bottom: 0;
+}
+
+.registry-session-list {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+}
+
+.registry-detail-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 0;
+  font-size: 11px;
+}
+
+.registry-detail-grid dt {
+  color: var(--muted);
+}
+
+.registry-detail-grid dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+}
+
+.registry-path {
+  overflow-wrap: anywhere;
+}
+
+.registry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
 }
 
 .field-with-hint {
@@ -935,5 +1006,17 @@ pre {
 
   .runtime-actions {
     justify-content: flex-start;
+  }
+
+  .registry-drawer {
+    width: min(680px, calc(100vw - 18px));
+  }
+
+  .registry-drawer-body {
+    grid-template-columns: 1fr;
+  }
+
+  .registry-session-list {
+    max-height: 240px;
   }
 }
