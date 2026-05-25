@@ -41,7 +41,7 @@ impl Session {
 }
 
 fn create_session_workspace(session_id: &str) -> Result<PathBuf> {
-    let base = PathBuf::from("/tmp/nullcontext");
+    let base = std::env::temp_dir().join("nullcontext");
 
     fs::create_dir_all(&base)?;
 
