@@ -439,6 +439,8 @@ function App() {
   const [chatTemplate, setChatTemplate] = useState<ChatTemplateOption>("auto");
   const [chatContextTokenBudget, setChatContextTokenBudget] = useState("2048");
   const [chatContextTurnLimit, setChatContextTurnLimit] = useState("12");
+  const [useModelTemplateDefault, setUseModelTemplateDefault] = useState(true);
+  const [useModelContextDefaults, setUseModelContextDefaults] = useState(true);
   const [models, setModels] = useState<RegisteredModel[]>([]);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [modelsLoadedAt, setModelsLoadedAt] = useState("never");
@@ -800,22 +802,41 @@ function App() {
   }
 
   function readActiveChatConfigInputs() {
-    const tokenBudget = parsePositiveInteger(chatContextTokenBudget);
-    const turnLimit = parsePositiveInteger(chatContextTurnLimit);
-
-    if (tokenBudget === null) {
-      throw new Error("Active chat context token budget must be a whole number greater than 0.");
+    if (useModelTemplateDefault || useModelContextDefaults) {
+      if (!selectedModel) {
+        throw new Error("Select a registered model before starting a session.");
+      }
     }
 
-    if (turnLimit === null) {
-      throw new Error("Active chat context turn limit must be a whole number greater than 0.");
+    const overrides: {
+      chat_template?: ChatTemplateOption;
+      chat_context_token_budget?: number;
+      chat_context_turn_limit?: number;
+    } = {};
+
+    if (!useModelTemplateDefault) {
+      overrides.chat_template = chatTemplate;
     }
 
-    return {
-      chat_template: chatTemplate,
-      chat_context_token_budget: tokenBudget,
-      chat_context_turn_limit: turnLimit,
-    };
+    if (!useModelContextDefaults) {
+      const tokenBudget = parsePositiveInteger(chatContextTokenBudget);
+      const turnLimit = parsePositiveInteger(chatContextTurnLimit);
+
+      if (tokenBudget === null) {
+        throw new Error(
+          "Active chat context token budget must be a whole number greater than 0."
+        );
+      }
+
+      if (turnLimit === null) {
+        throw new Error("Active chat context turn limit must be a whole number greater than 0.");
+      }
+
+      overrides.chat_context_token_budget = tokenBudget;
+      overrides.chat_context_turn_limit = turnLimit;
+    }
+
+    return overrides;
   }
 
   function closeDrawers() {
@@ -1492,6 +1513,15 @@ function App() {
     models.find((model) => model.id === selectedModelId) ??
     models.find((model) => model.default_selected) ??
     null;
+  const effectiveTemplate = useModelTemplateDefault
+    ? selectedModel?.chat_template || "auto"
+    : chatTemplate;
+  const effectiveContextBudget = useModelContextDefaults
+    ? selectedModel?.chat_context_token_budget ?? null
+    : parsePositiveInteger(chatContextTokenBudget);
+  const effectiveContextTurnLimit = useModelContextDefaults
+    ? selectedModel?.chat_context_turn_limit ?? null
+    : parsePositiveInteger(chatContextTurnLimit);
   const activeRuntimeModelName =
     activeChatRuntimeActive && activeChatModelName
       ? activeChatModelName
@@ -1606,8 +1636,17 @@ function App() {
                 <span>model: {selectedModel?.name || "loading..."}</span>
                 <span>mode: {mode}</span>
                 <span>persistent: {persistent ? "on" : "off"}</span>
-                <span>template: {chatTemplate}</span>
-                <span>context: {chatContextTokenBudget} tok / {chatContextTurnLimit} turns</span>
+                <span>
+                  template: {effectiveTemplate}
+                  {useModelTemplateDefault ? " · model" : " · override"}
+                </span>
+                <span>
+                  context:{" "}
+                  {effectiveContextBudget !== null && effectiveContextTurnLimit !== null
+                    ? `${effectiveContextBudget} tok / ${effectiveContextTurnLimit} turns`
+                    : "invalid"}
+                  {useModelContextDefaults ? " · model" : " · override"}
+                </span>
               </div>
 
               <p className="microcopy">
@@ -1721,6 +1760,20 @@ function App() {
                   </div>
                 )}
                 <div title={activeChatHistoryPolicy}>policy: {activeChatHistoryPolicy}</div>
+              </div>
+            )}
+            {runtimeMode === "one-shot" && (
+              <div className="runtime-meta">
+                <div>
+                  template: {effectiveTemplate}
+                  {useModelTemplateDefault ? " (model default)" : " (manual override)"}
+                </div>
+                {effectiveContextBudget !== null && effectiveContextTurnLimit !== null && (
+                  <div>
+                    context: {effectiveContextBudget} tok / {effectiveContextTurnLimit} turns
+                    {useModelContextDefaults ? " (model default)" : " (manual override)"}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2312,7 +2365,7 @@ function App() {
                 <select
                   value={chatTemplate}
                   onChange={(event) => setChatTemplate(event.target.value as ChatTemplateOption)}
-                  disabled={activeChatRuntimeActive}
+                  disabled={activeChatRuntimeActive || useModelTemplateDefault}
                 >
                   <option value="auto">auto-detect</option>
                   <option value="generic">generic</option>
@@ -2323,6 +2376,20 @@ function App() {
               </div>
             </label>
 
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={useModelTemplateDefault}
+                disabled={activeChatRuntimeActive || !selectedModel}
+                onChange={(event) => setUseModelTemplateDefault(event.target.checked)}
+              />
+              use selected model template default
+            </label>
+            <p className="microcopy">
+              effective template: {effectiveTemplate}
+              {useModelTemplateDefault ? " from model registry" : " from manual override"}
+            </p>
+
             <label>
               context token budget
               <div className="field-with-hint">
@@ -2332,7 +2399,7 @@ function App() {
                   step={1}
                   value={chatContextTokenBudget}
                   onChange={(event) => setChatContextTokenBudget(event.target.value)}
-                  disabled={activeChatRuntimeActive}
+                  disabled={activeChatRuntimeActive || useModelContextDefaults}
                 />
                 <Hint text="Approximate recent-context budget used when building active chat prompts. Older turns are dropped first when the window overflows." />
               </div>
@@ -2347,11 +2414,28 @@ function App() {
                   step={1}
                   value={chatContextTurnLimit}
                   onChange={(event) => setChatContextTurnLimit(event.target.value)}
-                  disabled={activeChatRuntimeActive}
+                  disabled={activeChatRuntimeActive || useModelContextDefaults}
                 />
                 <Hint text="Maximum number of recent prior turns that can be included in the active-chat prompt window." />
               </div>
             </label>
+
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={useModelContextDefaults}
+                disabled={activeChatRuntimeActive || !selectedModel}
+                onChange={(event) => setUseModelContextDefaults(event.target.checked)}
+              />
+              use selected model context defaults
+            </label>
+            <p className="microcopy">
+              effective context:{" "}
+              {effectiveContextBudget !== null && effectiveContextTurnLimit !== null
+                ? `${effectiveContextBudget} tok / ${effectiveContextTurnLimit} turns`
+                : "invalid manual override"}
+              {useModelContextDefaults ? " from model registry" : " from manual override"}
+            </p>
 
             <p className="microcopy">
               Active chat uses the selected template and bounded recent-context window when the
