@@ -99,6 +99,10 @@ pub struct LlamaRuntimeReport {
     pub gpu_memory_source: Option<String>,
     pub process_present_after_shutdown: Option<bool>,
     pub process_check_source: Option<String>,
+    pub process_resident_bytes_after_shutdown: Option<u64>,
+    pub process_virtual_bytes_after_shutdown: Option<u64>,
+    pub verification_window_ms: u64,
+    pub gpu_entry_present_after_shutdown: Option<bool>,
     pub gpu_memory_bytes_after_shutdown: Option<u64>,
     pub gpu_check_source: Option<String>,
     pub observation_notes: Vec<String>,
@@ -220,12 +224,34 @@ pub fn build_llama_runtime_report(
         LlamaMemoryDomainReport {
             domain: "llama_process_runtime".to_string(),
             exposure_scope: "external child process memory and runtime state".to_string(),
-            cleanup_status: if process_exited_cleanly {
+            cleanup_status: if post_shutdown.process_present_after_shutdown == Some(false) {
                 "successful".to_string()
+            } else if post_shutdown.process_present_after_shutdown == Some(true) {
+                "failed".to_string()
+            } else if process_exited_cleanly {
+                "warning".to_string()
             } else {
                 "failed".to_string()
             },
-            notes: if !process_exited_cleanly {
+            notes: if post_shutdown.process_present_after_shutdown == Some(false) {
+                format!(
+                    "No llama-server PID was observed during the {} ms verification window after shutdown. This is evidence that the external runtime process ended, but not proof that released RAM pages were zeroed.",
+                    post_shutdown.verification_window_ms
+                )
+            } else if post_shutdown.process_present_after_shutdown == Some(true) {
+                format!(
+                    "The llama-server PID was still observable after the {} ms verification window. Post-shutdown RSS/VSZ remained at {} / {}.",
+                    post_shutdown.verification_window_ms,
+                    post_shutdown
+                        .process_resident_bytes_after_shutdown
+                        .map(|value| format!("{value} bytes"))
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    post_shutdown
+                        .process_virtual_bytes_after_shutdown
+                        .map(|value| format!("{value} bytes"))
+                        .unwrap_or_else(|| "unknown".to_string())
+                )
+            } else if !process_exited_cleanly {
                 "The llama-server child process was not confirmed to stop, so external runtime memory may have remained live longer than intended."
                     .to_string()
             } else if shutdown.shutdown_method == "already_exited" {
@@ -260,8 +286,28 @@ pub fn build_llama_runtime_report(
         memory_domains.push(LlamaMemoryDomainReport {
             domain: "gpu_vram".to_string(),
             exposure_scope: "GPU-offloaded model layers and possible prompt/cache-related buffers".to_string(),
-            cleanup_status: "warning".to_string(),
-            notes: "GPU offload was requested, so some llama.cpp state may have resided in VRAM. NullContext does not yet verify or sanitize VRAM contents after shutdown.".to_string(),
+            cleanup_status: if post_shutdown.gpu_entry_present_after_shutdown == Some(true) {
+                "failed".to_string()
+            } else if post_shutdown.gpu_entry_present_after_shutdown == Some(false) {
+                "successful".to_string()
+            } else {
+                "warning".to_string()
+            },
+            notes: if post_shutdown.gpu_entry_present_after_shutdown == Some(true) {
+                format!(
+                    "A matching GPU-memory observation was still present after shutdown ({}). This is evidence of post-shutdown GPU residency visibility, not proof of allocator ownership or complete VRAM state.",
+                    post_shutdown
+                        .gpu_memory_bytes_after_shutdown
+                        .map(|value| format!("{value} bytes"))
+                        .unwrap_or_else(|| "unknown usage".to_string())
+                )
+            } else if post_shutdown.gpu_entry_present_after_shutdown == Some(false) {
+                "No matching GPU-memory entry was observed after shutdown. This is evidence that the runtime PID no longer had an observable nvidia-smi compute-apps allocation, but it is not proof of full VRAM sanitization."
+                    .to_string()
+            } else {
+                "GPU offload was requested, but post-shutdown GPU inspection was unavailable or inconclusive. NullContext does not yet verify or sanitize VRAM contents after shutdown."
+                    .to_string()
+            },
         });
     } else {
         memory_domains.push(LlamaMemoryDomainReport {
@@ -293,6 +339,10 @@ pub fn build_llama_runtime_report(
         gpu_memory_source: usage.gpu_memory_source.clone(),
         process_present_after_shutdown: post_shutdown.process_present_after_shutdown,
         process_check_source: post_shutdown.process_check_source.clone(),
+        process_resident_bytes_after_shutdown: post_shutdown.process_resident_bytes_after_shutdown,
+        process_virtual_bytes_after_shutdown: post_shutdown.process_virtual_bytes_after_shutdown,
+        verification_window_ms: post_shutdown.verification_window_ms,
+        gpu_entry_present_after_shutdown: post_shutdown.gpu_entry_present_after_shutdown,
         gpu_memory_bytes_after_shutdown: post_shutdown.gpu_memory_bytes_after_shutdown,
         gpu_check_source: post_shutdown.gpu_check_source.clone(),
         observation_notes,

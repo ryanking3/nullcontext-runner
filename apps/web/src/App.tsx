@@ -188,6 +188,10 @@ type LlamaRuntimeReportData = {
   gpu_memory_source?: string | null;
   process_present_after_shutdown?: boolean | null;
   process_check_source?: string | null;
+  process_resident_bytes_after_shutdown?: number | null;
+  process_virtual_bytes_after_shutdown?: number | null;
+  verification_window_ms: number;
+  gpu_entry_present_after_shutdown?: boolean | null;
   gpu_memory_bytes_after_shutdown?: number | null;
   gpu_check_source?: string | null;
   observation_notes: string[];
@@ -2945,6 +2949,45 @@ function App() {
                                     : formatBoolean(
                                         currentReport.llama_runtime
                                           .process_present_after_shutdown
+                                      ),
+                              },
+                              {
+                                label: "verification window",
+                                value: `${currentReport.llama_runtime.verification_window_ms} ms`,
+                              },
+                              {
+                                label: "post-shutdown rss",
+                                value:
+                                  currentReport.llama_runtime
+                                    .process_resident_bytes_after_shutdown
+                                    ? formatBytes(
+                                        currentReport.llama_runtime
+                                          .process_resident_bytes_after_shutdown
+                                      )
+                                    : "unavailable",
+                              },
+                              {
+                                label: "post-shutdown virtual",
+                                value:
+                                  currentReport.llama_runtime
+                                    .process_virtual_bytes_after_shutdown
+                                    ? formatBytes(
+                                        currentReport.llama_runtime
+                                          .process_virtual_bytes_after_shutdown
+                                      )
+                                    : "unavailable",
+                              },
+                              {
+                                label: "gpu entry after shutdown",
+                                value:
+                                  currentReport.llama_runtime
+                                    .gpu_entry_present_after_shutdown === null ||
+                                  currentReport.llama_runtime
+                                    .gpu_entry_present_after_shutdown === undefined
+                                    ? "unavailable"
+                                    : formatBoolean(
+                                        currentReport.llama_runtime
+                                          .gpu_entry_present_after_shutdown
                                       ),
                               },
                               {

@@ -34,10 +34,17 @@ pub struct RuntimeUsageSnapshot {
 pub struct RuntimePostShutdownObservation {
     pub process_present_after_shutdown: Option<bool>,
     pub process_check_source: Option<String>,
+    pub process_resident_bytes_after_shutdown: Option<u64>,
+    pub process_virtual_bytes_after_shutdown: Option<u64>,
+    pub verification_window_ms: u64,
+    pub gpu_entry_present_after_shutdown: Option<bool>,
     pub gpu_memory_bytes_after_shutdown: Option<u64>,
     pub gpu_check_source: Option<String>,
     pub observation_notes: Vec<String>,
 }
+
+const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
+const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
 
 impl ManagedRuntime {
     pub fn launch(config: &SessionConfig) -> Result<Self> {
@@ -150,9 +157,41 @@ impl ManagedRuntime {
 }
 
 pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
-    let (process_present_after_shutdown, process_check_source, process_note) =
-        observe_process_presence(pid);
+    let started_at = Instant::now();
+    let mut process_present_after_shutdown;
+    let mut process_check_source;
+    let mut process_note = None;
+
+    loop {
+        let (present, source, note) = observe_process_presence(pid);
+        process_present_after_shutdown = present;
+        process_check_source = source;
+
+        if note.is_some() {
+            process_note = note;
+        }
+
+        if present == Some(false)
+            || started_at.elapsed() >= Duration::from_millis(POST_SHUTDOWN_VERIFICATION_WINDOW_MS)
+        {
+            break;
+        }
+
+        thread::sleep(Duration::from_millis(
+            POST_SHUTDOWN_VERIFICATION_INTERVAL_MS,
+        ));
+    }
+
+    let post_shutdown_process_sample = if process_present_after_shutdown == Some(true) {
+        Some(observe_process_memory(pid))
+    } else {
+        None
+    };
+
     let (gpu_memory_bytes_after_shutdown, gpu_check_source, gpu_note) = observe_gpu_memory(pid);
+    let gpu_entry_present_after_shutdown = gpu_check_source
+        .as_ref()
+        .map(|_| gpu_memory_bytes_after_shutdown.is_some());
 
     let mut observation_notes = Vec::new();
 
@@ -167,6 +206,14 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
     RuntimePostShutdownObservation {
         process_present_after_shutdown,
         process_check_source,
+        process_resident_bytes_after_shutdown: post_shutdown_process_sample
+            .as_ref()
+            .and_then(|sample| sample.resident_bytes),
+        process_virtual_bytes_after_shutdown: post_shutdown_process_sample
+            .as_ref()
+            .and_then(|sample| sample.virtual_bytes),
+        verification_window_ms: POST_SHUTDOWN_VERIFICATION_WINDOW_MS,
+        gpu_entry_present_after_shutdown,
         gpu_memory_bytes_after_shutdown,
         gpu_check_source,
         observation_notes,
