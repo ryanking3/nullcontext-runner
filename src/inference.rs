@@ -1,6 +1,6 @@
 use crate::cleanup::SanitizationOperation;
 use crate::config::SessionConfig;
-use crate::runtime::ManagedRuntime;
+use crate::runtime::{ManagedRuntime, RuntimeShutdownOutcome};
 use crate::sensitive::SensitiveBytes;
 use anyhow::Result;
 use reqwest::blocking::Client;
@@ -11,7 +11,7 @@ use zeroize::Zeroize;
 pub struct InferenceResult {
     pub response: SensitiveBytes,
     pub runtime_pid: u32,
-    pub process_exited_cleanly: bool,
+    pub runtime_shutdown: RuntimeShutdownOutcome,
     pub sanitization_operations: Vec<SanitizationOperation>,
 }
 
@@ -44,22 +44,29 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
         config.max_tokens.parse::<u32>()?,
     )?;
 
-    let runtime_terminated = runtime.shutdown()?;
+    let runtime_shutdown = runtime.shutdown()?;
 
     operations.push(SanitizationOperation {
         operation: "managed_runtime_shutdown".to_string(),
-        status: if runtime_terminated {
+        status: if runtime_shutdown.stopped {
             "successful".to_string()
         } else {
             "failed".to_string()
         },
-        details: "llama-server child process was terminated after inference.".to_string(),
+        details: format!(
+            "llama-server child process shutdown completed using method {}. Exit code: {}.",
+            runtime_shutdown.shutdown_method,
+            runtime_shutdown
+                .exit_code
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        ),
     });
 
     Ok(InferenceResult {
         response: SensitiveBytes::new(response),
         runtime_pid,
-        process_exited_cleanly: runtime_terminated,
+        runtime_shutdown,
         sanitization_operations: operations,
     })
 }

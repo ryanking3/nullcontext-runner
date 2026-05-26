@@ -178,6 +178,9 @@ type LlamaRuntimeReportData = {
   model_path: string;
   gpu_layers_requested: number;
   gpu_offload_requested: boolean;
+  shutdown_method: string;
+  process_exit_code?: number | null;
+  graceful_shutdown_supported: boolean;
   cleanup_summary: string;
   residual_risk_summary: string;
   memory_domains: LlamaMemoryDomainReport[];
@@ -2868,6 +2871,24 @@ function App() {
                                 label: "gpu offload requested",
                                 value: formatBoolean(
                                   currentReport.llama_runtime.gpu_offload_requested
+                                ),
+                              },
+                              {
+                                label: "shutdown method",
+                                value: humanizeSnakeCase(
+                                  currentReport.llama_runtime.shutdown_method
+                                ),
+                              },
+                              {
+                                label: "process exit code",
+                                value:
+                                  currentReport.llama_runtime.process_exit_code?.toString() ||
+                                  "unknown",
+                              },
+                              {
+                                label: "graceful shutdown supported",
+                                value: formatBoolean(
+                                  currentReport.llama_runtime.graceful_shutdown_supported
                                 ),
                               },
                               {

@@ -3,6 +3,7 @@ use crate::config::SessionConfig;
 use crate::registry::{
     CleanupReason, RetentionPolicy, SessionLifecycleMetadata, SessionLifecycleState,
 };
+use crate::runtime::RuntimeShutdownOutcome;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -86,6 +87,9 @@ pub struct LlamaRuntimeReport {
     pub model_path: String,
     pub gpu_layers_requested: u32,
     pub gpu_offload_requested: bool,
+    pub shutdown_method: String,
+    pub process_exit_code: Option<i32>,
+    pub graceful_shutdown_supported: bool,
     pub cleanup_summary: String,
     pub residual_risk_summary: String,
     pub memory_domains: Vec<LlamaMemoryDomainReport>,
@@ -192,10 +196,11 @@ pub fn sync_report_lifecycle(
 pub fn build_llama_runtime_report(
     config: &SessionConfig,
     runtime_pid: Option<u32>,
-    process_exited_cleanly: bool,
+    shutdown: &RuntimeShutdownOutcome,
 ) -> LlamaRuntimeReport {
     let gpu_layers_requested = config.gpu_layers.parse::<u32>().unwrap_or(0);
     let gpu_offload_requested = gpu_layers_requested > 0;
+    let process_exited_cleanly = shutdown.stopped;
 
     let mut memory_domains = vec![
         LlamaMemoryDomainReport {
@@ -206,11 +211,14 @@ pub fn build_llama_runtime_report(
             } else {
                 "failed".to_string()
             },
-            notes: if process_exited_cleanly {
-                "NullContext terminated the llama-server child process, which is the current cleanup boundary for external llama.cpp-owned memory."
+            notes: if !process_exited_cleanly {
+                "The llama-server child process was not confirmed to stop, so external runtime memory may have remained live longer than intended."
+                    .to_string()
+            } else if shutdown.shutdown_method == "already_exited" {
+                "llama-server had already exited before NullContext ran its shutdown step. External llama.cpp memory ended with process exit, but no graceful cleanup hook was observed."
                     .to_string()
             } else {
-                "The llama-server child process was not confirmed to exit cleanly, so external runtime memory may have remained live longer than intended."
+                "NullContext stopped llama-server by killing the child process and waiting for exit. This is the current cleanup boundary for external llama.cpp-owned memory."
                     .to_string()
             },
         },
@@ -258,18 +266,24 @@ pub fn build_llama_runtime_report(
         model_path: config.model_path.clone(),
         gpu_layers_requested,
         gpu_offload_requested,
-        cleanup_summary: if process_exited_cleanly {
-            "NullContext terminated the llama-server runtime, but that process boundary is currently the strongest cleanup action applied to llama.cpp-owned memory domains."
+        shutdown_method: shutdown.shutdown_method.clone(),
+        process_exit_code: shutdown.exit_code,
+        graceful_shutdown_supported: shutdown.graceful_shutdown_supported,
+        cleanup_summary: if !process_exited_cleanly {
+            "NullContext could not confirm llama-server shutdown, so runtime-owned memory domains remain more weakly bounded than intended."
+                .to_string()
+        } else if shutdown.shutdown_method == "already_exited" {
+            "The llama-server process had already exited before the final shutdown step. Process exit is still the strongest cleanup boundary currently available for llama.cpp-owned memory domains."
                 .to_string()
         } else {
-            "NullContext could not confirm clean llama-server shutdown, so runtime-owned memory domains remain more weakly bounded than intended."
+            "NullContext stopped llama-server by force-killing the child process and waiting for exit. Process termination is currently the strongest cleanup action applied to llama.cpp-owned memory domains."
                 .to_string()
         },
         residual_risk_summary: if gpu_offload_requested {
-            "Allocator state, KV/cache contents, model-weight residency, and possible VRAM-resident buffers remain unverified even after runtime shutdown."
+            "Allocator state, KV/cache contents, model-weight residency, and possible VRAM-resident buffers remain unverified even after the recorded shutdown path."
                 .to_string()
         } else {
-            "Allocator state, KV/cache contents, and model-weight residency in the external llama.cpp process remain unverified even after runtime shutdown."
+            "Allocator state, KV/cache contents, and model-weight residency in the external llama.cpp process remain unverified even after the recorded shutdown path."
                 .to_string()
         },
         memory_domains,

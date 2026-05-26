@@ -12,6 +12,14 @@ pub struct ManagedRuntime {
     base_url: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct RuntimeShutdownOutcome {
+    pub stopped: bool,
+    pub shutdown_method: String,
+    pub exit_code: Option<i32>,
+    pub graceful_shutdown_supported: bool,
+}
+
 impl ManagedRuntime {
     pub fn launch(config: &SessionConfig) -> Result<Self> {
         println!("Launching llama-server...");
@@ -50,15 +58,25 @@ impl ManagedRuntime {
         self.child.id()
     }
 
-    pub fn shutdown(&mut self) -> Result<bool> {
+    pub fn shutdown(&mut self) -> Result<RuntimeShutdownOutcome> {
         println!("Shutting down runtime...");
 
         match self.child.try_wait()? {
-            Some(_status) => Ok(true),
+            Some(status) => Ok(RuntimeShutdownOutcome {
+                stopped: true,
+                shutdown_method: "already_exited".to_string(),
+                exit_code: status.code(),
+                graceful_shutdown_supported: false,
+            }),
             None => {
                 self.child.kill()?;
-                self.child.wait()?;
-                Ok(true)
+                let status = self.child.wait()?;
+                Ok(RuntimeShutdownOutcome {
+                    stopped: true,
+                    shutdown_method: "forced_kill_wait".to_string(),
+                    exit_code: status.code(),
+                    graceful_shutdown_supported: false,
+                })
             }
         }
     }

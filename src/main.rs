@@ -161,14 +161,14 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
         "llama-server".to_string(),
         config.security_mode.as_str().to_string(),
         config.gpu_layers.clone(),
-        inference_result.process_exited_cleanly,
+        inference_result.runtime_shutdown.stopped,
         cleanup_report.clone(),
     )
     .with_lifecycle(&lifecycle)
     .with_llama_runtime(build_llama_runtime_report(
         &config,
         Some(inference_result.runtime_pid),
-        inference_result.process_exited_cleanly,
+        &inference_result.runtime_shutdown,
     ));
 
     let report_json = report.to_pretty_json()?;

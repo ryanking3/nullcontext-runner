@@ -630,7 +630,7 @@ impl ChatSessionManager {
         let grounded_turn_count = active.retrieval_history.len();
         let runtime_pid = active.runtime.pid();
 
-        let runtime_stopped = active.runtime.shutdown()?;
+        let runtime_shutdown = active.runtime.shutdown()?;
 
         for turn in &mut active.turns {
             turn.user.sanitize();
@@ -643,13 +643,19 @@ impl ChatSessionManager {
 
         sanitization_operations.push(SanitizationOperation {
             operation: "managed_chat_runtime_shutdown".to_string(),
-            status: if runtime_stopped {
+            status: if runtime_shutdown.stopped {
                 "successful".to_string()
             } else {
                 "failed".to_string()
             },
-            details: "Long-lived llama-server chat runtime was terminated at session end."
-                .to_string(),
+            details: format!(
+                "Long-lived llama-server chat runtime shutdown completed using method {}. Exit code: {}.",
+                runtime_shutdown.shutdown_method,
+                runtime_shutdown
+                    .exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            ),
         });
 
         sanitization_operations.push(SanitizationOperation {
@@ -709,7 +715,7 @@ impl ChatSessionManager {
             "llama-server".to_string(),
             active.config.security_mode.as_str().to_string(),
             active.config.gpu_layers.clone(),
-            runtime_stopped,
+            runtime_shutdown.stopped,
             cleanup_report.clone(),
         )
         .with_lifecycle(&lifecycle)
@@ -717,7 +723,7 @@ impl ChatSessionManager {
         .with_llama_runtime(build_llama_runtime_report(
             &active.config,
             Some(runtime_pid),
-            runtime_stopped,
+            &runtime_shutdown,
         ));
 
         let report = if let (Some(corpus_id), Some(corpus_name)) = (
@@ -752,7 +758,7 @@ impl ChatSessionManager {
 
         Ok(EndChatResponse {
             session_id: active.session.id.clone(),
-            runtime_stopped,
+            runtime_stopped: runtime_shutdown.stopped,
             report: parsed_report,
         })
     }

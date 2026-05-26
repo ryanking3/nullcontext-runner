@@ -832,7 +832,7 @@ fn run_direct_streaming_session(
 
     let generation_completed = termination == StreamTermination::Completed;
 
-    let runtime_terminated = runtime.shutdown()?;
+    let runtime_shutdown = runtime.shutdown()?;
 
     if !generation_completed {
         let _ = send_audit(
@@ -891,12 +891,19 @@ fn run_direct_streaming_session(
         &mut sanitization_operations,
         SanitizationOperation {
             operation: "managed_runtime_shutdown".to_string(),
-            status: if runtime_terminated {
+            status: if runtime_shutdown.stopped {
                 "successful".to_string()
             } else {
                 "failed".to_string()
             },
-            details: "llama-server child process was terminated after inference.".to_string(),
+            details: format!(
+                "llama-server child process shutdown completed using method {}. Exit code: {}.",
+                runtime_shutdown.shutdown_method,
+                runtime_shutdown
+                    .exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            ),
         },
     );
 
@@ -992,14 +999,14 @@ fn run_direct_streaming_session(
         "llama-server".to_string(),
         config.security_mode.as_str().to_string(),
         config.gpu_layers.clone(),
-        runtime_terminated,
+        runtime_shutdown.stopped,
         cleanup_report.clone(),
     )
     .with_lifecycle(&lifecycle)
     .with_llama_runtime(build_llama_runtime_report(
         &config,
         Some(runtime_pid),
-        runtime_terminated,
+        &runtime_shutdown,
     ));
     let report = if let Some(retrieval_report) = retrieval_report {
         report.with_retrieval(retrieval_report)
