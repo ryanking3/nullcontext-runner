@@ -1108,6 +1108,94 @@ pre {
   background: var(--panel-soft);
 }
 
+.corpus-upload-summary {
+  border: 1px solid var(--border);
+  padding: 10px;
+  background: var(--panel-soft);
+}
+
+.upload-dropzone {
+  position: relative;
+  display: grid;
+  min-height: 98px;
+  place-items: center;
+  border: 1px dashed var(--border-strong);
+  background: var(--input);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.upload-dropzone.active {
+  border-color: var(--text);
+  background: var(--panel-soft);
+}
+
+.upload-dropzone.disabled {
+  opacity: 0.55;
+}
+
+.upload-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.upload-dropzone-copy {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  padding: 14px;
+  text-align: center;
+}
+
+.upload-dropzone-copy strong {
+  color: var(--text);
+  font-size: 12px;
+  text-transform: lowercase;
+}
+
+.upload-dropzone-copy span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.upload-progress {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  padding: 10px;
+  background: var(--panel-soft);
+}
+
+.upload-progress-bar {
+  height: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--input);
+}
+
+.upload-progress-fill {
+  height: 100%;
+  background: var(--text);
+  transition: width 120ms ease;
+}
+
+.upload-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.compact-report-section {
+  gap: 8px;
+}
+
 .registry-detail-grid {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);

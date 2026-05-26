@@ -511,6 +511,18 @@ function parsePrivacyReport(raw: string): PrivacyReportData | null {
   }
 }
 
+function parseCorpusReport(raw: string): CorpusIngestionReport | null {
+  if (!raw.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as CorpusIngestionReport;
+  } catch {
+    return null;
+  }
+}
+
 function ReportGrid({
   entries,
 }: {
@@ -577,6 +589,11 @@ function App() {
   const [corpusIngestFailed, setCorpusIngestFailed] = useState(false);
   const [corpusUploadFiles, setCorpusUploadFiles] = useState<File[]>([]);
   const [corpusUploadInputKey, setCorpusUploadInputKey] = useState(0);
+  const [corpusUploadProgressPercent, setCorpusUploadProgressPercent] = useState<number | null>(
+    null
+  );
+  const [corpusUploadProgressLabel, setCorpusUploadProgressLabel] = useState("");
+  const [corpusUploadDragActive, setCorpusUploadDragActive] = useState(false);
   const [lastIngestedCorpusReport, setLastIngestedCorpusReport] =
     useState<CorpusIngestionReport | null>(null);
   const [corpusActionPending, setCorpusActionPending] = useState<string | null>(null);
@@ -1590,6 +1607,8 @@ function App() {
     setCorpusIngestPending(true);
     setCorpusIngestFailed(false);
     setCorpusIngestMessage("");
+    setCorpusUploadProgressPercent(0);
+    setCorpusUploadProgressLabel("Preparing upload...");
 
     try {
       const formData = new FormData();
@@ -1601,17 +1620,56 @@ function App() {
         formData.append("files", file, file.name);
       }
 
-      const response = await fetch(`${API_BASE}/api/corpora/upload`, {
-        method: "POST",
-        body: formData,
+      const data = await new Promise<IngestCorpusResponse>((resolve, reject) => {
+        const request = new XMLHttpRequest();
+
+        request.open("POST", `${API_BASE}/api/corpora/upload`);
+        request.responseType = "json";
+
+        request.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+            setCorpusUploadProgressPercent(percent);
+            setCorpusUploadProgressLabel(
+              `Uploading ${formatBytes(event.loaded)} of ${formatBytes(event.total)}`
+            );
+          } else {
+            setCorpusUploadProgressLabel("Uploading files...");
+          }
+        };
+
+        request.onerror = () => {
+          reject(new Error("Failed to upload corpus files."));
+        };
+
+        request.onload = () => {
+          if (request.status < 200 || request.status >= 300) {
+            const responseText =
+              typeof request.responseText === "string" ? request.responseText : "";
+
+            try {
+              const parsed = JSON.parse(responseText) as ApiErrorResponse;
+              reject(new Error(parsed.error || "Failed to ingest uploaded corpus."));
+            } catch {
+              reject(new Error(responseText || "Failed to ingest uploaded corpus."));
+            }
+            return;
+          }
+
+          const response = request.response as IngestCorpusResponse | null;
+
+          if (!response) {
+            reject(new Error("Uploaded corpus response was empty."));
+            return;
+          }
+
+          resolve(response);
+        };
+
+        request.send(formData);
       });
-
-      if (!response.ok) {
-        const error = await readApiError(response, "Failed to ingest uploaded corpus.");
-        throw new Error(error);
-      }
-
-      const data = (await response.json()) as IngestCorpusResponse;
+      setCorpusUploadProgressPercent(100);
+      setCorpusUploadProgressLabel("Upload finished. Finalizing corpus...");
 
       setLastIngestedCorpusReport(data.report);
       setCorpusIngestMessage(
@@ -1628,7 +1686,17 @@ function App() {
       setCorpusIngestMessage(String(error));
     } finally {
       setCorpusIngestPending(false);
+      setCorpusUploadProgressPercent(null);
+      setCorpusUploadProgressLabel("");
     }
+  }
+
+  function handleCorpusUploadSelection(files: File[]) {
+    setCorpusUploadFiles(
+      files.filter((file) =>
+        [".txt", ".md", ".pdf"].some((suffix) => file.name.toLowerCase().endsWith(suffix))
+      )
+    );
   }
 
   async function openCorpusReport(corpusId: string) {
@@ -2069,6 +2137,7 @@ function App() {
       : selectedModel?.id || "";
   const currentReportRaw = selectedReport || privacyReport;
   const currentReport = parsePrivacyReport(currentReportRaw);
+  const currentCorpusReport = parseCorpusReport(selectedCorpusReport);
 
   return (
     <main
@@ -3591,13 +3660,66 @@ function App() {
                     </div>
 
                     {selectedCorpusReport && (
-                      <details className="report-detail" open>
-                        <summary>
-                          <span>corpus report</span>
-                          <span className="pill neutral">json</span>
-                        </summary>
-                        <pre>{selectedCorpusReport}</pre>
-                      </details>
+                      <>
+                        {currentCorpusReport?.upload_staging && (
+                          <section className="report-section">
+                            <div className="panel-title">upload staging</div>
+                            <ReportGrid
+                              entries={[
+                                {
+                                  label: "staging root",
+                                  value: currentCorpusReport.upload_staging.staging_root,
+                                },
+                                {
+                                  label: "staged files",
+                                  value: String(currentCorpusReport.upload_staging.staged_files),
+                                },
+                                {
+                                  label: "staged bytes",
+                                  value: formatBytes(currentCorpusReport.upload_staging.staged_bytes),
+                                },
+                                {
+                                  label: "cleanup status",
+                                  value: currentCorpusReport.upload_staging.cleaned_up
+                                    ? "cleaned up"
+                                    : "retained/failed",
+                                },
+                                {
+                                  label: "cleanup error",
+                                  value:
+                                    currentCorpusReport.upload_staging.cleanup_error || "none",
+                                },
+                              ]}
+                            />
+
+                            <details className="report-detail" open>
+                              <summary>
+                                <span>uploaded filenames</span>
+                                <span className="pill neutral">
+                                  {currentCorpusReport.upload_staging.source_filenames.length}
+                                </span>
+                              </summary>
+                              <div className="report-list">
+                                {currentCorpusReport.upload_staging.source_filenames.map((name) => (
+                                  <div className="report-item" key={name}>
+                                    <div className="report-path-list">
+                                      <div>{name}</div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          </section>
+                        )}
+
+                        <details className="report-detail" open>
+                          <summary>
+                            <span>corpus report</span>
+                            <span className="pill neutral">json</span>
+                          </summary>
+                          <pre>{selectedCorpusReport}</pre>
+                        </details>
+                      </>
                     )}
                   </>
                 )}
@@ -3641,16 +3763,54 @@ function App() {
 
                 <label>
                   upload files
-                  <input
-                    key={corpusUploadInputKey}
-                    type="file"
-                    accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf"
-                    multiple
-                    disabled={corpusIngestPending}
-                    onChange={(event) =>
-                      setCorpusUploadFiles(Array.from(event.target.files ?? []))
-                    }
-                  />
+                  <div
+                    className={`upload-dropzone${corpusUploadDragActive ? " active" : ""}${
+                      corpusIngestPending ? " disabled" : ""
+                    }`}
+                    onDragEnter={(event) => {
+                      event.preventDefault();
+                      if (!corpusIngestPending) {
+                        setCorpusUploadDragActive(true);
+                      }
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      if (!corpusIngestPending) {
+                        setCorpusUploadDragActive(true);
+                      }
+                    }}
+                    onDragLeave={(event) => {
+                      event.preventDefault();
+                      if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                        return;
+                      }
+                      setCorpusUploadDragActive(false);
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      setCorpusUploadDragActive(false);
+                      if (corpusIngestPending) {
+                        return;
+                      }
+                      handleCorpusUploadSelection(Array.from(event.dataTransfer.files ?? []));
+                    }}
+                  >
+                    <input
+                      key={corpusUploadInputKey}
+                      className="upload-input"
+                      type="file"
+                      accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf"
+                      multiple
+                      disabled={corpusIngestPending}
+                      onChange={(event) =>
+                        handleCorpusUploadSelection(Array.from(event.target.files ?? []))
+                      }
+                    />
+                    <div className="upload-dropzone-copy">
+                      <strong>drop files here or click to browse</strong>
+                      <span>Finder / File Explorer upload for .txt, .md, and .pdf</span>
+                    </div>
+                  </div>
                 </label>
 
                 {corpusUploadFiles.length > 0 && (
@@ -3702,6 +3862,21 @@ function App() {
                   </button>
                 </div>
 
+                {corpusIngestPending && corpusUploadProgressPercent !== null && (
+                  <div className="upload-progress">
+                    <div className="upload-progress-bar">
+                      <div
+                        className="upload-progress-fill"
+                        style={{ width: `${corpusUploadProgressPercent}%` }}
+                      />
+                    </div>
+                    <div className="upload-progress-meta">
+                      <span>{corpusUploadProgressPercent}%</span>
+                      <span>{corpusUploadProgressLabel || "Uploading corpus files..."}</span>
+                    </div>
+                  </div>
+                )}
+
                 <p className="microcopy">
                   Upload files to open Finder/File Explorer like a normal chatbot, or enter
                   absolute local file and directory paths if you want an operator-style ingest.
@@ -3729,6 +3904,38 @@ function App() {
                       </span>
                     )}
                   </div>
+                )}
+
+                {lastIngestedCorpusReport?.upload_staging && (
+                  <section className="report-section compact-report-section">
+                    <div className="panel-title">latest upload staging</div>
+                    <ReportGrid
+                      entries={[
+                        {
+                          label: "staging root",
+                          value: lastIngestedCorpusReport.upload_staging.staging_root,
+                        },
+                        {
+                          label: "staged files",
+                          value: String(lastIngestedCorpusReport.upload_staging.staged_files),
+                        },
+                        {
+                          label: "staged bytes",
+                          value: formatBytes(lastIngestedCorpusReport.upload_staging.staged_bytes),
+                        },
+                        {
+                          label: "cleanup status",
+                          value: lastIngestedCorpusReport.upload_staging.cleaned_up
+                            ? "cleaned up"
+                            : "retained/failed",
+                        },
+                        {
+                          label: "cleanup error",
+                          value: lastIngestedCorpusReport.upload_staging.cleanup_error || "none",
+                        },
+                      ]}
+                    />
+                  </section>
                 )}
               </section>
             </div>
