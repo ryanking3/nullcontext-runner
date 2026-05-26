@@ -4,6 +4,7 @@ mod cleanup;
 mod config;
 mod corpus;
 mod corpus_registry;
+mod docs;
 mod inference;
 mod llama_stream;
 mod memory_scan;

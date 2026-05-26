@@ -5,6 +5,7 @@ use crate::cleanup::{
 };
 use crate::config::{load_model_registry, SessionConfig};
 use crate::corpus_registry::{ensure_corpus_registry_dirs, list_corpora, CorpusRegistry};
+use crate::docs::{ingest_corpus, IngestCorpusRequest, IngestCorpusResponse};
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::registry::{
@@ -135,7 +136,10 @@ pub async fn serve() -> Result<()> {
 
     let app = Router::new()
         .route("/api/health", get(health))
-        .route("/api/corpora", get(list_corpora_route))
+        .route(
+            "/api/corpora",
+            get(list_corpora_route).post(ingest_corpus_route),
+        )
         .route("/api/models", get(list_models))
         .route("/api/run", post(run_session))
         .route("/api/run/stream", post(run_session_stream))
@@ -265,6 +269,19 @@ async fn list_models(State(state): State<WebState>) -> Response {
 async fn list_corpora_route(State(state): State<WebState>) -> Response {
     match list_corpora(&state.home) {
         Ok(registry) => Json::<CorpusRegistry>(registry).into_response(),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+async fn ingest_corpus_route(
+    State(state): State<WebState>,
+    Json(request): Json<IngestCorpusRequest>,
+) -> Response {
+    let home = state.home.as_ref().clone();
+
+    match tokio::task::spawn_blocking(move || ingest_corpus(&home, request)).await {
+        Ok(Ok(response)) => Json::<IngestCorpusResponse>(response).into_response(),
+        Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
