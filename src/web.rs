@@ -10,7 +10,10 @@ use crate::corpus_registry::{
     list_corpora, reconcile_corpora_on_startup, sync_corpus_report_lifecycle, CorpusIndexEntry,
     CorpusRegistry,
 };
-use crate::docs::{ingest_corpus, IngestCorpusRequest, IngestCorpusResponse};
+use crate::docs::{
+    ingest_corpus, ingest_uploaded_corpus, IngestCorpusRequest, IngestCorpusResponse,
+    IngestUploadedCorpusRequest, UploadedCorpusFile,
+};
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::registry::{
@@ -26,7 +29,7 @@ use crate::runtime::ManagedRuntime;
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
 use anyhow::Result;
-use axum::extract::{Path, State};
+use axum::extract::{Multipart, Path, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -166,6 +169,7 @@ pub async fn serve() -> Result<()> {
             "/api/corpora",
             get(list_corpora_route).post(ingest_corpus_route),
         )
+        .route("/api/corpora/upload", post(upload_corpus_route))
         .route("/api/corpora/:corpus_id/report", get(show_corpus_report))
         .route("/api/corpora/:corpus_id/query", post(query_corpus_route))
         .route(
@@ -354,6 +358,88 @@ async fn ingest_corpus_route(
     let home = state.home.as_ref().clone();
 
     match tokio::task::spawn_blocking(move || ingest_corpus(&home, request)).await {
+        Ok(Ok(response)) => Json::<IngestCorpusResponse>(response).into_response(),
+        Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+async fn upload_corpus_route(State(state): State<WebState>, mut multipart: Multipart) -> Response {
+    let mut name = String::new();
+    let mut persistent = None;
+    let mut ocr_enabled = None;
+    let mut files = Vec::new();
+
+    loop {
+        match multipart.next_field().await {
+            Ok(Some(field)) => {
+                let field_name = field.name().unwrap_or_default().to_string();
+
+                match field_name.as_str() {
+                    "name" => {
+                        if let Ok(value) = field.text().await {
+                            name = value;
+                        }
+                    }
+                    "persistent" => {
+                        if let Ok(value) = field.text().await {
+                            persistent = Some(matches!(
+                                value.trim().to_ascii_lowercase().as_str(),
+                                "1" | "true" | "yes" | "on"
+                            ));
+                        }
+                    }
+                    "ocr_enabled" => {
+                        if let Ok(value) = field.text().await {
+                            ocr_enabled = Some(matches!(
+                                value.trim().to_ascii_lowercase().as_str(),
+                                "1" | "true" | "yes" | "on"
+                            ));
+                        }
+                    }
+                    "files" => {
+                        let file_name = field
+                            .file_name()
+                            .map(|name| name.to_string())
+                            .unwrap_or_else(|| "upload.bin".to_string());
+
+                        match field.bytes().await {
+                            Ok(bytes) => files.push(UploadedCorpusFile {
+                                file_name,
+                                bytes: bytes.to_vec(),
+                            }),
+                            Err(error) => {
+                                return json_error(
+                                    StatusCode::BAD_REQUEST,
+                                    format!("Failed to read uploaded file bytes: {error}"),
+                                );
+                            }
+                        }
+                    }
+                    _ => {
+                        let _ = field.bytes().await;
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(error) => {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    format!("Failed to parse multipart upload: {error}"),
+                );
+            }
+        }
+    }
+
+    let home = state.home.as_ref().clone();
+    let request = IngestUploadedCorpusRequest {
+        name,
+        persistent,
+        ocr_enabled,
+        files,
+    };
+
+    match tokio::task::spawn_blocking(move || ingest_uploaded_corpus(&home, request)).await {
         Ok(Ok(response)) => Json::<IngestCorpusResponse>(response).into_response(),
         Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),

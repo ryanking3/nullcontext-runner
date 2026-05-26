@@ -286,6 +286,14 @@ type CorpusIngestionReport = {
   chunk_count: number;
   ocr_enabled: boolean;
   warnings: string[];
+  upload_staging?: {
+    staging_root: string;
+    staged_files: number;
+    staged_bytes: number;
+    source_filenames: string[];
+    cleaned_up: boolean;
+    cleanup_error?: string | null;
+  } | null;
   residual_risk: string;
 };
 
@@ -567,6 +575,8 @@ function App() {
   const [corpusIngestPending, setCorpusIngestPending] = useState(false);
   const [corpusIngestMessage, setCorpusIngestMessage] = useState("");
   const [corpusIngestFailed, setCorpusIngestFailed] = useState(false);
+  const [corpusUploadFiles, setCorpusUploadFiles] = useState<File[]>([]);
+  const [corpusUploadInputKey, setCorpusUploadInputKey] = useState(0);
   const [lastIngestedCorpusReport, setLastIngestedCorpusReport] =
     useState<CorpusIngestionReport | null>(null);
   const [corpusActionPending, setCorpusActionPending] = useState<string | null>(null);
@@ -1553,6 +1563,65 @@ function App() {
       setSelectedCorpusId(data.corpus.corpus_id);
       setCorpusIngestPaths("");
       setCorpusIngestName("");
+      await loadCorpora();
+    } catch (error) {
+      setCorpusIngestFailed(true);
+      setCorpusIngestMessage(String(error));
+    } finally {
+      setCorpusIngestPending(false);
+    }
+  }
+
+  async function ingestUploadedCorpusFromForm() {
+    const name = corpusIngestName.trim();
+
+    if (!name) {
+      setCorpusIngestFailed(true);
+      setCorpusIngestMessage("Corpus name is required.");
+      return;
+    }
+
+    if (corpusUploadFiles.length === 0) {
+      setCorpusIngestFailed(true);
+      setCorpusIngestMessage("Choose at least one .txt, .md, or .pdf file to upload.");
+      return;
+    }
+
+    setCorpusIngestPending(true);
+    setCorpusIngestFailed(false);
+    setCorpusIngestMessage("");
+
+    try {
+      const formData = new FormData();
+      formData.append("name", name);
+      formData.append("persistent", String(corpusIngestPersistent));
+      formData.append("ocr_enabled", String(corpusIngestOcrEnabled));
+
+      for (const file of corpusUploadFiles) {
+        formData.append("files", file, file.name);
+      }
+
+      const response = await fetch(`${API_BASE}/api/corpora/upload`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await readApiError(response, "Failed to ingest uploaded corpus.");
+        throw new Error(error);
+      }
+
+      const data = (await response.json()) as IngestCorpusResponse;
+
+      setLastIngestedCorpusReport(data.report);
+      setCorpusIngestMessage(
+        `Built uploaded corpus ${data.corpus.name} with ${data.report.chunk_count} chunks from ${data.report.files_ingested} ingested file(s).`
+      );
+      setSelectedCorpusId(data.corpus.corpus_id);
+      setCorpusIngestPaths("");
+      setCorpusIngestName("");
+      setCorpusUploadFiles([]);
+      setCorpusUploadInputKey((current) => current + 1);
       await loadCorpora();
     } catch (error) {
       setCorpusIngestFailed(true);
@@ -3570,6 +3639,37 @@ function App() {
                   />
                 </label>
 
+                <label>
+                  upload files
+                  <input
+                    key={corpusUploadInputKey}
+                    type="file"
+                    accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf"
+                    multiple
+                    disabled={corpusIngestPending}
+                    onChange={(event) =>
+                      setCorpusUploadFiles(Array.from(event.target.files ?? []))
+                    }
+                  />
+                </label>
+
+                {corpusUploadFiles.length > 0 && (
+                  <div className="config-summary corpus-upload-summary">
+                    <span>
+                      selected: {corpusUploadFiles.length} file
+                      {corpusUploadFiles.length === 1 ? "" : "s"}
+                    </span>
+                    {corpusUploadFiles.slice(0, 4).map((file) => (
+                      <span key={`${file.name}-${file.size}`}>
+                        {file.name} · {formatBytes(file.size)}
+                      </span>
+                    ))}
+                    {corpusUploadFiles.length > 4 && (
+                      <span>…and {corpusUploadFiles.length - 4} more</span>
+                    )}
+                  </div>
+                )}
+
                 <label className="checkbox">
                   <input
                     type="checkbox"
@@ -3592,13 +3692,20 @@ function App() {
 
                 <div className="registry-actions">
                   <button onClick={ingestCorpusFromForm} disabled={corpusIngestPending}>
-                    {corpusIngestPending ? "ingesting..." : "ingest corpus"}
+                    {corpusIngestPending ? "ingesting..." : "ingest from paths"}
+                  </button>
+                  <button
+                    onClick={ingestUploadedCorpusFromForm}
+                    disabled={corpusIngestPending || corpusUploadFiles.length === 0}
+                  >
+                    {corpusIngestPending ? "uploading..." : "upload + ingest"}
                   </button>
                 </div>
 
                 <p className="microcopy">
-                  Enter absolute local file or directory paths. PDF ingestion uses native text extraction
-                  first, then OCRs sparse pages when enabled.
+                  Upload files to open Finder/File Explorer like a normal chatbot, or enter
+                  absolute local file and directory paths if you want an operator-style ingest.
+                  PDF ingestion uses native text extraction first, then OCRs sparse pages when enabled.
                 </p>
 
                 {lastIngestedCorpusReport && (
@@ -3613,6 +3720,14 @@ function App() {
                       {lastIngestedCorpusReport.pdf_pages_ocrd}
                     </span>
                     <span>chunks: {lastIngestedCorpusReport.chunk_count}</span>
+                    {lastIngestedCorpusReport.upload_staging && (
+                      <span>
+                        upload staging:{" "}
+                        {lastIngestedCorpusReport.upload_staging.cleaned_up
+                          ? "cleaned"
+                          : "retained/failed"}
+                      </span>
+                    )}
                   </div>
                 )}
               </section>

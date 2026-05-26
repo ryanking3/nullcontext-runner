@@ -7,9 +7,11 @@ use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use lopdf::Document;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use uuid::Uuid;
 use walkdir::WalkDir;
 
 const CHUNK_SIZE_CHARS: usize = 1200;
@@ -104,7 +106,18 @@ pub struct CorpusIngestionReport {
     pub ocr_enabled: bool,
     pub warnings: Vec<String>,
     pub lifecycle: Option<CorpusLifecycleReport>,
+    pub upload_staging: Option<UploadStagingReport>,
     pub residual_risk: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadStagingReport {
+    pub staging_root: String,
+    pub staged_files: usize,
+    pub staged_bytes: u64,
+    pub source_filenames: Vec<String>,
+    pub cleaned_up: bool,
+    pub cleanup_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -119,6 +132,20 @@ pub struct IngestCorpusRequest {
 pub struct IngestCorpusResponse {
     pub corpus: CorpusIndexEntry,
     pub report: CorpusIngestionReport,
+}
+
+#[derive(Debug, Clone)]
+pub struct UploadedCorpusFile {
+    pub file_name: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IngestUploadedCorpusRequest {
+    pub name: String,
+    pub persistent: Option<bool>,
+    pub ocr_enabled: Option<bool>,
+    pub files: Vec<UploadedCorpusFile>,
 }
 
 pub fn ingest_corpus(home: &str, request: IngestCorpusRequest) -> Result<IngestCorpusResponse> {
@@ -159,6 +186,7 @@ pub fn ingest_corpus(home: &str, request: IngestCorpusRequest) -> Result<IngestC
                 .source_count
                 .saturating_sub(result.report.files_failed);
             result.report.lifecycle = Some(manifest.lifecycle.to_report());
+            result.report.upload_staging = None;
 
             write_json(&manifest.artifact_paths.sources_path, &result.sources)?;
             write_json(&manifest.artifact_paths.pages_path, &result.pages)?;
@@ -181,6 +209,74 @@ pub fn ingest_corpus(home: &str, request: IngestCorpusRequest) -> Result<IngestC
             manifest.lifecycle.updated_at = Some(Utc::now().to_rfc3339());
             let _ = write_manifest(&manifest);
             let _ = register_corpus(home, &manifest);
+            Err(error)
+        }
+    }
+}
+
+pub fn ingest_uploaded_corpus(
+    home: &str,
+    request: IngestUploadedCorpusRequest,
+) -> Result<IngestCorpusResponse> {
+    if request.files.is_empty() {
+        return Err(anyhow!(
+            "No uploaded files were provided. Supported types: .txt, .md, .pdf"
+        ));
+    }
+
+    let staging = stage_uploaded_files(&request.files)?;
+    let original_names = request
+        .files
+        .iter()
+        .map(|file| format!("browser_upload:{}", file.file_name))
+        .collect::<Vec<_>>();
+
+    let ingest_result = ingest_corpus(
+        home,
+        IngestCorpusRequest {
+            name: request.name,
+            paths: vec![staging.root.display().to_string()],
+            persistent: request.persistent,
+            ocr_enabled: request.ocr_enabled,
+        },
+    );
+
+    let cleanup_result = cleanup_upload_staging(&staging.root);
+
+    match ingest_result {
+        Ok(mut response) => {
+            rewrite_uploaded_source_paths(&response.corpus.root_path, &staging.path_map)?;
+
+            response.report.source_paths_requested = original_names;
+            response.report.upload_staging = Some(UploadStagingReport {
+                staging_root: staging.root.display().to_string(),
+                staged_files: staging.staged_files,
+                staged_bytes: staging.staged_bytes,
+                source_filenames: staging
+                    .path_map
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                cleaned_up: cleanup_result.is_ok(),
+                cleanup_error: cleanup_result.err().map(|error| error.to_string()),
+            });
+
+            if let Some(staging_report) = &response.report.upload_staging {
+                if !staging_report.cleaned_up {
+                    response.report.warnings.push(format!(
+                        "Upload staging cleanup failed for {}.",
+                        staging_report.staging_root
+                    ));
+                }
+            }
+
+            let ingestion_report_path = Path::new(&response.corpus.root_path).join("ingestion_report.json");
+            write_json(&ingestion_report_path.display().to_string(), &response.report)?;
+
+            Ok(response)
+        }
+        Err(error) => {
+            let _ = cleanup_result;
             Err(error)
         }
     }
@@ -288,6 +384,7 @@ fn run_ingestion(
         ocr_enabled,
         warnings,
         lifecycle: Some(manifest.lifecycle.to_report()),
+        upload_staging: None,
         residual_risk: "Extracted text, chunk artifacts, and any OCR-derived text may persist in corpus artifacts until cleanup. OCR rasterization may briefly create temporary page images during ingestion. OS/filesystem caches and process memory are not fully sanitized.".to_string(),
     };
 
@@ -297,6 +394,98 @@ fn run_ingestion(
         chunks,
         report,
     })
+}
+
+struct UploadStagingArea {
+    root: PathBuf,
+    path_map: HashMap<String, String>,
+    staged_files: usize,
+    staged_bytes: u64,
+}
+
+fn stage_uploaded_files(files: &[UploadedCorpusFile]) -> Result<UploadStagingArea> {
+    let root = std::env::temp_dir()
+        .join("nullcontext")
+        .join("uploads")
+        .join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&root)?;
+
+    let mut path_map = HashMap::new();
+    let mut staged_bytes = 0u64;
+
+    for (index, file) in files.iter().enumerate() {
+        let safe_name = sanitize_upload_filename(index, &file.file_name);
+        let staged_path = root.join(&safe_name);
+        fs::write(&staged_path, &file.bytes)?;
+        staged_bytes += file.bytes.len() as u64;
+        path_map.insert(staged_path.display().to_string(), file.file_name.clone());
+    }
+
+    Ok(UploadStagingArea {
+        root,
+        path_map,
+        staged_files: files.len(),
+        staged_bytes,
+    })
+}
+
+fn cleanup_upload_staging(root: &Path) -> Result<()> {
+    if root.exists() {
+        fs::remove_dir_all(root)?;
+    }
+
+    Ok(())
+}
+
+fn sanitize_upload_filename(index: usize, file_name: &str) -> String {
+    let candidate = Path::new(file_name)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("upload.bin");
+    let sanitized = candidate
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '_' | '-' => ch,
+            _ => '_',
+        })
+        .collect::<String>();
+
+    format!("{:04}-{}", index + 1, sanitized)
+}
+
+fn rewrite_uploaded_source_paths(corpus_root: &str, path_map: &HashMap<String, String>) -> Result<()> {
+    let root = Path::new(corpus_root);
+    let sources_path = root.join("sources.json");
+    let pages_path = root.join("pages.json");
+    let chunks_path = root.join("chunks.json");
+
+    let mut sources = read_json::<Vec<CorpusSourceRecord>>(&sources_path)?;
+    let mut pages = read_json::<Vec<PdfPageRecord>>(&pages_path)?;
+    let mut chunks = read_json::<Vec<ChunkRecord>>(&chunks_path)?;
+
+    for source in &mut sources {
+        if let Some(file_name) = path_map.get(&source.path) {
+            source.path = format!("browser_upload:{file_name}");
+        }
+    }
+
+    for page in &mut pages {
+        if let Some(file_name) = path_map.get(&page.source_path) {
+            page.source_path = format!("browser_upload:{file_name}");
+        }
+    }
+
+    for chunk in &mut chunks {
+        if let Some(file_name) = path_map.get(&chunk.source_path) {
+            chunk.source_path = format!("browser_upload:{file_name}");
+        }
+    }
+
+    write_json(&sources_path.display().to_string(), &sources)?;
+    write_json(&pages_path.display().to_string(), &pages)?;
+    write_json(&chunks_path.display().to_string(), &chunks)?;
+
+    Ok(())
 }
 
 struct PdfIngestionResult {
@@ -566,6 +755,14 @@ fn write_json<T: Serialize>(path: &str, value: &T) -> Result<()> {
     let json = serde_json::to_string_pretty(value)?;
     fs::write(path, json).with_context(|| format!("Failed to write {}", path))?;
     Ok(())
+}
+
+fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let parsed = serde_json::from_str(&raw)
+        .with_context(|| format!("Failed to parse {}", path.display()))?;
+    Ok(parsed)
 }
 
 fn text_preview(text: &str) -> String {
