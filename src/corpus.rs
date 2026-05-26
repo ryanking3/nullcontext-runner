@@ -73,6 +73,19 @@ impl CorpusCleanupReason {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorpusLifecycleReport {
+    pub state: String,
+    pub retention_policy: String,
+    pub retention_deadline: Option<String>,
+    pub cleanup_requested_at: Option<String>,
+    pub cleanup_completed_at: Option<String>,
+    pub cleanup_reason: Option<String>,
+    pub updated_at: Option<String>,
+    pub policy_summary: String,
+    pub decision_summary: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CorpusLifecycleMetadata {
     #[serde(default)]
@@ -89,6 +102,25 @@ pub struct CorpusLifecycleMetadata {
     pub cleanup_reason: Option<CorpusCleanupReason>,
     #[serde(default)]
     pub updated_at: Option<String>,
+}
+
+impl CorpusLifecycleMetadata {
+    pub fn to_report(&self) -> CorpusLifecycleReport {
+        CorpusLifecycleReport {
+            state: self.state.as_str().to_string(),
+            retention_policy: self.retention_policy.as_str().to_string(),
+            retention_deadline: self.retention_deadline.clone(),
+            cleanup_requested_at: self.cleanup_requested_at.clone(),
+            cleanup_completed_at: self.cleanup_completed_at.clone(),
+            cleanup_reason: self
+                .cleanup_reason
+                .as_ref()
+                .map(|reason| reason.as_str().to_string()),
+            updated_at: self.updated_at.clone(),
+            policy_summary: corpus_lifecycle_policy_summary(self),
+            decision_summary: corpus_lifecycle_decision_summary(self),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +183,90 @@ impl CorpusManifest {
                 cleanup_reason: None,
                 updated_at: Some(Utc::now().to_rfc3339()),
             },
+        }
+    }
+}
+
+fn corpus_lifecycle_policy_summary(metadata: &CorpusLifecycleMetadata) -> String {
+    match metadata.retention_policy {
+        CorpusRetentionPolicy::EphemeralImmediate => {
+            "Corpus artifacts live in temporary storage and should be cleaned promptly after the grounded workflow finishes."
+                .to_string()
+        }
+        CorpusRetentionPolicy::RetainUntilManualCleanup => {
+            "Corpus artifacts are retained until an operator explicitly requests cleanup."
+                .to_string()
+        }
+        CorpusRetentionPolicy::RetainForDuration => {
+            if let Some(deadline) = &metadata.retention_deadline {
+                format!(
+                    "Corpus artifacts are retained until {deadline}, after which scheduled cleanup may run."
+                )
+            } else {
+                "Corpus is configured for scheduled retention expiry, but no deadline is currently recorded."
+                    .to_string()
+            }
+        }
+    }
+}
+
+fn corpus_lifecycle_decision_summary(metadata: &CorpusLifecycleMetadata) -> String {
+    match metadata.state {
+        CorpusLifecycleState::Draft => {
+            "Corpus manifest has been created but ingestion has not completed yet.".to_string()
+        }
+        CorpusLifecycleState::Building => {
+            "Corpus ingestion is currently building artifacts.".to_string()
+        }
+        CorpusLifecycleState::Ready => {
+            "Corpus artifacts are available for retrieval under the current lifecycle policy."
+                .to_string()
+        }
+        CorpusLifecycleState::IngestionFailed => {
+            "Corpus ingestion failed before a usable retrieval corpus was finalized."
+                .to_string()
+        }
+        CorpusLifecycleState::CleanupPending => {
+            "Corpus cleanup has been requested but has not yet completed.".to_string()
+        }
+        CorpusLifecycleState::CleanupSucceeded => {
+            let reason = metadata
+                .cleanup_reason
+                .as_ref()
+                .map(corpus_cleanup_reason_summary)
+                .unwrap_or("Corpus cleanup completed successfully.");
+
+            reason.to_string()
+        }
+        CorpusLifecycleState::CleanupFailed => {
+            let reason = metadata
+                .cleanup_reason
+                .as_ref()
+                .map(corpus_cleanup_reason_summary)
+                .unwrap_or("Corpus cleanup attempted but did not complete successfully.");
+
+            format!("{reason} Corpus cleanup failed or requires operator follow-up.")
+        }
+        CorpusLifecycleState::Orphaned => {
+            "Lifecycle reconciliation detected an inconsistency between the corpus registry and on-disk artifacts. Operator review is recommended."
+                .to_string()
+        }
+    }
+}
+
+fn corpus_cleanup_reason_summary(reason: &CorpusCleanupReason) -> &'static str {
+    match reason {
+        CorpusCleanupReason::EphemeralPolicy => {
+            "Cleanup ran because the corpus policy was ephemeral-at-end."
+        }
+        CorpusCleanupReason::ManualOperatorRequest => {
+            "Cleanup ran because an operator explicitly requested lifecycle cleanup."
+        }
+        CorpusCleanupReason::ScheduledRetentionExpiry => {
+            "Cleanup ran because the scheduled retention deadline expired."
+        }
+        CorpusCleanupReason::StartupOrphanReconciliation => {
+            "Lifecycle reconciliation changed the corpus state during startup recovery."
         }
     }
 }

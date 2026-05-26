@@ -4,7 +4,12 @@ use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
 use crate::config::{load_model_registry, SessionConfig};
-use crate::corpus_registry::{ensure_corpus_registry_dirs, list_corpora, CorpusRegistry};
+use crate::corpus::{CorpusCleanupReason, CorpusRetentionPolicy};
+use crate::corpus_registry::{
+    archived_corpus_report_path, due_retention_cleanup_corpus_ids, ensure_corpus_registry_dirs,
+    list_corpora, reconcile_corpora_on_startup, sync_corpus_report_lifecycle, CorpusIndexEntry,
+    CorpusRegistry,
+};
 use crate::docs::{ingest_corpus, IngestCorpusRequest, IngestCorpusResponse};
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
@@ -78,6 +83,21 @@ struct SessionLifecycleActionResponse {
     message: String,
 }
 
+#[derive(Debug, Serialize)]
+struct CorpusLifecycleActionResponse {
+    corpus_id: String,
+    lifecycle_state: String,
+    retention_policy: String,
+    retention_deadline: Option<String>,
+    cleanup_reason: Option<String>,
+    root_exists: bool,
+    report_exists: bool,
+    root_path: String,
+    manifest_path: String,
+    report_path: String,
+    message: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct UpdateRetentionPolicyRequest {
     retention_policy: String,
@@ -130,6 +150,7 @@ struct StreamPayload {
 pub async fn serve() -> Result<()> {
     let home = home_dir()?;
     emit_startup_reconciliation(&home)?;
+    emit_startup_corpus_reconciliation(&home)?;
     ensure_corpus_registry_dirs(&home)?;
 
     let state = WebState {
@@ -145,7 +166,14 @@ pub async fn serve() -> Result<()> {
             "/api/corpora",
             get(list_corpora_route).post(ingest_corpus_route),
         )
+        .route("/api/corpora/:corpus_id/report", get(show_corpus_report))
         .route("/api/corpora/:corpus_id/query", post(query_corpus_route))
+        .route(
+            "/api/corpora/:corpus_id/retention",
+            post(update_corpus_retention_policy),
+        )
+        .route("/api/corpora/:corpus_id/cleanup", post(cleanup_corpus))
+        .route("/api/corpora/:corpus_id/reconcile", post(reconcile_corpus))
         .route("/api/models", get(list_models))
         .route("/api/run", post(run_session))
         .route("/api/run/stream", post(run_session_stream))
@@ -193,15 +221,29 @@ fn spawn_retention_scheduler(home: Arc<String>) {
 
             let home = home.clone();
 
-            let result = tokio::task::spawn_blocking(move || run_retention_sweep(&home)).await;
+            let result = tokio::task::spawn_blocking(move || {
+                let sessions = run_retention_sweep(&home)?;
+                let corpora = run_corpus_retention_sweep(&home)?;
+                Ok::<_, anyhow::Error>((sessions, corpora))
+            })
+            .await;
 
             match result {
-                Ok(Ok(swept)) if !swept.is_empty() => {
+                Ok(Ok((swept, corpus_swept))) if !swept.is_empty() || !corpus_swept.is_empty() => {
+                    if !swept.is_empty() {
                     println!(
                         "Retention sweep cleaned {} session(s): {}",
                         swept.len(),
                         swept.join(", ")
                     );
+                    }
+                    if !corpus_swept.is_empty() {
+                        println!(
+                            "Retention sweep cleaned {} corpora: {}",
+                            corpus_swept.len(),
+                            corpus_swept.join(", ")
+                        );
+                    }
                 }
                 Ok(Ok(_)) => {}
                 Ok(Err(error)) => {
@@ -235,6 +277,32 @@ fn emit_startup_reconciliation(home: &str) -> Result<()> {
     if summary.notes.len() > 8 {
         println!(
             "  [lifecycle] ... and {} more session note(s)",
+            summary.notes.len() - 8
+        );
+    }
+
+    Ok(())
+}
+
+fn emit_startup_corpus_reconciliation(home: &str) -> Result<()> {
+    let summary = reconcile_corpora_on_startup(home)?;
+
+    println!(
+        "Corpus lifecycle reconciliation: scanned {} corpora, changed {}, orphaned {}, cleanup-consistent {}, unchanged {}.",
+        summary.scanned_corpora,
+        summary.changed_corpora,
+        summary.orphaned_corpora,
+        summary.cleanup_succeeded_consistent,
+        summary.unchanged_corpora
+    );
+
+    for note in summary.notes.iter().take(8) {
+        println!("  [corpus-lifecycle] {note}");
+    }
+
+    if summary.notes.len() > 8 {
+        println!(
+            "  [corpus-lifecycle] ... and {} more corpus note(s)",
             summary.notes.len() - 8
         );
     }
@@ -310,6 +378,80 @@ async fn query_corpus_route(
             };
             json_error(status, message)
         }
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+async fn show_corpus_report(
+    State(state): State<WebState>,
+    Path(corpus_id): Path<String>,
+) -> Response {
+    let registry = match CorpusRegistry::load(&state.home) {
+        Ok(registry) => registry,
+        Err(error) => {
+            return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
+        }
+    };
+
+    let Some(entry) = registry.find(&corpus_id) else {
+        return json_error(StatusCode::NOT_FOUND, format!("Corpus not found: {corpus_id}"));
+    };
+
+    match fs::read_to_string(&entry.report_path) {
+        Ok(report) => match serde_json::from_str::<serde_json::Value>(&report) {
+            Ok(json) => Json(json).into_response(),
+            Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => json_error(
+            StatusCode::NOT_FOUND,
+            format!(
+                "Corpus report file not found for {corpus_id}. It may have been archived, removed during lifecycle cleanup, or the registry may need reconciliation."
+            ),
+        ),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+async fn update_corpus_retention_policy(
+    State(state): State<WebState>,
+    Path(corpus_id): Path<String>,
+    Json(request): Json<UpdateRetentionPolicyRequest>,
+) -> Response {
+    let home = state.home.as_ref().clone();
+
+    match tokio::task::spawn_blocking(move || {
+        update_registry_corpus_retention_policy(&home, &corpus_id, request)
+    })
+    .await
+    {
+        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+async fn cleanup_corpus(
+    State(state): State<WebState>,
+    Path(corpus_id): Path<String>,
+) -> Response {
+    let home = state.home.as_ref().clone();
+
+    match tokio::task::spawn_blocking(move || cleanup_registered_corpus(&home, &corpus_id)).await {
+        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+async fn reconcile_corpus(
+    State(state): State<WebState>,
+    Path(corpus_id): Path<String>,
+) -> Response {
+    let home = state.home.as_ref().clone();
+
+    match tokio::task::spawn_blocking(move || reconcile_registry_corpus(&home, &corpus_id)).await {
+        Ok(Ok(response)) => Json(response).into_response(),
+        Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
@@ -1168,6 +1310,25 @@ fn run_retention_sweep(home: &str) -> Result<Vec<String>> {
     Ok(swept)
 }
 
+fn run_corpus_retention_sweep(home: &str) -> Result<Vec<String>> {
+    let due_corpora = due_retention_cleanup_corpus_ids(home)?;
+    let mut swept = Vec::new();
+
+    for corpus_id in due_corpora {
+        cleanup_registered_corpus_with_reason(
+            home,
+            &corpus_id,
+            CorpusCleanupReason::ScheduledRetentionExpiry,
+            "Scheduled retention expiry cleanup finished.",
+            "Scheduled retention expiry triggered lifecycle cleanup for this retained corpus.",
+        )?;
+
+        swept.push(corpus_id);
+    }
+
+    Ok(swept)
+}
+
 fn reconcile_registry_session(
     home: &str,
     session_id: &str,
@@ -1278,6 +1439,289 @@ fn build_lifecycle_action_response(
         workspace_exists: FsPath::new(&entry.workspace).exists(),
         report_exists: FsPath::new(&entry.report_path).exists(),
         workspace: entry.workspace.clone(),
+        report_path: entry.report_path.clone(),
+        message: message.to_string(),
+    }
+}
+
+fn cleanup_registered_corpus(home: &str, corpus_id: &str) -> Result<CorpusLifecycleActionResponse> {
+    cleanup_registered_corpus_with_reason(
+        home,
+        corpus_id,
+        CorpusCleanupReason::ManualOperatorRequest,
+        "Manual corpus lifecycle cleanup finished.",
+        "Operator requested immediate lifecycle cleanup for a retained corpus.",
+    )
+}
+
+fn cleanup_registered_corpus_with_reason(
+    home: &str,
+    corpus_id: &str,
+    reason: CorpusCleanupReason,
+    completion_message: &str,
+    request_details: &str,
+) -> Result<CorpusLifecycleActionResponse> {
+    let mut registry = CorpusRegistry::load(home)?;
+    let entry = registry
+        .find_mut(corpus_id)
+        .ok_or_else(|| anyhow::anyhow!("Corpus not found: {corpus_id}"))?;
+
+    let root_path = entry.root_path.clone();
+    let manifest_path = entry.manifest_path.clone();
+    let current_report_path = entry.report_path.clone();
+
+    let archive_operation =
+        archive_corpus_report_if_present(home, corpus_id, &current_report_path)?;
+
+    entry.mark_cleanup_pending(reason.clone());
+    sync_manifest_lifecycle_if_present(&manifest_path, &entry.lifecycle)?;
+    registry.save(home)?;
+
+    let root_path_buf = FsPath::new(&root_path).to_path_buf();
+    let (artifacts_detected, scan_operation) = scan_artifacts(&root_path_buf)?;
+    let mut operations = vec![scan_operation];
+
+    operations.push(SanitizationOperation {
+        operation: "corpus_lifecycle_cleanup_request".to_string(),
+        status: "successful".to_string(),
+        details: request_details.to_string(),
+    });
+
+    if let Some(operation) = archive_operation {
+        operations.push(operation);
+    }
+
+    let cleanup_report =
+        cleanup_ephemeral_workspace(&root_path_buf, artifacts_detected, operations);
+
+    {
+        let entry = registry
+            .find_mut(corpus_id)
+            .ok_or_else(|| anyhow::anyhow!("Corpus not found after cleanup: {corpus_id}"))?;
+
+        if let Some(archived_path) =
+            maybe_archived_corpus_report_path(home, corpus_id, &current_report_path)?
+        {
+            entry.report_path = archived_path;
+        }
+
+        entry.mark_cleanup_result(cleanup_report.successful, reason);
+    }
+
+    registry.save(home)?;
+
+    let entry = registry
+        .find(corpus_id)
+        .ok_or_else(|| anyhow::anyhow!("Corpus not found after cleanup save: {corpus_id}"))?;
+
+    sync_corpus_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
+
+    Ok(build_corpus_lifecycle_action_response(entry, completion_message))
+}
+
+fn update_registry_corpus_retention_policy(
+    home: &str,
+    corpus_id: &str,
+    request: UpdateRetentionPolicyRequest,
+) -> Result<CorpusLifecycleActionResponse> {
+    let retention_policy = match request.retention_policy.as_str() {
+        "retain_until_manual_cleanup" => CorpusRetentionPolicy::RetainUntilManualCleanup,
+        "retain_for_duration" => CorpusRetentionPolicy::RetainForDuration,
+        "ephemeral_immediate" => CorpusRetentionPolicy::EphemeralImmediate,
+        value => anyhow::bail!("Invalid corpus retention policy: {value}"),
+    };
+
+    let retention_deadline = match retention_policy {
+        CorpusRetentionPolicy::RetainUntilManualCleanup => None,
+        CorpusRetentionPolicy::RetainForDuration => {
+            let minutes = request.retain_for_minutes.ok_or_else(|| {
+                anyhow::anyhow!("retain_for_minutes is required for retain_for_duration")
+            })?;
+
+            if minutes == 0 {
+                anyhow::bail!("retain_for_minutes must be greater than 0");
+            }
+
+            Some((chrono::Utc::now() + chrono::Duration::minutes(minutes as i64)).to_rfc3339())
+        }
+        CorpusRetentionPolicy::EphemeralImmediate => None,
+    };
+
+    let mut registry = CorpusRegistry::load(home)?;
+    let entry = registry
+        .find_mut(corpus_id)
+        .ok_or_else(|| anyhow::anyhow!("Corpus not found: {corpus_id}"))?;
+
+    entry.apply_retention_policy(retention_policy.clone(), retention_deadline);
+    sync_manifest_lifecycle_if_present(&entry.manifest_path, &entry.lifecycle)?;
+    registry.save(home)?;
+
+    let entry = registry
+        .find(corpus_id)
+        .ok_or_else(|| anyhow::anyhow!("Corpus not found after retention update: {corpus_id}"))?;
+
+    sync_corpus_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
+
+    let message = match retention_policy {
+        CorpusRetentionPolicy::RetainUntilManualCleanup => {
+            "Updated corpus retention to manual cleanup.".to_string()
+        }
+        CorpusRetentionPolicy::RetainForDuration => format!(
+            "Updated corpus retention to expire at {}.",
+            entry
+                .lifecycle
+                .retention_deadline
+                .as_deref()
+                .unwrap_or("unknown")
+        ),
+        CorpusRetentionPolicy::EphemeralImmediate => {
+            "Updated corpus retention to ephemeral immediate.".to_string()
+        }
+    };
+
+    Ok(build_corpus_lifecycle_action_response(entry, &message))
+}
+
+fn reconcile_registry_corpus(
+    home: &str,
+    corpus_id: &str,
+) -> Result<CorpusLifecycleActionResponse> {
+    let mut registry = CorpusRegistry::load(home)?;
+    let message = {
+        let entry = registry
+            .find_mut(corpus_id)
+            .ok_or_else(|| anyhow::anyhow!("Corpus not found: {corpus_id}"))?;
+
+        let root_exists = FsPath::new(&entry.root_path).exists();
+        let report_exists = FsPath::new(&entry.report_path).exists();
+
+        if entry.lifecycle.state == crate::corpus::CorpusLifecycleState::CleanupSucceeded
+            && !root_exists
+        {
+            entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            "Registry matches a cleaned-up corpus. Root directory is gone and lifecycle cleanup succeeded."
+                .to_string()
+        } else if !root_exists
+            && entry.lifecycle.state != crate::corpus::CorpusLifecycleState::CleanupSucceeded
+            && entry.lifecycle.state != crate::corpus::CorpusLifecycleState::CleanupFailed
+        {
+            entry.mark_orphaned();
+            "Corpus root is missing even though cleanup was not recorded as successful. Marked corpus as orphaned."
+                .to_string()
+        } else if root_exists
+            && entry.lifecycle.state == crate::corpus::CorpusLifecycleState::CleanupSucceeded
+        {
+            entry.mark_orphaned();
+            "Corpus root still exists even though cleanup was previously recorded as successful. Marked corpus as orphaned for investigation."
+                .to_string()
+        } else if !report_exists
+            && entry.lifecycle.state != crate::corpus::CorpusLifecycleState::CleanupSucceeded
+            && entry.lifecycle.state != crate::corpus::CorpusLifecycleState::CleanupFailed
+        {
+            entry.mark_orphaned();
+            "Corpus report is missing while cleanup was not recorded as successful. Marked corpus as orphaned."
+                .to_string()
+        } else {
+            entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            "Registry paths are present and no corpus reconciliation changes were needed."
+                .to_string()
+        }
+    };
+
+    if let Some(entry) = registry.find(corpus_id) {
+        sync_manifest_lifecycle_if_present(&entry.manifest_path, &entry.lifecycle)?;
+    }
+    registry.save(home)?;
+
+    let entry = registry
+        .find(corpus_id)
+        .ok_or_else(|| anyhow::anyhow!("Corpus not found after reconciliation: {corpus_id}"))?;
+
+    sync_corpus_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
+
+    Ok(build_corpus_lifecycle_action_response(entry, &message))
+}
+
+fn archive_corpus_report_if_present(
+    home: &str,
+    corpus_id: &str,
+    current_report_path: &str,
+) -> Result<Option<SanitizationOperation>> {
+    let source = FsPath::new(current_report_path);
+
+    if !source.exists() {
+        return Ok(None);
+    }
+
+    ensure_corpus_registry_dirs(home)?;
+
+    let archived_path = archived_corpus_report_path(home, corpus_id);
+    fs::copy(source, &archived_path)?;
+
+    Ok(Some(SanitizationOperation {
+        operation: "corpus_lifecycle_report_archive".to_string(),
+        status: "successful".to_string(),
+        details: format!(
+            "Archived corpus report before cleanup to {}.",
+            archived_path.display()
+        ),
+    }))
+}
+
+fn maybe_archived_corpus_report_path(
+    home: &str,
+    corpus_id: &str,
+    previous_report_path: &str,
+) -> Result<Option<String>> {
+    let archived_path = archived_corpus_report_path(home, corpus_id);
+
+    if archived_path.exists() {
+        return Ok(Some(archived_path.display().to_string()));
+    }
+
+    if FsPath::new(previous_report_path).exists() {
+        return Ok(Some(previous_report_path.to_string()));
+    }
+
+    Ok(None)
+}
+
+fn sync_manifest_lifecycle_if_present(
+    manifest_path: &str,
+    lifecycle: &crate::corpus::CorpusLifecycleMetadata,
+) -> Result<()> {
+    let path = FsPath::new(manifest_path);
+
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let raw = fs::read_to_string(path)?;
+    let mut manifest: crate::corpus::CorpusManifest = serde_json::from_str(&raw)?;
+    manifest.lifecycle = lifecycle.clone();
+    fs::write(path, serde_json::to_string_pretty(&manifest)?)?;
+
+    Ok(())
+}
+
+fn build_corpus_lifecycle_action_response(
+    entry: &CorpusIndexEntry,
+    message: &str,
+) -> CorpusLifecycleActionResponse {
+    CorpusLifecycleActionResponse {
+        corpus_id: entry.corpus_id.clone(),
+        lifecycle_state: entry.lifecycle.state.as_str().to_string(),
+        retention_policy: entry.lifecycle.retention_policy.as_str().to_string(),
+        retention_deadline: entry.lifecycle.retention_deadline.clone(),
+        cleanup_reason: entry
+            .lifecycle
+            .cleanup_reason
+            .as_ref()
+            .map(|reason| reason.as_str().to_string()),
+        root_exists: FsPath::new(&entry.root_path).exists(),
+        report_exists: FsPath::new(&entry.report_path).exists(),
+        root_path: entry.root_path.clone(),
+        manifest_path: entry.manifest_path.clone(),
         report_path: entry.report_path.clone(),
         message: message.to_string(),
     }

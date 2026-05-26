@@ -1,10 +1,13 @@
 #![allow(dead_code)]
 
 use crate::corpus::{
-    corpus_registry_root, CorpusLifecycleMetadata, CorpusManifest, CorpusRetentionPolicy,
+    corpus_registry_root, CorpusCleanupReason, CorpusLifecycleMetadata, CorpusLifecycleState,
+    CorpusManifest, CorpusRetentionPolicy,
 };
 use anyhow::{Context, Result};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -26,6 +29,8 @@ pub struct CorpusIndexEntry {
     pub embedding_backend: Option<String>,
     pub embedding_model: Option<String>,
     pub ocr_backend: Option<String>,
+    #[serde(default)]
+    pub report_path: String,
     #[serde(default)]
     pub lifecycle: CorpusLifecycleMetadata,
 }
@@ -74,6 +79,12 @@ impl CorpusRegistry {
             .iter()
             .find(|corpus| corpus.corpus_id == corpus_id)
     }
+
+    pub fn find_mut(&mut self, corpus_id: &str) -> Option<&mut CorpusIndexEntry> {
+        self.corpora
+            .iter_mut()
+            .find(|corpus| corpus.corpus_id == corpus_id)
+    }
 }
 
 impl CorpusIndexEntry {
@@ -90,8 +101,45 @@ impl CorpusIndexEntry {
             embedding_backend: manifest.embedding_backend.clone(),
             embedding_model: manifest.embedding_model.clone(),
             ocr_backend: manifest.ocr_backend.clone(),
+            report_path: manifest.artifact_paths.ingestion_report_path.clone(),
             lifecycle: manifest.lifecycle.clone(),
         }
+    }
+
+    pub fn mark_cleanup_pending(&mut self, reason: CorpusCleanupReason) {
+        self.lifecycle.state = CorpusLifecycleState::CleanupPending;
+        self.lifecycle.cleanup_requested_at = Some(current_timestamp());
+        self.lifecycle.cleanup_reason = Some(reason);
+        self.lifecycle.updated_at = self.lifecycle.cleanup_requested_at.clone();
+    }
+
+    pub fn mark_cleanup_result(&mut self, successful: bool, reason: CorpusCleanupReason) {
+        self.lifecycle.state = if successful {
+            CorpusLifecycleState::CleanupSucceeded
+        } else {
+            CorpusLifecycleState::CleanupFailed
+        };
+        self.lifecycle.cleanup_completed_at = Some(current_timestamp());
+        self.lifecycle.cleanup_reason = Some(reason);
+        self.lifecycle.updated_at = self.lifecycle.cleanup_completed_at.clone();
+        self.source_count = 0;
+        self.chunk_count = 0;
+    }
+
+    pub fn mark_orphaned(&mut self) {
+        self.lifecycle.state = CorpusLifecycleState::Orphaned;
+        self.lifecycle.cleanup_reason = Some(CorpusCleanupReason::StartupOrphanReconciliation);
+        self.lifecycle.updated_at = Some(current_timestamp());
+    }
+
+    pub fn apply_retention_policy(
+        &mut self,
+        retention_policy: CorpusRetentionPolicy,
+        retention_deadline: Option<String>,
+    ) {
+        self.lifecycle.retention_policy = retention_policy;
+        self.lifecycle.retention_deadline = retention_deadline;
+        self.lifecycle.updated_at = Some(current_timestamp());
     }
 }
 
@@ -104,6 +152,7 @@ pub fn register_corpus(home: &str, manifest: &CorpusManifest) -> Result<()> {
 pub fn ensure_corpus_registry_dirs(home: &str) -> Result<()> {
     fs::create_dir_all(corpus_registry_root(home))?;
     fs::create_dir_all(corpus_registry_root(home).join("data"))?;
+    fs::create_dir_all(corpus_registry_root(home).join("reports"))?;
     Ok(())
 }
 
@@ -132,4 +181,172 @@ pub fn resolve_corpus_retention_policy(persistent: bool) -> CorpusRetentionPolic
 
 pub fn corpus_exists(home: &str, corpus_id: &str) -> bool {
     Path::new(&corpus_manifest_path(home, corpus_id)).exists()
+}
+
+pub fn due_retention_cleanup_corpus_ids(home: &str) -> Result<Vec<String>> {
+    let registry = CorpusRegistry::load(home)?;
+    let now = Utc::now();
+
+    Ok(registry
+        .corpora
+        .iter()
+        .filter(|entry| {
+            entry.lifecycle.retention_policy == CorpusRetentionPolicy::RetainForDuration
+                && entry.lifecycle.state == CorpusLifecycleState::Ready
+                && entry
+                    .lifecycle
+                    .retention_deadline
+                    .as_deref()
+                    .and_then(parse_timestamp)
+                    .is_some_and(|deadline| deadline <= now)
+        })
+        .map(|entry| entry.corpus_id.clone())
+        .collect())
+}
+
+pub fn archived_corpus_report_path(home: &str, corpus_id: &str) -> PathBuf {
+    corpus_registry_root(home)
+        .join("reports")
+        .join(format!("{corpus_id}.json"))
+}
+
+pub struct CorpusStartupReconciliationSummary {
+    pub scanned_corpora: usize,
+    pub changed_corpora: usize,
+    pub orphaned_corpora: usize,
+    pub cleanup_succeeded_consistent: usize,
+    pub unchanged_corpora: usize,
+    pub notes: Vec<String>,
+}
+
+pub fn reconcile_corpora_on_startup(home: &str) -> Result<CorpusStartupReconciliationSummary> {
+    let mut registry = CorpusRegistry::load(home)?;
+    let mut summary = CorpusStartupReconciliationSummary {
+        scanned_corpora: registry.corpora.len(),
+        changed_corpora: 0,
+        orphaned_corpora: 0,
+        cleanup_succeeded_consistent: 0,
+        unchanged_corpora: 0,
+        notes: Vec::new(),
+    };
+
+    for entry in &mut registry.corpora {
+        let message = reconcile_corpus_entry(entry);
+
+        match message {
+            CorpusReconciliationOutcome::Changed(note) => {
+                summary.changed_corpora += 1;
+                if entry.lifecycle.state == CorpusLifecycleState::Orphaned {
+                    summary.orphaned_corpora += 1;
+                }
+                summary.notes.push(format!("{}: {}", entry.corpus_id, note));
+            }
+            CorpusReconciliationOutcome::CleanupConsistent(note) => {
+                summary.cleanup_succeeded_consistent += 1;
+                summary.unchanged_corpora += 1;
+                summary.notes.push(format!("{}: {}", entry.corpus_id, note));
+            }
+            CorpusReconciliationOutcome::Unchanged(note) => {
+                summary.unchanged_corpora += 1;
+                summary.notes.push(format!("{}: {}", entry.corpus_id, note));
+            }
+        }
+    }
+
+    if summary.changed_corpora > 0 {
+        registry.save(home)?;
+    }
+
+    Ok(summary)
+}
+
+pub fn sync_corpus_report_lifecycle(report_path: &Path, lifecycle: &CorpusLifecycleMetadata) -> Result<()> {
+    if !report_path.exists() {
+        return Ok(());
+    }
+
+    let raw = fs::read_to_string(report_path)?;
+    let mut value: Value = serde_json::from_str(&raw)?;
+    value["lifecycle"] = serde_json::to_value(lifecycle.to_report())?;
+    fs::write(report_path, serde_json::to_string_pretty(&value)?)?;
+    Ok(())
+}
+
+fn current_timestamp() -> String {
+    Utc::now().to_rfc3339()
+}
+
+fn parse_timestamp(value: &str) -> Option<chrono::DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|value| value.with_timezone(&Utc))
+}
+
+enum CorpusReconciliationOutcome {
+    Changed(String),
+    CleanupConsistent(String),
+    Unchanged(String),
+}
+
+fn reconcile_corpus_entry(entry: &mut CorpusIndexEntry) -> CorpusReconciliationOutcome {
+    let root_exists = Path::new(&entry.root_path).exists();
+    let report_exists = Path::new(&entry.report_path).exists();
+
+    if entry.lifecycle.state == CorpusLifecycleState::CleanupPending {
+        entry.mark_orphaned();
+        return CorpusReconciliationOutcome::Changed(
+            "Startup found a corpus still marked cleanup_pending; reclassified as orphaned."
+                .to_string(),
+        );
+    }
+
+    if entry.lifecycle.state == CorpusLifecycleState::CleanupSucceeded && !root_exists {
+        if !report_exists {
+            entry.mark_orphaned();
+            return CorpusReconciliationOutcome::Changed(
+                "Cleanup had been recorded as successful and the corpus root is gone, but the retained report is missing; marked orphaned for investigation."
+                    .to_string(),
+            );
+        }
+
+        return CorpusReconciliationOutcome::CleanupConsistent(
+            "Cleanup had already succeeded and startup confirmed the corpus root remains removed."
+                .to_string(),
+        );
+    }
+
+    if !root_exists
+        && entry.lifecycle.state != CorpusLifecycleState::CleanupSucceeded
+        && entry.lifecycle.state != CorpusLifecycleState::CleanupFailed
+    {
+        entry.mark_orphaned();
+        return CorpusReconciliationOutcome::Changed(
+            "Corpus root is missing even though lifecycle cleanup was not recorded as successful; marked orphaned."
+                .to_string(),
+        );
+    }
+
+    if root_exists && entry.lifecycle.state == CorpusLifecycleState::CleanupSucceeded {
+        entry.mark_orphaned();
+        return CorpusReconciliationOutcome::Changed(
+            "Corpus root still exists even though cleanup was previously recorded as successful; marked orphaned."
+                .to_string(),
+        );
+    }
+
+    if !report_exists
+        && entry.lifecycle.state != CorpusLifecycleState::CleanupSucceeded
+        && entry.lifecycle.state != CorpusLifecycleState::CleanupFailed
+    {
+        entry.mark_orphaned();
+        return CorpusReconciliationOutcome::Changed(
+            "Corpus report is missing while cleanup was not recorded as successful; marked orphaned."
+                .to_string(),
+        );
+    }
+
+    entry.lifecycle.updated_at = Some(current_timestamp());
+    CorpusReconciliationOutcome::Unchanged(
+        "Corpus paths are present and no reconciliation changes were needed.".to_string(),
+    )
 }

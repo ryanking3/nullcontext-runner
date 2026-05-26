@@ -1,4 +1,6 @@
-use crate::corpus::{ensure_corpus_artifact_dirs, CorpusLifecycleState, CorpusManifest};
+use crate::corpus::{
+    ensure_corpus_artifact_dirs, CorpusLifecycleReport, CorpusLifecycleState, CorpusManifest,
+};
 use crate::corpus_registry::{register_corpus, CorpusIndexEntry};
 use crate::embed::{embed_chunks, EMBEDDING_BACKEND, EMBEDDING_MODEL};
 use anyhow::{anyhow, Context, Result};
@@ -101,6 +103,7 @@ pub struct CorpusIngestionReport {
     pub chunk_count: usize,
     pub ocr_enabled: bool,
     pub warnings: Vec<String>,
+    pub lifecycle: Option<CorpusLifecycleReport>,
     pub residual_risk: String,
 }
 
@@ -155,6 +158,7 @@ pub fn ingest_corpus(home: &str, request: IngestCorpusRequest) -> Result<IngestC
             result.report.files_ingested = manifest
                 .source_count
                 .saturating_sub(result.report.files_failed);
+            result.report.lifecycle = Some(manifest.lifecycle.to_report());
 
             write_json(&manifest.artifact_paths.sources_path, &result.sources)?;
             write_json(&manifest.artifact_paths.pages_path, &result.pages)?;
@@ -283,6 +287,7 @@ fn run_ingestion(
         chunk_count: chunks.len(),
         ocr_enabled,
         warnings,
+        lifecycle: Some(manifest.lifecycle.to_report()),
         residual_risk: "Extracted text, chunk artifacts, and any OCR-derived text may persist in corpus artifacts until cleanup. OCR rasterization may briefly create temporary page images during ingestion. OS/filesystem caches and process memory are not fully sanitized.".to_string(),
     };
 

@@ -55,6 +55,7 @@ type CorpusIndexEntry = {
   persistent: boolean;
   root_path: string;
   manifest_path: string;
+  report_path: string;
   source_count: number;
   chunk_count: number;
   embedding_backend?: string | null;
@@ -291,6 +292,20 @@ type CorpusIngestionReport = {
 type IngestCorpusResponse = {
   corpus: CorpusIndexEntry;
   report: CorpusIngestionReport;
+};
+
+type CorpusLifecycleActionResponse = {
+  corpus_id: string;
+  lifecycle_state: string;
+  retention_policy: string;
+  retention_deadline?: string | null;
+  cleanup_reason?: string | null;
+  root_exists: boolean;
+  report_exists: boolean;
+  root_path: string;
+  manifest_path: string;
+  report_path: string;
+  message: string;
 };
 
 type ChatMessage = {
@@ -554,6 +569,15 @@ function App() {
   const [corpusIngestFailed, setCorpusIngestFailed] = useState(false);
   const [lastIngestedCorpusReport, setLastIngestedCorpusReport] =
     useState<CorpusIngestionReport | null>(null);
+  const [corpusActionPending, setCorpusActionPending] = useState<string | null>(null);
+  const [corpusActionMessage, setCorpusActionMessage] = useState("");
+  const [corpusActionFailed, setCorpusActionFailed] = useState(false);
+  const [corpusActionResult, setCorpusActionResult] =
+    useState<CorpusLifecycleActionResponse | null>(null);
+  const [corpusRetentionPolicyDraft, setCorpusRetentionPolicyDraft] =
+    useState("retain_until_manual_cleanup");
+  const [corpusRetentionMinutesDraft, setCorpusRetentionMinutesDraft] = useState("60");
+  const [selectedCorpusReport, setSelectedCorpusReport] = useState("");
 
   const [activeChatSessionId, setActiveChatSessionId] = useState("");
   const [activeChatWorkspace, setActiveChatWorkspace] = useState("");
@@ -1538,6 +1562,111 @@ function App() {
     }
   }
 
+  async function openCorpusReport(corpusId: string) {
+    try {
+      const response = await fetch(`${API_BASE}/api/corpora/${corpusId}/report`);
+
+      if (!response.ok) {
+        const error = await readApiError(response, "Failed to load corpus report.");
+        throw new Error(error);
+      }
+
+      const data = await response.json();
+      setSelectedCorpusReport(JSON.stringify(data, null, 2));
+    } catch (error) {
+      setSelectedCorpusReport(String(error));
+    }
+  }
+
+  async function runCorpusLifecycleAction(
+    corpusId: string,
+    action: "cleanup" | "reconcile"
+  ) {
+    if (
+      action === "cleanup" &&
+      !window.confirm(
+        "Run lifecycle cleanup for this corpus now? NullContext will archive the ingestion report first when possible and then delete the corpus artifacts."
+      )
+    ) {
+      return;
+    }
+
+    setCorpusActionPending(action);
+    setCorpusActionFailed(false);
+    setCorpusActionMessage("");
+
+    try {
+      const response = await fetch(`${API_BASE}/api/corpora/${corpusId}/${action}`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const error = await readApiError(
+          response,
+          `Failed to ${action} corpus lifecycle state.`
+        );
+        throw new Error(error);
+      }
+
+      const data = (await response.json()) as CorpusLifecycleActionResponse;
+      setCorpusActionResult(data);
+      setCorpusActionMessage(data.message);
+      setSelectedCorpusId(data.corpus_id);
+      await loadCorpora();
+      await openCorpusReport(data.corpus_id);
+    } catch (error) {
+      setCorpusActionFailed(true);
+      setCorpusActionMessage(String(error));
+    } finally {
+      setCorpusActionPending(null);
+    }
+  }
+
+  async function saveCorpusRetentionPolicy(corpusId: string) {
+    setCorpusActionPending("retention");
+    setCorpusActionFailed(false);
+    setCorpusActionMessage("");
+
+    try {
+      const retainForMinutes =
+        corpusRetentionPolicyDraft === "retain_for_duration"
+          ? parsePositiveInteger(corpusRetentionMinutesDraft)
+          : null;
+
+      if (corpusRetentionPolicyDraft === "retain_for_duration" && retainForMinutes === null) {
+        throw new Error("Retention minutes must be a whole number greater than 0.");
+      }
+
+      const response = await fetch(`${API_BASE}/api/corpora/${corpusId}/retention`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          retention_policy: corpusRetentionPolicyDraft,
+          retain_for_minutes: retainForMinutes ?? undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await readApiError(response, "Failed to update corpus retention policy.");
+        throw new Error(error);
+      }
+
+      const data = (await response.json()) as CorpusLifecycleActionResponse;
+      setCorpusActionResult(data);
+      setCorpusActionMessage(data.message);
+      setSelectedCorpusId(data.corpus_id);
+      await loadCorpora();
+      await openCorpusReport(data.corpus_id);
+    } catch (error) {
+      setCorpusActionFailed(true);
+      setCorpusActionMessage(String(error));
+    } finally {
+      setCorpusActionPending(null);
+    }
+  }
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
@@ -1628,6 +1757,17 @@ function App() {
     if (!corpora.some((corpus) => corpus.corpus_id === selectedCorpusId)) {
       setSelectedCorpusId(corpora[0].corpus_id);
     }
+  }, [corpora, selectedCorpusId]);
+
+  useEffect(() => {
+    const currentCorpus = corpora.find((corpus) => corpus.corpus_id === selectedCorpusId);
+
+    if (!currentCorpus) {
+      return;
+    }
+
+    setCorpusRetentionPolicyDraft(currentCorpus.lifecycle.retention_policy);
+    setCorpusRetentionMinutesDraft(minutesUntil(currentCorpus.lifecycle.retention_deadline));
   }, [corpora, selectedCorpusId]);
 
   useEffect(() => {
@@ -1816,6 +1956,10 @@ function App() {
     filteredCorpora.find((corpus) => corpus.corpus_id === selectedCorpusId) ??
     corpora.find((corpus) => corpus.corpus_id === selectedCorpusId) ??
     null;
+  const selectedCorpusLifecycleResult =
+    corpusActionResult && corpusActionResult.corpus_id === selectedCorpusId
+      ? corpusActionResult
+      : null;
   const modelQueryText = modelQuery.trim().toLowerCase();
   const filteredModels = models.filter((model) => {
     if (!modelQueryText) {
@@ -3221,6 +3365,16 @@ function App() {
                       </span>
                     </div>
 
+                    {corpusActionMessage && (
+                      <div
+                        className={
+                          corpusActionFailed ? "registry-action-banner failed" : "registry-action-banner"
+                        }
+                      >
+                        {corpusActionMessage}
+                      </div>
+                    )}
+
                     <dl className="registry-detail-grid">
                       <dt>name</dt>
                       <dd>{selectedCorpus.name}</dd>
@@ -3228,6 +3382,36 @@ function App() {
                       <dd>{formatTimestamp(selectedCorpus.created_at)}</dd>
                       <dt>retention policy</dt>
                       <dd>{humanizeSnakeCase(selectedCorpus.lifecycle.retention_policy)}</dd>
+                      <dt>retention deadline</dt>
+                      <dd>
+                        {selectedCorpus.lifecycle.retention_deadline
+                          ? formatTimestamp(selectedCorpus.lifecycle.retention_deadline)
+                          : "none"}
+                      </dd>
+                      <dt>cleanup requested</dt>
+                      <dd>
+                        {selectedCorpus.lifecycle.cleanup_requested_at
+                          ? formatTimestamp(selectedCorpus.lifecycle.cleanup_requested_at)
+                          : "not requested"}
+                      </dd>
+                      <dt>cleanup completed</dt>
+                      <dd>
+                        {selectedCorpus.lifecycle.cleanup_completed_at
+                          ? formatTimestamp(selectedCorpus.lifecycle.cleanup_completed_at)
+                          : "not completed"}
+                      </dd>
+                      <dt>cleanup reason</dt>
+                      <dd>
+                        {selectedCorpus.lifecycle.cleanup_reason
+                          ? humanizeSnakeCase(selectedCorpus.lifecycle.cleanup_reason)
+                          : "none"}
+                      </dd>
+                      <dt>lifecycle updated</dt>
+                      <dd>
+                        {selectedCorpus.lifecycle.updated_at
+                          ? formatTimestamp(selectedCorpus.lifecycle.updated_at)
+                          : "unknown"}
+                      </dd>
                       <dt>sources</dt>
                       <dd>{selectedCorpus.source_count}</dd>
                       <dt>chunks</dt>
@@ -3242,7 +3426,66 @@ function App() {
                       <dd className="registry-path">{selectedCorpus.root_path}</dd>
                       <dt>manifest path</dt>
                       <dd className="registry-path">{selectedCorpus.manifest_path}</dd>
+                      <dt>report path</dt>
+                      <dd className="registry-path">{selectedCorpus.report_path}</dd>
+                      {selectedCorpusLifecycleResult && (
+                        <>
+                          <dt>root exists</dt>
+                          <dd>{formatBoolean(selectedCorpusLifecycleResult.root_exists)}</dd>
+                          <dt>report exists</dt>
+                          <dd>{formatBoolean(selectedCorpusLifecycleResult.report_exists)}</dd>
+                        </>
+                      )}
                     </dl>
+
+                    <section className="registry-retention-controls">
+                      <div className="panel-title">retention policy</div>
+                      <div className="registry-filter-row">
+                        <label>
+                          policy
+                          <select
+                            value={corpusRetentionPolicyDraft}
+                            onChange={(event) => setCorpusRetentionPolicyDraft(event.target.value)}
+                            disabled={corpusActionPending !== null}
+                          >
+                            <option value="retain_until_manual_cleanup">manual cleanup</option>
+                            <option value="retain_for_duration">timed retention</option>
+                            <option value="ephemeral_immediate">ephemeral immediate</option>
+                          </select>
+                        </label>
+
+                        {corpusRetentionPolicyDraft === "retain_for_duration" && (
+                          <label>
+                            minutes
+                            <input
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={corpusRetentionMinutesDraft}
+                              onChange={(event) => setCorpusRetentionMinutesDraft(event.target.value)}
+                              disabled={corpusActionPending !== null}
+                            />
+                          </label>
+                        )}
+                      </div>
+
+                      <div className="registry-retention-meta">
+                        <span>
+                          current deadline:{" "}
+                          {selectedCorpus.lifecycle.retention_deadline
+                            ? formatTimestamp(selectedCorpus.lifecycle.retention_deadline)
+                            : "none"}
+                        </span>
+                        <button
+                          onClick={() => saveCorpusRetentionPolicy(selectedCorpus.corpus_id)}
+                          disabled={corpusActionPending !== null}
+                        >
+                          {corpusActionPending === "retention"
+                            ? "saving..."
+                            : "save retention policy"}
+                        </button>
+                      </div>
+                    </section>
 
                     <div className="registry-actions">
                       <button
@@ -3253,7 +3496,40 @@ function App() {
                       >
                         use for one-shot
                       </button>
+                      <button
+                        onClick={() => openCorpusReport(selectedCorpus.corpus_id)}
+                        disabled={corpusActionPending !== null}
+                      >
+                        load report
+                      </button>
+                      <button
+                        onClick={() =>
+                          runCorpusLifecycleAction(selectedCorpus.corpus_id, "reconcile")
+                        }
+                        disabled={corpusActionPending !== null}
+                      >
+                        {corpusActionPending === "reconcile" ? "reconciling..." : "reconcile"}
+                      </button>
+                      <button
+                        className="danger-button"
+                        onClick={() =>
+                          runCorpusLifecycleAction(selectedCorpus.corpus_id, "cleanup")
+                        }
+                        disabled={corpusActionPending !== null}
+                      >
+                        {corpusActionPending === "cleanup" ? "cleaning up..." : "cleanup now"}
+                      </button>
                     </div>
+
+                    {selectedCorpusReport && (
+                      <details className="report-detail" open>
+                        <summary>
+                          <span>corpus report</span>
+                          <span className="pill neutral">json</span>
+                        </summary>
+                        <pre>{selectedCorpusReport}</pre>
+                      </details>
+                    )}
                   </>
                 )}
               </section>
