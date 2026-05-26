@@ -4,6 +4,7 @@ use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
 use crate::config::{load_model_registry, SessionConfig};
+use crate::corpus_registry::{ensure_corpus_registry_dirs, list_corpora, CorpusRegistry};
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::registry::{
@@ -123,6 +124,7 @@ struct StreamPayload {
 pub async fn serve() -> Result<()> {
     let home = home_dir()?;
     emit_startup_reconciliation(&home)?;
+    ensure_corpus_registry_dirs(&home)?;
 
     let state = WebState {
         home: Arc::new(home),
@@ -133,6 +135,7 @@ pub async fn serve() -> Result<()> {
 
     let app = Router::new()
         .route("/api/health", get(health))
+        .route("/api/corpora", get(list_corpora_route))
         .route("/api/models", get(list_models))
         .route("/api/run", post(run_session))
         .route("/api/run/stream", post(run_session_stream))
@@ -256,6 +259,13 @@ async fn list_models(State(state): State<WebState>) -> Response {
             }),
         )
             .into_response(),
+    }
+}
+
+async fn list_corpora_route(State(state): State<WebState>) -> Response {
+    match list_corpora(&state.home) {
+        Ok(registry) => Json::<CorpusRegistry>(registry).into_response(),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
 

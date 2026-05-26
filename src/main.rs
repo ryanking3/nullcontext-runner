@@ -2,6 +2,8 @@ mod audit;
 mod chat;
 mod cleanup;
 mod config;
+mod corpus;
+mod corpus_registry;
 mod inference;
 mod llama_stream;
 mod memory_scan;
