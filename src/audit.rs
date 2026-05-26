@@ -4,7 +4,8 @@ use crate::registry::{
     CleanupReason, RetentionPolicy, SessionLifecycleMetadata, SessionLifecycleState,
 };
 use crate::runtime::{
-    RuntimePostShutdownObservation, RuntimeShutdownOutcome, RuntimeUsageSnapshot,
+    RuntimePostShutdownObservation, RuntimeResidentRegion, RuntimeShutdownOutcome,
+    RuntimeUsageSnapshot,
 };
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -95,6 +96,10 @@ pub struct LlamaRuntimeReport {
     pub observed_resident_bytes: Option<u64>,
     pub observed_virtual_bytes: Option<u64>,
     pub process_memory_source: Option<String>,
+    pub physical_footprint_bytes: Option<u64>,
+    pub physical_footprint_peak_bytes: Option<u64>,
+    pub vmmap_summary_source: Option<String>,
+    pub resident_regions: Vec<LlamaResidentRegionReport>,
     pub observed_gpu_memory_bytes: Option<u64>,
     pub gpu_memory_source: Option<String>,
     pub process_present_after_shutdown: Option<bool>,
@@ -117,6 +122,13 @@ pub struct LlamaMemoryDomainReport {
     pub exposure_scope: String,
     pub cleanup_status: String,
     pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlamaResidentRegionReport {
+    pub region_type: String,
+    pub virtual_bytes: u64,
+    pub resident_bytes: u64,
 }
 
 impl PrivacyReport {
@@ -320,6 +332,11 @@ pub fn build_llama_runtime_report(
 
     let mut observation_notes = usage.observation_notes.clone();
     observation_notes.extend(post_shutdown.observation_notes.clone());
+    let resident_regions = usage
+        .resident_regions
+        .iter()
+        .map(LlamaResidentRegionReport::from_runtime_region)
+        .collect();
 
     LlamaRuntimeReport {
         runtime_kind: "llama-server".to_string(),
@@ -335,6 +352,10 @@ pub fn build_llama_runtime_report(
         observed_resident_bytes: usage.resident_bytes,
         observed_virtual_bytes: usage.virtual_bytes,
         process_memory_source: usage.process_memory_source.clone(),
+        physical_footprint_bytes: usage.physical_footprint_bytes,
+        physical_footprint_peak_bytes: usage.physical_footprint_peak_bytes,
+        vmmap_summary_source: usage.vmmap_summary_source.clone(),
+        resident_regions,
         observed_gpu_memory_bytes: usage.gpu_memory_bytes,
         gpu_memory_source: usage.gpu_memory_source.clone(),
         process_present_after_shutdown: post_shutdown.process_present_after_shutdown,
@@ -364,6 +385,16 @@ pub fn build_llama_runtime_report(
                 .to_string()
         },
         memory_domains,
+    }
+}
+
+impl LlamaResidentRegionReport {
+    fn from_runtime_region(region: &RuntimeResidentRegion) -> Self {
+        Self {
+            region_type: region.region_type.clone(),
+            virtual_bytes: region.virtual_bytes,
+            resident_bytes: region.resident_bytes,
+        }
     }
 }
 

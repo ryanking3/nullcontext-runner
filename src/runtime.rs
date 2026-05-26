@@ -25,9 +25,20 @@ pub struct RuntimeUsageSnapshot {
     pub resident_bytes: Option<u64>,
     pub virtual_bytes: Option<u64>,
     pub process_memory_source: Option<String>,
+    pub physical_footprint_bytes: Option<u64>,
+    pub physical_footprint_peak_bytes: Option<u64>,
+    pub vmmap_summary_source: Option<String>,
+    pub resident_regions: Vec<RuntimeResidentRegion>,
     pub gpu_memory_bytes: Option<u64>,
     pub gpu_memory_source: Option<String>,
     pub observation_notes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeResidentRegion {
+    pub region_type: String,
+    pub virtual_bytes: u64,
+    pub resident_bytes: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -220,65 +231,79 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
     }
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
 fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
-    #[cfg(unix)]
-    {
-        let output = Command::new("ps")
-            .args(["-o", "rss=", "-o", "vsz=", "-p", &pid.to_string()])
-            .output();
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-o", "vsz=", "-p", &pid.to_string()])
+        .output();
 
-        match output {
-            Ok(output) if output.status.success() => {
-                let raw = String::from_utf8_lossy(&output.stdout);
-                let mut parts = raw.split_whitespace();
-                let resident_kb = parts.next().and_then(|value| value.parse::<u64>().ok());
-                let virtual_kb = parts.next().and_then(|value| value.parse::<u64>().ok());
+    match output {
+        Ok(output) if output.status.success() => {
+            let raw = String::from_utf8_lossy(&output.stdout);
+            let mut parts = raw.split_whitespace();
+            let resident_kb = parts.next().and_then(|value| value.parse::<u64>().ok());
+            let virtual_kb = parts.next().and_then(|value| value.parse::<u64>().ok());
 
-                RuntimeUsageSnapshot {
-                    resident_bytes: resident_kb.map(|value| value * 1024),
-                    virtual_bytes: virtual_kb.map(|value| value * 1024),
-                    process_memory_source: Some("ps rss/vsz".to_string()),
-                    gpu_memory_bytes: None,
-                    gpu_memory_source: None,
-                    observation_notes: vec![],
-                }
+            RuntimeUsageSnapshot {
+                resident_bytes: resident_kb.map(|value| value * 1024),
+                virtual_bytes: virtual_kb.map(|value| value * 1024),
+                process_memory_source: Some("ps rss/vsz".to_string()),
+                physical_footprint_bytes: None,
+                physical_footprint_peak_bytes: None,
+                vmmap_summary_source: None,
+                resident_regions: vec![],
+                gpu_memory_bytes: None,
+                gpu_memory_source: None,
+                observation_notes: vec![],
             }
-            Ok(output) => RuntimeUsageSnapshot {
-                resident_bytes: None,
-                virtual_bytes: None,
-                process_memory_source: None,
-                gpu_memory_bytes: None,
-                gpu_memory_source: None,
-                observation_notes: vec![format!(
-                    "Process memory observation via ps failed with status {}.",
-                    output.status
-                )],
-            },
-            Err(error) => RuntimeUsageSnapshot {
-                resident_bytes: None,
-                virtual_bytes: None,
-                process_memory_source: None,
-                gpu_memory_bytes: None,
-                gpu_memory_source: None,
-                observation_notes: vec![format!(
-                    "Process memory observation via ps was unavailable: {error}."
-                )],
-            },
         }
-    }
-
-    #[cfg(not(unix))]
-    {
-        RuntimeUsageSnapshot {
+        Ok(output) => RuntimeUsageSnapshot {
             resident_bytes: None,
             virtual_bytes: None,
             process_memory_source: None,
+            physical_footprint_bytes: None,
+            physical_footprint_peak_bytes: None,
+            vmmap_summary_source: None,
+            resident_regions: vec![],
             gpu_memory_bytes: None,
             gpu_memory_source: None,
-            observation_notes: vec![
-                "Process memory observation is not yet implemented on this platform.".to_string(),
-            ],
-        }
+            observation_notes: vec![format!(
+                "Process memory observation via ps failed with status {}.",
+                output.status
+            )],
+        },
+        Err(error) => RuntimeUsageSnapshot {
+            resident_bytes: None,
+            virtual_bytes: None,
+            process_memory_source: None,
+            physical_footprint_bytes: None,
+            physical_footprint_peak_bytes: None,
+            vmmap_summary_source: None,
+            resident_regions: vec![],
+            gpu_memory_bytes: None,
+            gpu_memory_source: None,
+            observation_notes: vec![format!(
+                "Process memory observation via ps was unavailable: {error}."
+            )],
+        },
+    }
+}
+
+#[cfg(not(unix))]
+fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
+    RuntimeUsageSnapshot {
+        resident_bytes: None,
+        virtual_bytes: None,
+        process_memory_source: None,
+        physical_footprint_bytes: None,
+        physical_footprint_peak_bytes: None,
+        vmmap_summary_source: None,
+        resident_regions: vec![],
+        gpu_memory_bytes: None,
+        gpu_memory_source: None,
+        observation_notes: vec![
+            "Process memory observation is not yet implemented on this platform.".to_string(),
+        ],
     }
 }
 
@@ -380,6 +405,196 @@ fn observe_process_presence(pid: u32) -> (Option<bool>, Option<String>, Option<S
             ),
         )
     }
+}
+
+#[cfg(target_os = "macos")]
+fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
+    let mut snapshot = {
+        let output = Command::new("ps")
+            .args(["-o", "rss=", "-o", "vsz=", "-p", &pid.to_string()])
+            .output();
+
+        match output {
+            Ok(output) if output.status.success() => {
+                let raw = String::from_utf8_lossy(&output.stdout);
+                let mut parts = raw.split_whitespace();
+                let resident_kb = parts.next().and_then(|value| value.parse::<u64>().ok());
+                let virtual_kb = parts.next().and_then(|value| value.parse::<u64>().ok());
+
+                RuntimeUsageSnapshot {
+                    resident_bytes: resident_kb.map(|value| value * 1024),
+                    virtual_bytes: virtual_kb.map(|value| value * 1024),
+                    process_memory_source: Some("ps rss/vsz".to_string()),
+                    physical_footprint_bytes: None,
+                    physical_footprint_peak_bytes: None,
+                    vmmap_summary_source: None,
+                    resident_regions: vec![],
+                    gpu_memory_bytes: None,
+                    gpu_memory_source: None,
+                    observation_notes: vec![],
+                }
+            }
+            Ok(output) => RuntimeUsageSnapshot {
+                resident_bytes: None,
+                virtual_bytes: None,
+                process_memory_source: None,
+                physical_footprint_bytes: None,
+                physical_footprint_peak_bytes: None,
+                vmmap_summary_source: None,
+                resident_regions: vec![],
+                gpu_memory_bytes: None,
+                gpu_memory_source: None,
+                observation_notes: vec![format!(
+                    "Process memory observation via ps failed with status {}.",
+                    output.status
+                )],
+            },
+            Err(error) => RuntimeUsageSnapshot {
+                resident_bytes: None,
+                virtual_bytes: None,
+                process_memory_source: None,
+                physical_footprint_bytes: None,
+                physical_footprint_peak_bytes: None,
+                vmmap_summary_source: None,
+                resident_regions: vec![],
+                gpu_memory_bytes: None,
+                gpu_memory_source: None,
+                observation_notes: vec![format!(
+                    "Process memory observation via ps was unavailable: {error}."
+                )],
+            },
+        }
+    };
+
+    let output = Command::new("vmmap")
+        .args(["-summary", &pid.to_string()])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let raw = String::from_utf8_lossy(&output.stdout);
+            snapshot.physical_footprint_bytes = find_vmmap_value(&raw, "Physical footprint:");
+            snapshot.physical_footprint_peak_bytes =
+                find_vmmap_value(&raw, "Physical footprint (peak):");
+            snapshot.vmmap_summary_source = Some("vmmap -summary".to_string());
+            snapshot.resident_regions = parse_vmmap_resident_regions(&raw);
+
+            if snapshot.process_memory_source.is_some() {
+                snapshot.process_memory_source = Some("ps rss/vsz + vmmap -summary".to_string());
+            } else {
+                snapshot.process_memory_source = Some("vmmap -summary".to_string());
+            }
+        }
+        Ok(output) => {
+            snapshot.observation_notes.push(format!(
+                "macOS vmmap summary observation failed with status {}.",
+                output.status
+            ));
+        }
+        Err(error) => {
+            snapshot.observation_notes.push(format!(
+                "macOS vmmap summary observation was unavailable: {error}."
+            ));
+        }
+    }
+
+    snapshot
+}
+
+#[cfg(target_os = "macos")]
+fn find_vmmap_value(raw: &str, prefix: &str) -> Option<u64> {
+    raw.lines()
+        .find(|line| line.trim_start().starts_with(prefix))
+        .and_then(|line| line.split(':').nth(1))
+        .and_then(|value| parse_vmmap_size(value.trim()))
+}
+
+#[cfg(target_os = "macos")]
+fn parse_vmmap_resident_regions(raw: &str) -> Vec<RuntimeResidentRegion> {
+    let mut in_table = false;
+    let mut regions = Vec::new();
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("REGION TYPE") {
+            in_table = true;
+            continue;
+        }
+
+        if !in_table {
+            continue;
+        }
+
+        if trimmed.starts_with("TOTAL") || trimmed.starts_with("MALLOC ZONE") {
+            break;
+        }
+
+        if trimmed.is_empty() || trimmed.starts_with("===========") {
+            continue;
+        }
+
+        if let Some(region) = parse_vmmap_region_line(trimmed) {
+            if region.resident_bytes > 0 {
+                regions.push(region);
+            }
+        }
+    }
+
+    regions.sort_by(|a, b| b.resident_bytes.cmp(&a.resident_bytes));
+    regions.truncate(6);
+    regions
+}
+
+#[cfg(target_os = "macos")]
+fn parse_vmmap_region_line(line: &str) -> Option<RuntimeResidentRegion> {
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    let numeric_index = tokens
+        .iter()
+        .position(|token| parse_vmmap_size(token).is_some())?;
+
+    if numeric_index == 0 || tokens.len() <= numeric_index + 1 {
+        return None;
+    }
+
+    let region_type = tokens[..numeric_index].join(" ");
+    let virtual_bytes = parse_vmmap_size(tokens[numeric_index])?;
+    let resident_bytes = parse_vmmap_size(tokens[numeric_index + 1])?;
+
+    Some(RuntimeResidentRegion {
+        region_type,
+        virtual_bytes,
+        resident_bytes,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn parse_vmmap_size(value: &str) -> Option<u64> {
+    let trimmed = value.trim().trim_end_matches('%');
+
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (number_part, unit) = trimmed.chars().last().map(|last| {
+        if last.is_ascii_alphabetic() {
+            (&trimmed[..trimmed.len() - 1], Some(last))
+        } else {
+            (trimmed, None)
+        }
+    })?;
+
+    let number = number_part.parse::<f64>().ok()?;
+    let multiplier = match unit.map(|value| value.to_ascii_uppercase()) {
+        Some('K') => 1024.0,
+        Some('M') => 1024.0 * 1024.0,
+        Some('G') => 1024.0 * 1024.0 * 1024.0,
+        Some('T') => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        Some('B') | None => 1.0,
+        _ => return None,
+    };
+
+    Some((number * multiplier) as u64)
 }
 
 fn read_child_stderr(child: &mut Child) -> String {

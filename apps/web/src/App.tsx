@@ -170,6 +170,12 @@ type LlamaMemoryDomainReport = {
   notes: string;
 };
 
+type LlamaResidentRegionReport = {
+  region_type: string;
+  virtual_bytes: number;
+  resident_bytes: number;
+};
+
 type LlamaRuntimeReportData = {
   runtime_kind: string;
   runtime_pid?: number | null;
@@ -184,6 +190,10 @@ type LlamaRuntimeReportData = {
   observed_resident_bytes?: number | null;
   observed_virtual_bytes?: number | null;
   process_memory_source?: string | null;
+  physical_footprint_bytes?: number | null;
+  physical_footprint_peak_bytes?: number | null;
+  vmmap_summary_source?: string | null;
+  resident_regions: LlamaResidentRegionReport[];
   observed_gpu_memory_bytes?: number | null;
   gpu_memory_source?: string | null;
   process_present_after_shutdown?: boolean | null;
@@ -2922,6 +2932,22 @@ function App() {
                                   : "unavailable",
                               },
                               {
+                                label: "physical footprint",
+                                value: currentReport.llama_runtime.physical_footprint_bytes
+                                  ? formatBytes(
+                                      currentReport.llama_runtime.physical_footprint_bytes
+                                    )
+                                  : "unavailable",
+                              },
+                              {
+                                label: "peak footprint",
+                                value: currentReport.llama_runtime.physical_footprint_peak_bytes
+                                  ? formatBytes(
+                                      currentReport.llama_runtime.physical_footprint_peak_bytes
+                                    )
+                                  : "unavailable",
+                              },
+                              {
                                 label: "observed gpu memory",
                                 value: currentReport.llama_runtime.observed_gpu_memory_bytes
                                   ? formatBytes(
@@ -2937,6 +2963,11 @@ function App() {
                               {
                                 label: "gpu source",
                                 value: currentReport.llama_runtime.gpu_memory_source || "none",
+                              },
+                              {
+                                label: "vmmap source",
+                                value:
+                                  currentReport.llama_runtime.vmmap_summary_source || "none",
                               },
                               {
                                 label: "process present after shutdown",
@@ -3027,6 +3058,40 @@ function App() {
                               {currentReport.llama_runtime.residual_risk_summary}
                             </p>
                           </div>
+
+                          <details className="report-detail" open>
+                            <summary>
+                              <span>resident regions</span>
+                              <span className="pill neutral">
+                                {currentReport.llama_runtime.resident_regions.length}
+                              </span>
+                            </summary>
+                            {currentReport.llama_runtime.resident_regions.length === 0 ? (
+                              <p className="muted-text">
+                                no detailed region summary captured
+                              </p>
+                            ) : (
+                              <div className="report-list">
+                                {currentReport.llama_runtime.resident_regions.map((region) => (
+                                  <div
+                                    className="report-item"
+                                    key={`${region.region_type}-${region.resident_bytes}`}
+                                  >
+                                    <div className="report-item-header">
+                                      <strong>{region.region_type}</strong>
+                                      <span className="pill neutral">
+                                        {formatBytes(region.resident_bytes)} resident
+                                      </span>
+                                    </div>
+                                    <div className="report-path-list">
+                                      <div>virtual: {formatBytes(region.virtual_bytes)}</div>
+                                      <div>resident: {formatBytes(region.resident_bytes)}</div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </details>
 
                           <details className="report-detail" open>
                             <summary>
