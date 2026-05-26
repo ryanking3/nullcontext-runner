@@ -47,6 +47,10 @@ pub struct RuntimePostShutdownObservation {
     pub process_check_source: Option<String>,
     pub process_resident_bytes_after_shutdown: Option<u64>,
     pub process_virtual_bytes_after_shutdown: Option<u64>,
+    pub physical_footprint_bytes_after_shutdown: Option<u64>,
+    pub physical_footprint_peak_bytes_after_shutdown: Option<u64>,
+    pub vmmap_summary_source_after_shutdown: Option<String>,
+    pub resident_regions_after_shutdown: Vec<RuntimeResidentRegion>,
     pub verification_window_ms: u64,
     pub gpu_entry_present_after_shutdown: Option<bool>,
     pub gpu_memory_bytes_after_shutdown: Option<u64>,
@@ -223,6 +227,19 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
         process_virtual_bytes_after_shutdown: post_shutdown_process_sample
             .as_ref()
             .and_then(|sample| sample.virtual_bytes),
+        physical_footprint_bytes_after_shutdown: post_shutdown_process_sample
+            .as_ref()
+            .and_then(|sample| sample.physical_footprint_bytes),
+        physical_footprint_peak_bytes_after_shutdown: post_shutdown_process_sample
+            .as_ref()
+            .and_then(|sample| sample.physical_footprint_peak_bytes),
+        vmmap_summary_source_after_shutdown: post_shutdown_process_sample
+            .as_ref()
+            .and_then(|sample| sample.vmmap_summary_source.clone()),
+        resident_regions_after_shutdown: post_shutdown_process_sample
+            .as_ref()
+            .map(|sample| sample.resident_regions.clone())
+            .unwrap_or_default(),
         verification_window_ms: POST_SHUTDOWN_VERIFICATION_WINDOW_MS,
         gpu_entry_present_after_shutdown,
         gpu_memory_bytes_after_shutdown,

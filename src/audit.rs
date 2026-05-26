@@ -106,6 +106,10 @@ pub struct LlamaRuntimeReport {
     pub process_check_source: Option<String>,
     pub process_resident_bytes_after_shutdown: Option<u64>,
     pub process_virtual_bytes_after_shutdown: Option<u64>,
+    pub physical_footprint_bytes_after_shutdown: Option<u64>,
+    pub physical_footprint_peak_bytes_after_shutdown: Option<u64>,
+    pub vmmap_summary_source_after_shutdown: Option<String>,
+    pub resident_regions_after_shutdown: Vec<LlamaResidentRegionReport>,
     pub verification_window_ms: u64,
     pub gpu_entry_present_after_shutdown: Option<bool>,
     pub gpu_memory_bytes_after_shutdown: Option<u64>,
@@ -256,7 +260,7 @@ pub fn build_llama_runtime_report(
                 )
             } else if post_shutdown.process_present_after_shutdown == Some(true) {
                 format!(
-                    "The llama-server PID was still observable after the {} ms verification window. Post-shutdown RSS/VSZ remained at {} / {}.",
+                    "The llama-server PID was still observable after the {} ms verification window. Post-shutdown RSS/VSZ remained at {} / {}, with physical footprint {}.",
                     post_shutdown.verification_window_ms,
                     post_shutdown
                         .process_resident_bytes_after_shutdown
@@ -264,6 +268,10 @@ pub fn build_llama_runtime_report(
                         .unwrap_or_else(|| "unknown".to_string()),
                     post_shutdown
                         .process_virtual_bytes_after_shutdown
+                        .map(|value| format!("{value} bytes"))
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    post_shutdown
+                        .physical_footprint_bytes_after_shutdown
                         .map(|value| format!("{value} bytes"))
                         .unwrap_or_else(|| "unknown".to_string())
                 )
@@ -341,6 +349,11 @@ pub fn build_llama_runtime_report(
         .iter()
         .map(LlamaResidentRegionReport::from_runtime_region)
         .collect();
+    let resident_regions_after_shutdown = post_shutdown
+        .resident_regions_after_shutdown
+        .iter()
+        .map(LlamaResidentRegionReport::from_runtime_region)
+        .collect();
     let inspection_status = runtime_inspection_status(post_shutdown);
     let ram_inspection_status = ram_inspection_status(post_shutdown);
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
@@ -375,6 +388,14 @@ pub fn build_llama_runtime_report(
         process_check_source: post_shutdown.process_check_source.clone(),
         process_resident_bytes_after_shutdown: post_shutdown.process_resident_bytes_after_shutdown,
         process_virtual_bytes_after_shutdown: post_shutdown.process_virtual_bytes_after_shutdown,
+        physical_footprint_bytes_after_shutdown: post_shutdown
+            .physical_footprint_bytes_after_shutdown,
+        physical_footprint_peak_bytes_after_shutdown: post_shutdown
+            .physical_footprint_peak_bytes_after_shutdown,
+        vmmap_summary_source_after_shutdown: post_shutdown
+            .vmmap_summary_source_after_shutdown
+            .clone(),
+        resident_regions_after_shutdown,
         verification_window_ms: post_shutdown.verification_window_ms,
         gpu_entry_present_after_shutdown: post_shutdown.gpu_entry_present_after_shutdown,
         gpu_memory_bytes_after_shutdown: post_shutdown.gpu_memory_bytes_after_shutdown,
@@ -474,8 +495,13 @@ fn runtime_inspection_summary(
             post_shutdown.verification_window_ms
         ),
         ("process_still_observable_after_shutdown", _, _) => format!(
-            "The llama-server PID was still observable after the {} ms verification window, so RAM cleanup evidence remains unfavorable and follow-up inspection is recommended.",
+            "The llama-server PID was still observable after the {} ms verification window, so RAM cleanup evidence remains unfavorable{} and follow-up inspection is recommended.",
             post_shutdown.verification_window_ms
+            ,
+            post_shutdown
+                .physical_footprint_bytes_after_shutdown
+                .map(|value| format!("; post-shutdown physical footprint remained {}", value))
+                .unwrap_or_default()
         ),
         (_, _, "gpu_entry_still_observable_after_shutdown") => format!(
             "A matching GPU entry was still observable after the {} ms verification window, so VRAM exposure remains explicitly visible after shutdown.",

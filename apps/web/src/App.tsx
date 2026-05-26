@@ -200,6 +200,10 @@ type LlamaRuntimeReportData = {
   process_check_source?: string | null;
   process_resident_bytes_after_shutdown?: number | null;
   process_virtual_bytes_after_shutdown?: number | null;
+  physical_footprint_bytes_after_shutdown?: number | null;
+  physical_footprint_peak_bytes_after_shutdown?: number | null;
+  vmmap_summary_source_after_shutdown?: string | null;
+  resident_regions_after_shutdown: LlamaResidentRegionReport[];
   verification_window_ms: number;
   gpu_entry_present_after_shutdown?: boolean | null;
   gpu_memory_bytes_after_shutdown?: number | null;
@@ -3083,6 +3087,28 @@ function App() {
                                     : "unavailable",
                               },
                               {
+                                label: "post-shutdown footprint",
+                                value:
+                                  currentReport.llama_runtime
+                                    .physical_footprint_bytes_after_shutdown
+                                    ? formatBytes(
+                                        currentReport.llama_runtime
+                                          .physical_footprint_bytes_after_shutdown
+                                      )
+                                    : "unavailable",
+                              },
+                              {
+                                label: "post-shutdown peak footprint",
+                                value:
+                                  currentReport.llama_runtime
+                                    .physical_footprint_peak_bytes_after_shutdown
+                                    ? formatBytes(
+                                        currentReport.llama_runtime
+                                          .physical_footprint_peak_bytes_after_shutdown
+                                      )
+                                    : "unavailable",
+                              },
+                              {
                                 label: "gpu entry after shutdown",
                                 value:
                                   currentReport.llama_runtime
@@ -3114,6 +3140,12 @@ function App() {
                               {
                                 label: "post-shutdown gpu source",
                                 value: currentReport.llama_runtime.gpu_check_source || "none",
+                              },
+                              {
+                                label: "post-shutdown vmmap source",
+                                value:
+                                  currentReport.llama_runtime
+                                    .vmmap_summary_source_after_shutdown || "none",
                               },
                               {
                                 label: "model path",
@@ -3210,6 +3242,46 @@ function App() {
                               </div>
                             </details>
                           )}
+
+                          <details className="report-detail" open>
+                            <summary>
+                              <span>post-shutdown resident regions</span>
+                              <span className="pill neutral">
+                                {
+                                  currentReport.llama_runtime.resident_regions_after_shutdown
+                                    .length
+                                }
+                              </span>
+                            </summary>
+                            {currentReport.llama_runtime.resident_regions_after_shutdown.length ===
+                            0 ? (
+                              <p className="muted-text">
+                                no post-shutdown region summary captured
+                              </p>
+                            ) : (
+                              <div className="report-list">
+                                {currentReport.llama_runtime.resident_regions_after_shutdown.map(
+                                  (region) => (
+                                    <div
+                                      className="report-item"
+                                      key={`post-${region.region_type}-${region.resident_bytes}`}
+                                    >
+                                      <div className="report-item-header">
+                                        <strong>{region.region_type}</strong>
+                                        <span className="pill neutral">
+                                          {formatBytes(region.resident_bytes)} resident
+                                        </span>
+                                      </div>
+                                      <div className="report-path-list">
+                                        <div>virtual: {formatBytes(region.virtual_bytes)}</div>
+                                        <div>resident: {formatBytes(region.resident_bytes)}</div>
+                                      </div>
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            )}
+                          </details>
                         </section>
                       )}
 
