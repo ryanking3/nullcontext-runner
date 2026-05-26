@@ -34,6 +34,35 @@ type ModelRegistrySnapshot = {
   models: RegisteredModel[];
 };
 
+type CorpusRegistrySnapshot = {
+  corpora: CorpusIndexEntry[];
+};
+
+type CorpusLifecycleMetadata = {
+  state: string;
+  retention_policy: string;
+  retention_deadline?: string | null;
+  cleanup_requested_at?: string | null;
+  cleanup_completed_at?: string | null;
+  cleanup_reason?: string | null;
+  updated_at?: string | null;
+};
+
+type CorpusIndexEntry = {
+  corpus_id: string;
+  name: string;
+  created_at: string;
+  persistent: boolean;
+  root_path: string;
+  manifest_path: string;
+  source_count: number;
+  chunk_count: number;
+  embedding_backend?: string | null;
+  embedding_model?: string | null;
+  ocr_backend?: string | null;
+  lifecycle: CorpusLifecycleMetadata;
+};
+
 type SessionLifecycleMetadata = {
   state: string;
   retention_policy: string;
@@ -217,6 +246,27 @@ type SessionLifecycleActionResponse = {
 
 type ApiErrorResponse = {
   error?: string;
+};
+
+type CorpusIngestionReport = {
+  corpus_id: string;
+  created_at: string;
+  persistent: boolean;
+  source_paths_requested: string[];
+  files_discovered: number;
+  files_ingested: number;
+  files_failed: number;
+  pdf_pages_seen: number;
+  pdf_pages_ocrd: number;
+  chunk_count: number;
+  ocr_enabled: boolean;
+  warnings: string[];
+  residual_risk: string;
+};
+
+type IngestCorpusResponse = {
+  corpus: CorpusIndexEntry;
+  report: CorpusIngestionReport;
 };
 
 type ChatMessage = {
@@ -450,6 +500,7 @@ function App() {
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [registryDrawerOpen, setRegistryDrawerOpen] = useState(false);
+  const [corpusDrawerOpen, setCorpusDrawerOpen] = useState(false);
   const [inspectorView, setInspectorView] = useState<InspectorView>("audit");
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [chatTemplate, setChatTemplate] = useState<ChatTemplateOption>("auto");
@@ -465,6 +516,20 @@ function App() {
   const [modelsLoadedAt, setModelsLoadedAt] = useState("never");
   const [modelLoadError, setModelLoadError] = useState("");
   const [modelQuery, setModelQuery] = useState("");
+  const [corpora, setCorpora] = useState<CorpusIndexEntry[]>([]);
+  const [selectedCorpusId, setSelectedCorpusId] = useState("");
+  const [corporaLoadedAt, setCorporaLoadedAt] = useState("never");
+  const [corpusLoadError, setCorpusLoadError] = useState("");
+  const [corpusQuery, setCorpusQuery] = useState("");
+  const [corpusIngestName, setCorpusIngestName] = useState("");
+  const [corpusIngestPaths, setCorpusIngestPaths] = useState("");
+  const [corpusIngestPersistent, setCorpusIngestPersistent] = useState(true);
+  const [corpusIngestOcrEnabled, setCorpusIngestOcrEnabled] = useState(true);
+  const [corpusIngestPending, setCorpusIngestPending] = useState(false);
+  const [corpusIngestMessage, setCorpusIngestMessage] = useState("");
+  const [corpusIngestFailed, setCorpusIngestFailed] = useState(false);
+  const [lastIngestedCorpusReport, setLastIngestedCorpusReport] =
+    useState<CorpusIngestionReport | null>(null);
 
   const [activeChatSessionId, setActiveChatSessionId] = useState("");
   const [activeChatWorkspace, setActiveChatWorkspace] = useState("");
@@ -588,6 +653,36 @@ function App() {
       setInspectedModelId("");
     } finally {
       setModelsLoadedAt(new Date().toLocaleTimeString());
+    }
+  }
+
+  async function loadCorpora() {
+    try {
+      const response = await fetch(`${API_BASE}/api/corpora`);
+
+      if (!response.ok) {
+        const error = await readApiError(response, "Failed to load corpus registry.");
+        throw new Error(error);
+      }
+
+      const data = (await response.json()) as CorpusRegistrySnapshot;
+      const nextCorpora = data.corpora ?? [];
+
+      setCorpora(nextCorpora);
+      setCorpusLoadError("");
+      setSelectedCorpusId((current) => {
+        if (current && nextCorpora.some((corpus) => corpus.corpus_id === current)) {
+          return current;
+        }
+
+        return nextCorpora[0]?.corpus_id ?? "";
+      });
+    } catch (error) {
+      setCorpora([]);
+      setCorpusLoadError(String(error));
+      setSelectedCorpusId("");
+    } finally {
+      setCorporaLoadedAt(new Date().toLocaleTimeString());
     }
   }
 
@@ -877,6 +972,7 @@ function App() {
     setConfigDrawerOpen(false);
     setModelDrawerOpen(false);
     setRegistryDrawerOpen(false);
+    setCorpusDrawerOpen(false);
   }
 
   function openConfigDrawer() {
@@ -889,6 +985,7 @@ function App() {
   function openModelDrawer() {
     setConfigDrawerOpen(false);
     setRegistryDrawerOpen(false);
+    setCorpusDrawerOpen(false);
     setModelDrawerOpen(true);
     setCommandMenuOpen(false);
 
@@ -900,11 +997,24 @@ function App() {
   function openRegistryDrawer() {
     setConfigDrawerOpen(false);
     setModelDrawerOpen(false);
+    setCorpusDrawerOpen(false);
     setRegistryDrawerOpen(true);
     setCommandMenuOpen(false);
 
     if (!selectedSessionId && sessions.length > 0) {
       setSelectedSessionId(sessions[0].session_id);
+    }
+  }
+
+  function openCorpusDrawer() {
+    setConfigDrawerOpen(false);
+    setModelDrawerOpen(false);
+    setRegistryDrawerOpen(false);
+    setCorpusDrawerOpen(true);
+    setCommandMenuOpen(false);
+
+    if (!selectedCorpusId && corpora.length > 0) {
+      setSelectedCorpusId(corpora[0].corpus_id);
     }
   }
 
@@ -940,6 +1050,7 @@ function App() {
           mode,
           persistent,
           model_id: selectedModelId || undefined,
+          corpus_id: selectedCorpusId || undefined,
           ...activeChatConfig,
         }),
         signal: controller.signal,
@@ -1322,6 +1433,66 @@ function App() {
     }
   }
 
+  async function ingestCorpusFromForm() {
+    const paths = corpusIngestPaths
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const name = corpusIngestName.trim();
+
+    if (!name) {
+      setCorpusIngestFailed(true);
+      setCorpusIngestMessage("Corpus name is required.");
+      return;
+    }
+
+    if (paths.length === 0) {
+      setCorpusIngestFailed(true);
+      setCorpusIngestMessage("Provide at least one absolute file or directory path to ingest.");
+      return;
+    }
+
+    setCorpusIngestPending(true);
+    setCorpusIngestFailed(false);
+    setCorpusIngestMessage("");
+
+    try {
+      const response = await fetch(`${API_BASE}/api/corpora`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          paths,
+          persistent: corpusIngestPersistent,
+          ocr_enabled: corpusIngestOcrEnabled,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await readApiError(response, "Failed to ingest corpus.");
+        throw new Error(error);
+      }
+
+      const data = (await response.json()) as IngestCorpusResponse;
+
+      setLastIngestedCorpusReport(data.report);
+      setCorpusIngestMessage(
+        `Built corpus ${data.corpus.name} with ${data.report.chunk_count} chunks from ${data.report.files_ingested} ingested file(s).`
+      );
+      setSelectedCorpusId(data.corpus.corpus_id);
+      setCorpusIngestPaths("");
+      setCorpusIngestName("");
+      await loadCorpora();
+    } catch (error) {
+      setCorpusIngestFailed(true);
+      setCorpusIngestMessage(String(error));
+    } finally {
+      setCorpusIngestPending(false);
+    }
+  }
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
@@ -1330,6 +1501,7 @@ function App() {
     checkHealth();
     loadSessions();
     loadModels();
+    loadCorpora();
   }, []);
 
   useEffect(() => {
@@ -1399,6 +1571,19 @@ function App() {
     setRetentionPolicyDraft(currentSession.lifecycle.retention_policy);
     setRetentionMinutesDraft(minutesUntil(currentSession.lifecycle.retention_deadline));
   }, [selectedSessionId, sessions]);
+
+  useEffect(() => {
+    if (corpora.length === 0) {
+      if (selectedCorpusId !== "") {
+        setSelectedCorpusId("");
+      }
+      return;
+    }
+
+    if (!corpora.some((corpus) => corpus.corpus_id === selectedCorpusId)) {
+      setSelectedCorpusId(corpora[0].corpus_id);
+    }
+  }, [corpora, selectedCorpusId]);
 
   useEffect(() => {
     const nextSessions = [...sessions]
@@ -1561,6 +1746,31 @@ function App() {
     models.find((model) => model.id === selectedModelId) ??
     models.find((model) => model.default_selected) ??
     null;
+  const corpusQueryText = corpusQuery.trim().toLowerCase();
+  const filteredCorpora = corpora.filter((corpus) => {
+    if (!corpusQueryText) {
+      return true;
+    }
+
+    return [
+      corpus.corpus_id,
+      corpus.name,
+      corpus.root_path,
+      corpus.manifest_path,
+      corpus.embedding_backend ?? "",
+      corpus.embedding_model ?? "",
+      corpus.ocr_backend ?? "",
+      corpus.lifecycle.state,
+      corpus.lifecycle.retention_policy,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(corpusQueryText);
+  });
+  const selectedCorpus =
+    filteredCorpora.find((corpus) => corpus.corpus_id === selectedCorpusId) ??
+    corpora.find((corpus) => corpus.corpus_id === selectedCorpusId) ??
+    null;
   const modelQueryText = modelQuery.trim().toLowerCase();
   const filteredModels = models.filter((model) => {
     if (!modelQueryText) {
@@ -1697,6 +1907,9 @@ function App() {
               <div className="panel-header">
                 <div className="panel-title">session config</div>
                 <div className="drawer-actions">
+                  <button className="ghost-button" onClick={openCorpusDrawer}>
+                    corpora
+                  </button>
                   <button className="ghost-button" onClick={openModelDrawer}>
                     models
                   </button>
@@ -1710,6 +1923,12 @@ function App() {
                 <span>model: {selectedModel?.name || "loading..."}</span>
                 <span>mode: {mode}</span>
                 <span>persistent: {persistent ? "on" : "off"}</span>
+                <span>
+                  corpus:{" "}
+                  {selectedCorpus
+                    ? `${selectedCorpus.name} · ${selectedCorpus.persistent ? "persistent" : "ephemeral"}`
+                    : "none"}
+                </span>
                 <span>
                   template: {effectiveTemplate}
                   {useModelTemplateDefault ? " · model" : " · override"}
@@ -1725,7 +1944,8 @@ function App() {
 
               <p className="microcopy">
                 Move detailed controls into the config drawer so the main shell stays focused on
-                runtime state and conversation flow.
+                runtime state and conversation flow. Corpus selection currently applies to one-shot
+                grounded runs only.
               </p>
             </section>
 
@@ -1819,6 +2039,11 @@ function App() {
                 model: {activeRuntimeModelName}
                 {activeRuntimeModelId ? ` (${activeRuntimeModelId})` : ""}
               </div>
+              {runtimeMode === "one-shot" && selectedCorpus && (
+                <div className="truncate" title={selectedCorpus.root_path}>
+                  corpus: {selectedCorpus.name} ({selectedCorpus.persistent ? "persistent" : "ephemeral"})
+                </div>
+              )}
               {!activeChatRuntimeActive && selectedModel && (
                 <div className="truncate" title={selectedModel.model_path}>
                   path: {selectedModel.model_path}
@@ -1895,6 +2120,13 @@ function App() {
                     </button>
                     <button
                       onClick={() => {
+                        openCorpusDrawer();
+                      }}
+                    >
+                      open corpus drawer
+                    </button>
+                    <button
+                      onClick={() => {
                         openConfigDrawer();
                       }}
                     >
@@ -1907,6 +2139,14 @@ function App() {
                       }}
                     >
                       refresh model registry
+                    </button>
+                    <button
+                      onClick={() => {
+                        loadCorpora();
+                        setCommandMenuOpen(false);
+                      }}
+                    >
+                      refresh corpus registry
                     </button>
                     <button
                       onClick={() => {
@@ -2353,7 +2593,9 @@ function App() {
 
       <div
         className={`drawer-backdrop${
-          configDrawerOpen || modelDrawerOpen || registryDrawerOpen ? " open" : ""
+          configDrawerOpen || modelDrawerOpen || registryDrawerOpen || corpusDrawerOpen
+            ? " open"
+            : ""
         }`}
         onClick={closeDrawers}
       />
@@ -2608,10 +2850,46 @@ function App() {
             )}
 
             <div className="drawer-actions">
+              <button className="ghost-button" onClick={openCorpusDrawer}>
+                browse corpora
+              </button>
               <button className="ghost-button" onClick={openModelDrawer}>
                 browse model registry
               </button>
             </div>
+
+            <section className="corpus-config-block">
+              <div className="panel-header">
+                <div className="panel-title">grounding corpus</div>
+                <span className="mini-status">loaded:{corporaLoadedAt}</span>
+              </div>
+
+              {selectedCorpus ? (
+                <div className="config-summary">
+                  <span>name: {selectedCorpus.name}</span>
+                  <span>id: {selectedCorpus.corpus_id}</span>
+                  <span>
+                    lifecycle: {humanizeSnakeCase(selectedCorpus.lifecycle.state)}
+                  </span>
+                  <span>
+                    chunks: {selectedCorpus.chunk_count} · sources: {selectedCorpus.source_count}
+                  </span>
+                </div>
+              ) : (
+                <p className="microcopy">
+                  {corpusLoadError
+                    ? `Corpus registry unavailable: ${corpusLoadError}`
+                    : "No corpus selected. One-shot runs will use the raw prompt only."}
+                </p>
+              )}
+
+              {selectedCorpus && (
+                <p className="microcopy">
+                  Selected corpus applies to one-shot grounded runs. Active chat corpus attachment
+                  will come in a later slice.
+                </p>
+              )}
+            </section>
 
             <label>
               mode
@@ -2720,6 +2998,224 @@ function App() {
               session starts. Change settings before starting the runtime.
             </p>
             <p className="microcopy">models loaded: {modelsLoadedAt}</p>
+          </section>
+        </div>
+      </aside>
+
+      <aside className={`corpus-drawer${corpusDrawerOpen ? " open" : ""}`}>
+        <div className="drawer-header">
+          <div>
+            <h3>corpus registry</h3>
+            <p>ingest local documents, inspect corpus artifacts, and choose a grounded one-shot corpus</p>
+          </div>
+          <div className="drawer-actions">
+            <button className="ghost-button" onClick={loadCorpora}>
+              refresh
+            </button>
+            <button className="ghost-button" onClick={closeDrawers}>
+              close
+            </button>
+          </div>
+        </div>
+
+        <div className="drawer-body corpus-drawer-body">
+          <section className="panel corpus-list-panel">
+            <div className="panel-header">
+              <div className="panel-title">corpora</div>
+              <span className="mini-status">loaded:{corporaLoadedAt}</span>
+            </div>
+
+            <div className="registry-toolbar">
+              <label>
+                search
+                <input
+                  type="search"
+                  value={corpusQuery}
+                  onChange={(event) => setCorpusQuery(event.target.value)}
+                  placeholder="name, id, path, backend..."
+                />
+              </label>
+            </div>
+
+            {corpusLoadError ? (
+              <p className="muted-text">corpus registry unavailable: {corpusLoadError}</p>
+            ) : filteredCorpora.length === 0 ? (
+              <p className="muted-text">
+                {corpora.length === 0 ? "no corpora have been ingested yet" : "no corpora match the current search"}
+              </p>
+            ) : (
+              <div className="session-list model-session-list">
+                {filteredCorpora.map((corpus) => (
+                  <button
+                    className={
+                      selectedCorpusId === corpus.corpus_id ? "session-item selected" : "session-item"
+                    }
+                    key={corpus.corpus_id}
+                    onClick={() => setSelectedCorpusId(corpus.corpus_id)}
+                  >
+                    <div className="registry-session-header">
+                      <span>{corpus.name}</span>
+                      <span className={lifecycleStateClass(corpus.lifecycle.state)}>
+                        {humanizeSnakeCase(corpus.lifecycle.state)}
+                      </span>
+                    </div>
+                    <div className="registry-session-meta">
+                      <small>{corpus.persistent ? "persistent" : "ephemeral"}</small>
+                      <small>{new Date(corpus.created_at).toLocaleString()}</small>
+                    </div>
+                    <small>{shortId(corpus.corpus_id)}</small>
+                    <small>
+                      {corpus.source_count} sources · {corpus.chunk_count} chunks
+                    </small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="panel corpus-detail-panel">
+            <div className="detail-stack">
+              <section className="corpus-detail-block">
+                <div className="panel-header">
+                  <div className="panel-title">details</div>
+                  {selectedCorpus && (
+                    <span className="mini-status">id:{shortId(selectedCorpus.corpus_id)}</span>
+                  )}
+                </div>
+
+                {!selectedCorpus ? (
+                  <p className="muted-text">select a corpus to inspect its lifecycle and artifact paths</p>
+                ) : (
+                  <>
+                    <div className="registry-lifecycle-summary">
+                      <span className={lifecycleStateClass(selectedCorpus.lifecycle.state)}>
+                        {humanizeSnakeCase(selectedCorpus.lifecycle.state)}
+                      </span>
+                      <span className="pill neutral">
+                        {selectedCorpus.persistent ? "persistent" : "ephemeral"}
+                      </span>
+                    </div>
+
+                    <dl className="registry-detail-grid">
+                      <dt>name</dt>
+                      <dd>{selectedCorpus.name}</dd>
+                      <dt>created</dt>
+                      <dd>{formatTimestamp(selectedCorpus.created_at)}</dd>
+                      <dt>retention policy</dt>
+                      <dd>{humanizeSnakeCase(selectedCorpus.lifecycle.retention_policy)}</dd>
+                      <dt>sources</dt>
+                      <dd>{selectedCorpus.source_count}</dd>
+                      <dt>chunks</dt>
+                      <dd>{selectedCorpus.chunk_count}</dd>
+                      <dt>embedding backend</dt>
+                      <dd>{selectedCorpus.embedding_backend || "unknown"}</dd>
+                      <dt>embedding model</dt>
+                      <dd>{selectedCorpus.embedding_model || "unknown"}</dd>
+                      <dt>ocr backend</dt>
+                      <dd>{selectedCorpus.ocr_backend || "unknown"}</dd>
+                      <dt>root path</dt>
+                      <dd className="registry-path">{selectedCorpus.root_path}</dd>
+                      <dt>manifest path</dt>
+                      <dd className="registry-path">{selectedCorpus.manifest_path}</dd>
+                    </dl>
+
+                    <div className="registry-actions">
+                      <button
+                        onClick={() => {
+                          setSelectedCorpusId(selectedCorpus.corpus_id);
+                          openConfigDrawer();
+                        }}
+                      >
+                        use for one-shot
+                      </button>
+                    </div>
+                  </>
+                )}
+              </section>
+
+              <section className="corpus-ingest-panel">
+                <div className="panel-header">
+                  <div className="panel-title">ingest corpus</div>
+                  <span className="mini-status">txt · md · pdf</span>
+                </div>
+
+                {corpusIngestMessage && (
+                  <div
+                    className={
+                      corpusIngestFailed ? "registry-action-banner failed" : "registry-action-banner"
+                    }
+                  >
+                    {corpusIngestMessage}
+                  </div>
+                )}
+
+                <label>
+                  corpus name
+                  <input
+                    value={corpusIngestName}
+                    onChange={(event) => setCorpusIngestName(event.target.value)}
+                    placeholder="incident-response-briefing"
+                    disabled={corpusIngestPending}
+                  />
+                </label>
+
+                <label>
+                  local paths
+                  <textarea
+                    value={corpusIngestPaths}
+                    onChange={(event) => setCorpusIngestPaths(event.target.value)}
+                    placeholder={"/Users/you/docs/briefing.pdf\n/Users/you/docs/notes"}
+                    disabled={corpusIngestPending}
+                  />
+                </label>
+
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={corpusIngestPersistent}
+                    onChange={(event) => setCorpusIngestPersistent(event.target.checked)}
+                    disabled={corpusIngestPending}
+                  />
+                  persistent corpus
+                </label>
+
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={corpusIngestOcrEnabled}
+                    onChange={(event) => setCorpusIngestOcrEnabled(event.target.checked)}
+                    disabled={corpusIngestPending}
+                  />
+                  enable hybrid OCR for sparse PDF pages
+                </label>
+
+                <div className="registry-actions">
+                  <button onClick={ingestCorpusFromForm} disabled={corpusIngestPending}>
+                    {corpusIngestPending ? "ingesting..." : "ingest corpus"}
+                  </button>
+                </div>
+
+                <p className="microcopy">
+                  Enter absolute local file or directory paths. PDF ingestion uses native text extraction
+                  first, then OCRs sparse pages when enabled.
+                </p>
+
+                {lastIngestedCorpusReport && (
+                  <div className="config-summary corpus-ingest-summary">
+                    <span>last ingest: {shortId(lastIngestedCorpusReport.corpus_id)}</span>
+                    <span>
+                      discovered: {lastIngestedCorpusReport.files_discovered} · ingested:{" "}
+                      {lastIngestedCorpusReport.files_ingested}
+                    </span>
+                    <span>
+                      pdf pages: {lastIngestedCorpusReport.pdf_pages_seen} · OCR:{" "}
+                      {lastIngestedCorpusReport.pdf_pages_ocrd}
+                    </span>
+                    <span>chunks: {lastIngestedCorpusReport.chunk_count}</span>
+                  </div>
+                )}
+              </section>
+            </div>
           </section>
         </div>
       </aside>
