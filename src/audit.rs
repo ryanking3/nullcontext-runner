@@ -110,6 +110,10 @@ pub struct LlamaRuntimeReport {
     pub gpu_entry_present_after_shutdown: Option<bool>,
     pub gpu_memory_bytes_after_shutdown: Option<u64>,
     pub gpu_check_source: Option<String>,
+    pub inspection_status: String,
+    pub ram_inspection_status: String,
+    pub vram_inspection_status: String,
+    pub inspection_summary: String,
     pub observation_notes: Vec<String>,
     pub cleanup_summary: String,
     pub residual_risk_summary: String,
@@ -337,6 +341,15 @@ pub fn build_llama_runtime_report(
         .iter()
         .map(LlamaResidentRegionReport::from_runtime_region)
         .collect();
+    let inspection_status = runtime_inspection_status(post_shutdown);
+    let ram_inspection_status = ram_inspection_status(post_shutdown);
+    let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
+    let inspection_summary = runtime_inspection_summary(
+        &inspection_status,
+        &ram_inspection_status,
+        &vram_inspection_status,
+        post_shutdown,
+    );
 
     LlamaRuntimeReport {
         runtime_kind: "llama-server".to_string(),
@@ -366,6 +379,10 @@ pub fn build_llama_runtime_report(
         gpu_entry_present_after_shutdown: post_shutdown.gpu_entry_present_after_shutdown,
         gpu_memory_bytes_after_shutdown: post_shutdown.gpu_memory_bytes_after_shutdown,
         gpu_check_source: post_shutdown.gpu_check_source.clone(),
+        inspection_status,
+        ram_inspection_status,
+        vram_inspection_status,
+        inspection_summary,
         observation_notes,
         cleanup_summary: if !process_exited_cleanly {
             "NullContext could not confirm llama-server shutdown, so runtime-owned memory domains remain more weakly bounded than intended."
@@ -395,6 +412,79 @@ impl LlamaResidentRegionReport {
             virtual_bytes: region.virtual_bytes,
             resident_bytes: region.resident_bytes,
         }
+    }
+}
+
+fn runtime_inspection_status(post_shutdown: &RuntimePostShutdownObservation) -> String {
+    match post_shutdown.process_present_after_shutdown {
+        Some(false) => "process_not_observed_after_shutdown".to_string(),
+        Some(true) => "process_still_observable_after_shutdown".to_string(),
+        None => "process_shutdown_observation_inconclusive".to_string(),
+    }
+}
+
+fn ram_inspection_status(post_shutdown: &RuntimePostShutdownObservation) -> String {
+    match post_shutdown.process_present_after_shutdown {
+        Some(false) => "resident_memory_not_observed_after_shutdown".to_string(),
+        Some(true) => "resident_memory_still_observable_after_shutdown".to_string(),
+        None => "ram_inspection_inconclusive".to_string(),
+    }
+}
+
+fn vram_inspection_status(
+    gpu_offload_requested: bool,
+    post_shutdown: &RuntimePostShutdownObservation,
+) -> String {
+    if !gpu_offload_requested {
+        return "gpu_offload_not_requested".to_string();
+    }
+
+    match post_shutdown.gpu_entry_present_after_shutdown {
+        Some(false) => "gpu_entry_not_observed_after_shutdown".to_string(),
+        Some(true) => "gpu_entry_still_observable_after_shutdown".to_string(),
+        None => "gpu_inspection_unavailable".to_string(),
+    }
+}
+
+fn runtime_inspection_summary(
+    inspection_status: &str,
+    ram_inspection_status: &str,
+    vram_inspection_status: &str,
+    post_shutdown: &RuntimePostShutdownObservation,
+) -> String {
+    match (
+        inspection_status,
+        ram_inspection_status,
+        vram_inspection_status,
+    ) {
+        (
+            "process_not_observed_after_shutdown",
+            "resident_memory_not_observed_after_shutdown",
+            "gpu_entry_not_observed_after_shutdown",
+        ) => format!(
+            "Within the {} ms verification window, NullContext did not observe the llama-server PID, did not observe residual process RSS/VSZ, and did not observe a matching post-shutdown GPU entry.",
+            post_shutdown.verification_window_ms
+        ),
+        (
+            "process_not_observed_after_shutdown",
+            "resident_memory_not_observed_after_shutdown",
+            "gpu_offload_not_requested",
+        ) => format!(
+            "Within the {} ms verification window, NullContext did not observe the llama-server PID or residual process RSS/VSZ. GPU offload was not requested for this session.",
+            post_shutdown.verification_window_ms
+        ),
+        ("process_still_observable_after_shutdown", _, _) => format!(
+            "The llama-server PID was still observable after the {} ms verification window, so RAM cleanup evidence remains unfavorable and follow-up inspection is recommended.",
+            post_shutdown.verification_window_ms
+        ),
+        (_, _, "gpu_entry_still_observable_after_shutdown") => format!(
+            "A matching GPU entry was still observable after the {} ms verification window, so VRAM exposure remains explicitly visible after shutdown.",
+            post_shutdown.verification_window_ms
+        ),
+        _ => format!(
+            "Post-shutdown inspection completed with mixed or incomplete evidence over a {} ms verification window. Review the RAM and VRAM inspection statuses before making cleanup claims.",
+            post_shutdown.verification_window_ms
+        ),
     }
 }
 

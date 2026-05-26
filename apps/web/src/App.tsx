@@ -204,6 +204,10 @@ type LlamaRuntimeReportData = {
   gpu_entry_present_after_shutdown?: boolean | null;
   gpu_memory_bytes_after_shutdown?: number | null;
   gpu_check_source?: string | null;
+  inspection_status: string;
+  ram_inspection_status: string;
+  vram_inspection_status: string;
+  inspection_summary: string;
   observation_notes: string[];
   cleanup_summary: string;
   residual_risk_summary: string;
@@ -374,6 +378,25 @@ function statusClass(status: string): string {
   if (status === "failed") return "pill failed";
   if (status === "warning") return "pill warning";
   if (status === "not_attempted") return "pill muted";
+  return "pill neutral";
+}
+
+function inspectionStatusClass(status: string): string {
+  if (
+    status.includes("not_observed_after_shutdown") ||
+    status === "gpu_offload_not_requested"
+  ) {
+    return "pill success";
+  }
+
+  if (status.includes("still_observable_after_shutdown")) {
+    return "pill failed";
+  }
+
+  if (status.includes("inconclusive") || status.includes("unavailable")) {
+    return "pill warning";
+  }
+
   return "pill neutral";
 }
 
@@ -2870,6 +2893,57 @@ function App() {
                       {currentReport.llama_runtime && (
                         <section className="report-section">
                           <div className="panel-title">llama runtime exposure</div>
+                          <div className="report-risk-block">
+                            <p>
+                              <strong>inspection summary:</strong>{" "}
+                              {currentReport.llama_runtime.inspection_summary}
+                            </p>
+                            <div className="report-list">
+                              <div className="report-item">
+                                <div className="report-item-header">
+                                  <strong>runtime inspection</strong>
+                                  <span
+                                    className={inspectionStatusClass(
+                                      currentReport.llama_runtime.inspection_status
+                                    )}
+                                  >
+                                    {humanizeSnakeCase(
+                                      currentReport.llama_runtime.inspection_status
+                                    )}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="report-item">
+                                <div className="report-item-header">
+                                  <strong>ram inspection</strong>
+                                  <span
+                                    className={inspectionStatusClass(
+                                      currentReport.llama_runtime.ram_inspection_status
+                                    )}
+                                  >
+                                    {humanizeSnakeCase(
+                                      currentReport.llama_runtime.ram_inspection_status
+                                    )}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="report-item">
+                                <div className="report-item-header">
+                                  <strong>vram inspection</strong>
+                                  <span
+                                    className={inspectionStatusClass(
+                                      currentReport.llama_runtime.vram_inspection_status
+                                    )}
+                                  >
+                                    {humanizeSnakeCase(
+                                      currentReport.llama_runtime.vram_inspection_status
+                                    )}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
                           <ReportGrid
                             entries={[
                               {
