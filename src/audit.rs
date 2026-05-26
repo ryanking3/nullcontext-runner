@@ -3,7 +3,9 @@ use crate::config::SessionConfig;
 use crate::registry::{
     CleanupReason, RetentionPolicy, SessionLifecycleMetadata, SessionLifecycleState,
 };
-use crate::runtime::{RuntimeShutdownOutcome, RuntimeUsageSnapshot};
+use crate::runtime::{
+    RuntimePostShutdownObservation, RuntimeShutdownOutcome, RuntimeUsageSnapshot,
+};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -95,6 +97,10 @@ pub struct LlamaRuntimeReport {
     pub process_memory_source: Option<String>,
     pub observed_gpu_memory_bytes: Option<u64>,
     pub gpu_memory_source: Option<String>,
+    pub process_present_after_shutdown: Option<bool>,
+    pub process_check_source: Option<String>,
+    pub gpu_memory_bytes_after_shutdown: Option<u64>,
+    pub gpu_check_source: Option<String>,
     pub observation_notes: Vec<String>,
     pub cleanup_summary: String,
     pub residual_risk_summary: String,
@@ -204,6 +210,7 @@ pub fn build_llama_runtime_report(
     runtime_pid: Option<u32>,
     shutdown: &RuntimeShutdownOutcome,
     usage: &RuntimeUsageSnapshot,
+    post_shutdown: &RuntimePostShutdownObservation,
 ) -> LlamaRuntimeReport {
     let gpu_layers_requested = config.gpu_layers.parse::<u32>().unwrap_or(0);
     let gpu_offload_requested = gpu_layers_requested > 0;
@@ -265,6 +272,9 @@ pub fn build_llama_runtime_report(
         });
     }
 
+    let mut observation_notes = usage.observation_notes.clone();
+    observation_notes.extend(post_shutdown.observation_notes.clone());
+
     LlamaRuntimeReport {
         runtime_kind: "llama-server".to_string(),
         runtime_pid,
@@ -281,7 +291,11 @@ pub fn build_llama_runtime_report(
         process_memory_source: usage.process_memory_source.clone(),
         observed_gpu_memory_bytes: usage.gpu_memory_bytes,
         gpu_memory_source: usage.gpu_memory_source.clone(),
-        observation_notes: usage.observation_notes.clone(),
+        process_present_after_shutdown: post_shutdown.process_present_after_shutdown,
+        process_check_source: post_shutdown.process_check_source.clone(),
+        gpu_memory_bytes_after_shutdown: post_shutdown.gpu_memory_bytes_after_shutdown,
+        gpu_check_source: post_shutdown.gpu_check_source.clone(),
+        observation_notes,
         cleanup_summary: if !process_exited_cleanly {
             "NullContext could not confirm llama-server shutdown, so runtime-owned memory domains remain more weakly bounded than intended."
                 .to_string()

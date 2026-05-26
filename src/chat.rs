@@ -12,7 +12,7 @@ use crate::retrieval::{
     build_active_chat_retrieval_report, build_grounded_prompt, build_retrieval_report,
     query_corpus, QueryCorpusRequest,
 };
-use crate::runtime::ManagedRuntime;
+use crate::runtime::{observe_post_shutdown, ManagedRuntime};
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
 use anyhow::{bail, Result};
@@ -632,6 +632,7 @@ impl ChatSessionManager {
         let runtime_usage = active.runtime.observe_usage();
 
         let runtime_shutdown = active.runtime.shutdown()?;
+        let post_shutdown_observation = observe_post_shutdown(runtime_pid);
 
         for turn in &mut active.turns {
             turn.user.sanitize();
@@ -726,6 +727,7 @@ impl ChatSessionManager {
             Some(runtime_pid),
             &runtime_shutdown,
             &runtime_usage,
+            &post_shutdown_observation,
         ));
 
         let report = if let (Some(corpus_id), Some(corpus_name)) = (

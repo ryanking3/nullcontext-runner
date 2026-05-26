@@ -1,6 +1,9 @@
 use crate::cleanup::SanitizationOperation;
 use crate::config::SessionConfig;
-use crate::runtime::{ManagedRuntime, RuntimeShutdownOutcome, RuntimeUsageSnapshot};
+use crate::runtime::{
+    observe_post_shutdown, ManagedRuntime, RuntimePostShutdownObservation, RuntimeShutdownOutcome,
+    RuntimeUsageSnapshot,
+};
 use crate::sensitive::SensitiveBytes;
 use anyhow::Result;
 use reqwest::blocking::Client;
@@ -13,6 +16,7 @@ pub struct InferenceResult {
     pub runtime_pid: u32,
     pub runtime_shutdown: RuntimeShutdownOutcome,
     pub runtime_usage: RuntimeUsageSnapshot,
+    pub post_shutdown_observation: RuntimePostShutdownObservation,
     pub sanitization_operations: Vec<SanitizationOperation>,
 }
 
@@ -47,6 +51,7 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
 
     let runtime_usage = runtime.observe_usage();
     let runtime_shutdown = runtime.shutdown()?;
+    let post_shutdown_observation = observe_post_shutdown(runtime_pid);
 
     operations.push(SanitizationOperation {
         operation: "managed_runtime_shutdown".to_string(),
@@ -70,6 +75,7 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
         runtime_pid,
         runtime_shutdown,
         runtime_usage,
+        post_shutdown_observation,
         sanitization_operations: operations,
     })
 }

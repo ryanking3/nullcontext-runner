@@ -186,6 +186,10 @@ type LlamaRuntimeReportData = {
   process_memory_source?: string | null;
   observed_gpu_memory_bytes?: number | null;
   gpu_memory_source?: string | null;
+  process_present_after_shutdown?: boolean | null;
+  process_check_source?: string | null;
+  gpu_memory_bytes_after_shutdown?: number | null;
+  gpu_check_source?: string | null;
   observation_notes: string[];
   cleanup_summary: string;
   residual_risk_summary: string;
@@ -2929,6 +2933,39 @@ function App() {
                               {
                                 label: "gpu source",
                                 value: currentReport.llama_runtime.gpu_memory_source || "none",
+                              },
+                              {
+                                label: "process present after shutdown",
+                                value:
+                                  currentReport.llama_runtime
+                                    .process_present_after_shutdown === null ||
+                                  currentReport.llama_runtime
+                                    .process_present_after_shutdown === undefined
+                                    ? "unavailable"
+                                    : formatBoolean(
+                                        currentReport.llama_runtime
+                                          .process_present_after_shutdown
+                                      ),
+                              },
+                              {
+                                label: "post-shutdown gpu memory",
+                                value:
+                                  currentReport.llama_runtime
+                                    .gpu_memory_bytes_after_shutdown
+                                    ? formatBytes(
+                                        currentReport.llama_runtime
+                                          .gpu_memory_bytes_after_shutdown
+                                      )
+                                    : "unavailable",
+                              },
+                              {
+                                label: "process check source",
+                                value:
+                                  currentReport.llama_runtime.process_check_source || "none",
+                              },
+                              {
+                                label: "post-shutdown gpu source",
+                                value: currentReport.llama_runtime.gpu_check_source || "none",
                               },
                               {
                                 label: "model path",

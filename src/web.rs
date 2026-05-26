@@ -25,7 +25,7 @@ use crate::retrieval::{
     build_grounded_prompt, build_retrieval_report, query_corpus, QueryCorpusRequest,
     QueryCorpusResponse,
 };
-use crate::runtime::ManagedRuntime;
+use crate::runtime::{observe_post_shutdown, ManagedRuntime};
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
 use anyhow::Result;
@@ -834,6 +834,7 @@ fn run_direct_streaming_session(
 
     let runtime_usage = runtime.observe_usage();
     let runtime_shutdown = runtime.shutdown()?;
+    let post_shutdown_observation = observe_post_shutdown(runtime_pid);
 
     if !generation_completed {
         let _ = send_audit(
@@ -1009,6 +1010,7 @@ fn run_direct_streaming_session(
         Some(runtime_pid),
         &runtime_shutdown,
         &runtime_usage,
+        &post_shutdown_observation,
     ));
     let report = if let Some(retrieval_report) = retrieval_report {
         report.with_retrieval(retrieval_report)

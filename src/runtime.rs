@@ -30,6 +30,15 @@ pub struct RuntimeUsageSnapshot {
     pub observation_notes: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RuntimePostShutdownObservation {
+    pub process_present_after_shutdown: Option<bool>,
+    pub process_check_source: Option<String>,
+    pub gpu_memory_bytes_after_shutdown: Option<u64>,
+    pub gpu_check_source: Option<String>,
+    pub observation_notes: Vec<String>,
+}
+
 impl ManagedRuntime {
     pub fn launch(config: &SessionConfig) -> Result<Self> {
         println!("Launching llama-server...");
@@ -137,6 +146,30 @@ impl ManagedRuntime {
         }
 
         bail!("llama-server did not become ready within {:?}", timeout)
+    }
+}
+
+pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
+    let (process_present_after_shutdown, process_check_source, process_note) =
+        observe_process_presence(pid);
+    let (gpu_memory_bytes_after_shutdown, gpu_check_source, gpu_note) = observe_gpu_memory(pid);
+
+    let mut observation_notes = Vec::new();
+
+    if let Some(note) = process_note {
+        observation_notes.push(note);
+    }
+
+    if let Some(note) = gpu_note {
+        observation_notes.push(note);
+    }
+
+    RuntimePostShutdownObservation {
+        process_present_after_shutdown,
+        process_check_source,
+        gpu_memory_bytes_after_shutdown,
+        gpu_check_source,
+        observation_notes,
     }
 }
 
@@ -252,6 +285,53 @@ fn observe_gpu_memory(pid: u32) -> (Option<u64>, Option<String>, Option<String>)
                 "GPU memory observation via nvidia-smi was unavailable: {error}."
             )),
         ),
+    }
+}
+
+fn observe_process_presence(pid: u32) -> (Option<bool>, Option<String>, Option<String>) {
+    #[cfg(unix)]
+    {
+        let output = Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "pid="])
+            .output();
+
+        match output {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let present = stdout
+                    .lines()
+                    .any(|line| line.trim().parse::<u32>().ok() == Some(pid));
+
+                (Some(present), Some("ps pid".to_string()), None)
+            }
+            Ok(output) => (
+                None,
+                None,
+                Some(format!(
+                    "Post-shutdown process presence check via ps failed with status {}.",
+                    output.status
+                )),
+            ),
+            Err(error) => (
+                None,
+                None,
+                Some(format!(
+                    "Post-shutdown process presence check via ps was unavailable: {error}."
+                )),
+            ),
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        (
+            None,
+            None,
+            Some(
+                "Post-shutdown process presence observation is not yet implemented on this platform."
+                    .to_string(),
+            ),
+        )
     }
 }
 
