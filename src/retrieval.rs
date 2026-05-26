@@ -9,6 +9,7 @@ use crate::embed::{
 };
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -91,13 +92,51 @@ pub fn build_retrieval_report(response: &QueryCorpusResponse) -> RetrievalReport
     RetrievalReport {
         corpus_id: response.corpus_id.clone(),
         corpus_name: response.corpus_name.clone(),
+        retrieval_mode: "one_shot".to_string(),
         query: response.query.clone(),
         top_k: response.top_k,
+        grounded_turns: 1,
         retrieved_chunks: response.results.len(),
         source_paths,
         page_hits,
         context_injected: true,
     }
+}
+
+pub fn build_active_chat_retrieval_report(
+    corpus_id: &str,
+    corpus_name: &str,
+    reports: &[RetrievalReport],
+) -> Option<RetrievalReport> {
+    let latest = reports.last()?;
+    let mut source_paths = BTreeSet::new();
+    let mut page_hits = BTreeSet::new();
+    let mut retrieved_chunks = 0usize;
+
+    for report in reports {
+        retrieved_chunks += report.retrieved_chunks;
+
+        for source_path in &report.source_paths {
+            source_paths.insert(source_path.clone());
+        }
+
+        for page_hit in &report.page_hits {
+            page_hits.insert(page_hit.clone());
+        }
+    }
+
+    Some(RetrievalReport {
+        corpus_id: corpus_id.to_string(),
+        corpus_name: corpus_name.to_string(),
+        retrieval_mode: "active_chat".to_string(),
+        query: latest.query.clone(),
+        top_k: latest.top_k,
+        grounded_turns: reports.len(),
+        retrieved_chunks,
+        source_paths: source_paths.into_iter().collect(),
+        page_hits: page_hits.into_iter().collect(),
+        context_injected: true,
+    })
 }
 
 pub fn query_corpus(

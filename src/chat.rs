@@ -1,10 +1,15 @@
-use crate::audit::{PrivacyReport, SessionProfile, TurnArtifact};
+use crate::audit::{PrivacyReport, RetrievalReport, SessionProfile, TurnArtifact};
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
 use crate::config::{ChatTemplate, SessionConfig};
+use crate::corpus_registry::CorpusRegistry;
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::registry::{register_persistent_session, SessionLifecycleMetadata};
+use crate::retrieval::{
+    build_active_chat_retrieval_report, build_grounded_prompt, build_retrieval_report,
+    query_corpus, QueryCorpusRequest,
+};
 use crate::runtime::ManagedRuntime;
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
@@ -27,6 +32,9 @@ struct ActiveChatSession {
     config: SessionConfig,
     runtime: ManagedRuntime,
     turns: Vec<ChatTurn>,
+    bound_corpus_id: Option<String>,
+    bound_corpus_name: Option<String>,
+    retrieval_history: Vec<RetrievalReport>,
     generation_active: bool,
     cancel_requested: Arc<AtomicBool>,
     ending: bool,
@@ -36,6 +44,12 @@ struct ActiveChatSession {
 struct ChatTurn {
     user: SensitiveBytes,
     assistant: SensitiveBytes,
+}
+
+#[derive(Debug, Clone)]
+struct ChatTurnSnapshot {
+    user: String,
+    assistant: String,
 }
 
 #[derive(Debug)]
@@ -112,6 +126,7 @@ pub struct StartChatRequest {
     pub mode: Option<String>,
     pub persistent: Option<bool>,
     pub model_id: Option<String>,
+    pub corpus_id: Option<String>,
     pub chat_template: Option<String>,
     pub chat_context_token_budget: Option<u32>,
     pub chat_context_turn_limit: Option<usize>,
@@ -130,8 +145,11 @@ pub struct StartChatResponse {
     pub persistent: bool,
     pub model_id: String,
     pub model_name: String,
+    pub corpus_id: Option<String>,
+    pub corpus_name: Option<String>,
     pub runtime_active: bool,
     pub turns: usize,
+    pub grounded_turns: usize,
     pub chat_template: String,
     pub chat_context_token_budget: usize,
     pub chat_context_turn_limit: usize,
@@ -146,8 +164,11 @@ pub struct ChatStatusResponse {
     pub persistent: bool,
     pub model_id: String,
     pub model_name: String,
+    pub corpus_id: Option<String>,
+    pub corpus_name: Option<String>,
     pub runtime_active: bool,
     pub turns: usize,
+    pub grounded_turns: usize,
     pub runtime_duration_ms: i64,
     pub chat_template: String,
     pub chat_context_token_budget: usize,
@@ -208,6 +229,7 @@ impl ChatSessionManager {
         request: StartChatRequest,
     ) -> Result<StartChatResponse> {
         let persistent = request.persistent.unwrap_or(false);
+        let bound_corpus = resolve_bound_corpus(&home, request.corpus_id.as_deref())?;
 
         let config = SessionConfig::from_web_request(
             home,
@@ -238,8 +260,11 @@ impl ChatSessionManager {
             persistent: !config.ephemeral,
             model_id: config.model_id.clone(),
             model_name: config.model_name.clone(),
+            corpus_id: bound_corpus.as_ref().map(|(id, _)| id.clone()),
+            corpus_name: bound_corpus.as_ref().map(|(_, name)| name.clone()),
             runtime_active: true,
             turns: 0,
+            grounded_turns: 0,
             chat_template: config.chat_template.as_str().to_string(),
             chat_context_token_budget: config.chat_context_token_budget,
             chat_context_turn_limit: config.chat_context_turn_limit,
@@ -251,6 +276,9 @@ impl ChatSessionManager {
             config,
             runtime,
             turns: vec![],
+            bound_corpus_id: bound_corpus.as_ref().map(|(id, _)| id.clone()),
+            bound_corpus_name: bound_corpus.as_ref().map(|(_, name)| name.clone()),
+            retrieval_history: vec![],
             generation_active: false,
             cancel_requested: Arc::new(AtomicBool::new(false)),
             ending: false,
@@ -281,8 +309,11 @@ impl ChatSessionManager {
             persistent: !active.config.ephemeral,
             model_id: active.config.model_id.clone(),
             model_name: active.config.model_name.clone(),
+            corpus_id: active.bound_corpus_id.clone(),
+            corpus_name: active.bound_corpus_name.clone(),
             runtime_active: !active.ending,
             turns: active.turns.len(),
+            grounded_turns: active.retrieval_history.len(),
             runtime_duration_ms,
             chat_template: active.config.chat_template.as_str().to_string(),
             chat_context_token_budget: active.config.chat_context_token_budget,
@@ -304,7 +335,19 @@ impl ChatSessionManager {
         let session_handle = self.session_handle(session_id)?;
         let user_buffer = SensitiveBytes::new(request.prompt);
 
-        let (turn_number, completion_url, max_tokens, cancel_requested, mut context_window) = {
+        let (
+            turn_number,
+            completion_url,
+            max_tokens,
+            cancel_requested,
+            home,
+            template,
+            token_budget,
+            turn_limit,
+            prior_turns,
+            bound_corpus_id,
+            bound_corpus_name,
+        ) = {
             let mut active = session_handle
                 .lock()
                 .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
@@ -320,13 +363,14 @@ impl ChatSessionManager {
             let turn_number = active.turns.len() + 1;
             let completion_url = active.runtime.completion_url();
             let max_tokens = active.config.max_tokens.parse::<u32>()?;
-            let context_window = prepare_chat_context(
-                active.config.chat_template,
-                &active.turns,
-                user_buffer.as_str(),
-                active.config.chat_context_token_budget,
-                active.config.chat_context_turn_limit,
-            );
+            let prior_turns = active
+                .turns
+                .iter()
+                .map(|turn| ChatTurnSnapshot {
+                    user: turn.user.as_str().to_string(),
+                    assistant: turn.assistant.as_str().to_string(),
+                })
+                .collect::<Vec<_>>();
 
             write_turn_prompt(&active.session, turn_number, user_buffer.as_bytes())?;
 
@@ -338,9 +382,73 @@ impl ChatSessionManager {
                 completion_url,
                 max_tokens,
                 active.cancel_requested.clone(),
-                context_window,
+                active.config.home.clone(),
+                active.config.chat_template,
+                active.config.chat_context_token_budget,
+                active.config.chat_context_turn_limit,
+                prior_turns,
+                active.bound_corpus_id.clone(),
+                active.bound_corpus_name.clone(),
             )
         };
+
+        let mut retrieval_report = None;
+        let prompt_for_model = if let Some(corpus_id) = bound_corpus_id.as_deref() {
+            if !emit(runtime_event(format!(
+                "Retrieving local corpus context for active chat turn {turn_number}..."
+            ))) {
+                clear_generation_active(&session_handle)?;
+                return Ok(());
+            }
+
+            let retrieval = match query_corpus(
+                &home,
+                corpus_id,
+                QueryCorpusRequest {
+                    query: user_buffer.as_str().to_string(),
+                    top_k: None,
+                },
+            ) {
+                Ok(retrieval) => retrieval,
+                Err(error) => {
+                    clear_generation_active(&session_handle)?;
+                    return Err(error);
+                }
+            };
+            let retrieval_corpus_name = bound_corpus_name
+                .clone()
+                .unwrap_or_else(|| retrieval.corpus_name.clone());
+
+            retrieval_report = Some(build_retrieval_report(&retrieval));
+
+            let _ = emit(audit_event(SanitizationOperation {
+                operation: "chat_turn_corpus_context_injected".to_string(),
+                status: "recorded".to_string(),
+                details: format!(
+                    "Injected retrieval context from corpus '{}' ({}) for chat turn {} using {} chunk(s) across {} source file(s).",
+                    retrieval_corpus_name,
+                    retrieval.corpus_id,
+                    turn_number,
+                    retrieval.results.len(),
+                    retrieval_report
+                        .as_ref()
+                        .map(|report| report.source_paths.len())
+                        .unwrap_or(0)
+                ),
+            }));
+
+            build_grounded_prompt(&retrieval)
+        } else {
+            user_buffer.as_str().to_string()
+        };
+
+        let mut context_window = prepare_chat_context(
+            template,
+            &prior_turns,
+            &prompt_for_model,
+            token_budget,
+            turn_limit,
+        );
 
         if !emit(runtime_event(format!(
             "Running chat turn {turn_number} on active runtime..."
@@ -419,6 +527,9 @@ impl ChatSessionManager {
                 user: user_buffer,
                 assistant: assistant_buffer,
             });
+            if let Some(report) = retrieval_report {
+                active.retrieval_history.push(report);
+            }
 
             active.generation_active = false;
 
@@ -514,6 +625,7 @@ impl ChatSessionManager {
         let runtime_duration_ms = UtcNow::duration_since(active.session.started_at);
         let turn_count = active.turns.len();
         let turn_artifacts = build_turn_artifacts(&active.session, turn_count);
+        let grounded_turn_count = active.retrieval_history.len();
 
         let runtime_stopped = active.runtime.shutdown()?;
 
@@ -575,6 +687,12 @@ impl ChatSessionManager {
             prompt_source: active.config.prompt_source.as_str().to_string(),
             turn_artifacts,
             active_runtime_residual_risk: active_runtime_risk(),
+            grounding_scope: active.bound_corpus_id.as_ref().map(|_| {
+                "corpus_bound_retrieval_per_turn_until_end_sanitize".to_string()
+            }),
+            bound_corpus_id: active.bound_corpus_id.clone(),
+            bound_corpus_name: active.bound_corpus_name.clone(),
+            grounded_turn_count,
         };
 
         let lifecycle =
@@ -592,6 +710,23 @@ impl ChatSessionManager {
         )
         .with_lifecycle(&lifecycle)
         .with_session_profile(profile);
+
+        let report = if let (Some(corpus_id), Some(corpus_name)) = (
+            active.bound_corpus_id.as_deref(),
+            active.bound_corpus_name.as_deref(),
+        ) {
+            if let Some(retrieval_report) = build_active_chat_retrieval_report(
+                corpus_id,
+                corpus_name,
+                &active.retrieval_history,
+            ) {
+                report.with_retrieval(retrieval_report)
+            } else {
+                report
+            }
+        } else {
+            report
+        };
 
         let report_json = report.to_pretty_json()?;
         let parsed_report: serde_json::Value = serde_json::from_str(&report_json)?;
@@ -638,7 +773,7 @@ impl UtcNow {
 
 fn prepare_chat_context(
     template: ChatTemplate,
-    turns: &[ChatTurn],
+    turns: &[ChatTurnSnapshot],
     current_user_prompt: &str,
     token_budget: usize,
     turn_limit: usize,
@@ -655,7 +790,7 @@ fn prepare_chat_context(
     let mut truncated_by_token_budget = current_prompt_over_budget && total_turns > 0;
 
     for turn in turns.iter().rev().take(turn_limit) {
-        let rendered_turn = render_chat_turn(template, turn);
+        let rendered_turn = render_chat_turn_snapshot(template, turn);
         let turn_chars = text_char_count(&rendered_turn);
 
         if used_chars + turn_chars > char_budget {
@@ -722,22 +857,35 @@ fn prompt_suffix(template: ChatTemplate, current_user_prompt: &str) -> String {
     }
 }
 
-fn render_chat_turn(template: ChatTemplate, turn: &ChatTurn) -> String {
+fn render_chat_turn_snapshot(template: ChatTemplate, turn: &ChatTurnSnapshot) -> String {
     match template {
         ChatTemplate::Generic => {
-            format!("User: {}\n\nAssistant: {}\n\n", turn.user.as_str(), turn.assistant.as_str())
+            format!("User: {}\n\nAssistant: {}\n\n", turn.user, turn.assistant)
         }
         ChatTemplate::ChatMl => format!(
             "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n{}<|im_end|>\n",
-            turn.user.as_str(),
-            turn.assistant.as_str()
+            turn.user,
+            turn.assistant
         ),
         ChatTemplate::Llama3Instruct => format!(
             "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{}<|eot_id|>",
-            turn.user.as_str(),
-            turn.assistant.as_str()
+            turn.user,
+            turn.assistant
         ),
     }
+}
+
+fn resolve_bound_corpus(home: &str, corpus_id: Option<&str>) -> Result<Option<(String, String)>> {
+    let Some(corpus_id) = corpus_id else {
+        return Ok(None);
+    };
+
+    let registry = CorpusRegistry::load(home)?;
+    let corpus = registry
+        .find(corpus_id)
+        .ok_or_else(|| anyhow::anyhow!("Corpus not found in registry: {corpus_id}"))?;
+
+    Ok(Some((corpus.corpus_id.clone(), corpus.name.clone())))
 }
 
 fn write_turn_prompt(session: &Session, turn_number: usize, prompt: &[u8]) -> Result<()> {

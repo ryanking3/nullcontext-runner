@@ -35,6 +35,10 @@ pub struct SessionProfile {
     pub prompt_source: String,
     pub turn_artifacts: Vec<TurnArtifact>,
     pub active_runtime_residual_risk: String,
+    pub grounding_scope: Option<String>,
+    pub bound_corpus_id: Option<String>,
+    pub bound_corpus_name: Option<String>,
+    pub grounded_turn_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,8 +65,10 @@ pub struct LifecycleReport {
 pub struct RetrievalReport {
     pub corpus_id: String,
     pub corpus_name: String,
+    pub retrieval_mode: String,
     pub query: String,
     pub top_k: usize,
+    pub grounded_turns: usize,
     pub retrieved_chunks: usize,
     pub source_paths: Vec<String>,
     pub page_hits: Vec<String>,

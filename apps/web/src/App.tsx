@@ -131,6 +131,10 @@ type SessionProfile = {
   prompt_source: string;
   turn_artifacts: TurnArtifact[];
   active_runtime_residual_risk: string;
+  grounding_scope?: string | null;
+  bound_corpus_id?: string | null;
+  bound_corpus_name?: string | null;
+  grounded_turn_count?: number;
 };
 
 type LifecycleReport = {
@@ -145,6 +149,19 @@ type LifecycleReport = {
   decision_summary: string;
 };
 
+type RetrievalReportData = {
+  corpus_id: string;
+  corpus_name: string;
+  retrieval_mode: string;
+  query: string;
+  top_k: number;
+  grounded_turns: number;
+  retrieved_chunks: number;
+  source_paths: string[];
+  page_hits: string[];
+  context_injected: boolean;
+};
+
 type PrivacyReportData = {
   session_id: string;
   started_at: string;
@@ -156,6 +173,7 @@ type PrivacyReportData = {
   cleanup: CleanupInfo;
   session_profile?: SessionProfile | null;
   lifecycle?: LifecycleReport | null;
+  retrieval?: RetrievalReportData | null;
   residual_risk: string;
 };
 
@@ -190,8 +208,11 @@ type ChatStartResponse = {
   persistent: boolean;
   model_id: string;
   model_name: string;
+  corpus_id?: string | null;
+  corpus_name?: string | null;
   runtime_active: boolean;
   turns: number;
+  grounded_turns: number;
   chat_template: string;
   chat_context_token_budget: number;
   chat_context_turn_limit: number;
@@ -205,8 +226,11 @@ type ChatStatusResponse = {
   persistent: boolean;
   model_id?: string;
   model_name?: string;
+  corpus_id?: string | null;
+  corpus_name?: string | null;
   runtime_active: boolean;
   turns: number;
+  grounded_turns?: number;
   runtime_duration_ms?: number;
   chat_template?: string;
   chat_context_token_budget?: number;
@@ -535,7 +559,10 @@ function App() {
   const [activeChatWorkspace, setActiveChatWorkspace] = useState("");
   const [activeChatModelId, setActiveChatModelId] = useState("");
   const [activeChatModelName, setActiveChatModelName] = useState("");
+  const [activeChatCorpusId, setActiveChatCorpusId] = useState("");
+  const [activeChatCorpusName, setActiveChatCorpusName] = useState("");
   const [activeChatTurns, setActiveChatTurns] = useState(0);
+  const [activeChatGroundedTurns, setActiveChatGroundedTurns] = useState(0);
   const [activeChatRuntimeActive, setActiveChatRuntimeActive] = useState(false);
   const [activeChatStartedAt, setActiveChatStartedAt] = useState<number | null>(null);
   const [activeRuntimeElapsedMs, setActiveRuntimeElapsedMs] = useState(0);
@@ -1090,6 +1117,7 @@ function App() {
           mode,
           persistent,
           model_id: selectedModelId || undefined,
+          corpus_id: selectedCorpusId || undefined,
           ...activeChatConfig,
         }),
       });
@@ -1106,7 +1134,10 @@ function App() {
       setActiveChatWorkspace(data.workspace);
       setActiveChatModelId(data.model_id);
       setActiveChatModelName(data.model_name);
+      setActiveChatCorpusId(data.corpus_id || "");
+      setActiveChatCorpusName(data.corpus_name || "");
       setActiveChatTurns(data.turns);
+      setActiveChatGroundedTurns(data.grounded_turns);
       setActiveChatRuntimeActive(data.runtime_active);
       setActiveChatStartedAt(Date.now());
       setActiveRuntimeElapsedMs(0);
@@ -1143,6 +1174,9 @@ function App() {
       const data = (await response.json()) as ChatStatusResponse;
 
       setActiveChatTurns(data.turns);
+      if (typeof data.grounded_turns === "number") {
+        setActiveChatGroundedTurns(data.grounded_turns);
+      }
       setActiveChatRuntimeActive(data.runtime_active);
       setActiveChatWorkspace(data.workspace);
 
@@ -1152,6 +1186,14 @@ function App() {
 
       if (data.model_name) {
         setActiveChatModelName(data.model_name);
+      }
+
+      if (data.corpus_id) {
+        setActiveChatCorpusId(data.corpus_id);
+      }
+
+      if (data.corpus_name) {
+        setActiveChatCorpusName(data.corpus_name);
       }
 
       if (typeof data.runtime_duration_ms === "number") {
@@ -1219,6 +1261,9 @@ function App() {
       setActiveChatContextTurnLimit(null);
       setActiveChatModelId("");
       setActiveChatModelName("");
+      setActiveChatCorpusId("");
+      setActiveChatCorpusName("");
+      setActiveChatGroundedTurns(0);
       setShowRawReport(false);
       setPrivacyReport(JSON.stringify(data.report, null, 2));
       setRuntimeLogs((current) =>
@@ -1944,8 +1989,8 @@ function App() {
 
               <p className="microcopy">
                 Move detailed controls into the config drawer so the main shell stays focused on
-                runtime state and conversation flow. Corpus selection currently applies to one-shot
-                grounded runs only.
+                runtime state and conversation flow. The selected corpus can ground one-shot runs
+                immediately and will bind to active chat when you start a new session.
               </p>
             </section>
 
@@ -2039,6 +2084,12 @@ function App() {
                 model: {activeRuntimeModelName}
                 {activeRuntimeModelId ? ` (${activeRuntimeModelId})` : ""}
               </div>
+              {runtimeMode === "active-chat" && activeChatCorpusName && (
+                <div className="truncate" title={activeChatCorpusId || activeChatCorpusName}>
+                  corpus: {activeChatCorpusName}
+                  {activeChatCorpusId ? ` (${activeChatCorpusId})` : ""}
+                </div>
+              )}
               {runtimeMode === "one-shot" && selectedCorpus && (
                 <div className="truncate" title={selectedCorpus.root_path}>
                   corpus: {selectedCorpus.name} ({selectedCorpus.persistent ? "persistent" : "ephemeral"})
@@ -2056,6 +2107,11 @@ function App() {
                 {activeChatContextBudget !== null && activeChatContextTurnLimit !== null && (
                   <div>
                     context: {activeChatContextBudget} tok / {activeChatContextTurnLimit} turns
+                  </div>
+                )}
+                {activeChatCorpusName && (
+                  <div>
+                    grounded turns: {activeChatGroundedTurns} via {activeChatCorpusName}
                   </div>
                 )}
                 <div title={activeChatHistoryPolicy}>policy: {activeChatHistoryPolicy}</div>
@@ -2432,6 +2488,24 @@ function App() {
                                 label: "prompt source",
                                 value: currentReport.session_profile.prompt_source,
                               },
+                              {
+                                label: "grounding scope",
+                                value:
+                                  currentReport.session_profile.grounding_scope || "none",
+                              },
+                              {
+                                label: "bound corpus",
+                                value:
+                                  currentReport.session_profile.bound_corpus_name ||
+                                  currentReport.session_profile.bound_corpus_id ||
+                                  "none",
+                              },
+                              {
+                                label: "grounded turns",
+                                value: String(
+                                  currentReport.session_profile.grounded_turn_count ?? 0
+                                ),
+                              },
                             ]}
                           />
 
@@ -2460,6 +2534,57 @@ function App() {
                               </div>
                             )}
                           </details>
+                        </section>
+                      )}
+
+                      {currentReport.retrieval && (
+                        <section className="report-section">
+                          <div className="panel-title">retrieval provenance</div>
+                          <ReportGrid
+                            entries={[
+                              {
+                                label: "corpus",
+                                value: `${currentReport.retrieval.corpus_name} (${currentReport.retrieval.corpus_id})`,
+                              },
+                              {
+                                label: "mode",
+                                value: humanizeSnakeCase(currentReport.retrieval.retrieval_mode),
+                              },
+                              {
+                                label: "grounded turns",
+                                value: String(currentReport.retrieval.grounded_turns),
+                              },
+                              {
+                                label: "retrieved chunks",
+                                value: String(currentReport.retrieval.retrieved_chunks),
+                              },
+                              {
+                                label: "top k",
+                                value: String(currentReport.retrieval.top_k),
+                              },
+                              {
+                                label: "context injected",
+                                value: formatBoolean(currentReport.retrieval.context_injected),
+                              },
+                            ]}
+                          />
+
+                          <div className="report-risk-block">
+                            <p>
+                              <strong>latest grounded query:</strong>{" "}
+                              {currentReport.retrieval.query}
+                            </p>
+                            <p>
+                              <strong>source files touched:</strong>{" "}
+                              {currentReport.retrieval.source_paths.length}
+                            </p>
+                            {currentReport.retrieval.page_hits.length > 0 && (
+                              <p>
+                                <strong>page-level hits:</strong>{" "}
+                                {currentReport.retrieval.page_hits.length}
+                              </p>
+                            )}
+                          </div>
                         </section>
                       )}
 
@@ -2885,8 +3010,8 @@ function App() {
 
               {selectedCorpus && (
                 <p className="microcopy">
-                  Selected corpus applies to one-shot grounded runs. Active chat corpus attachment
-                  will come in a later slice.
+                  Selected corpus will be used for one-shot grounded runs immediately and will bind
+                  to any new active chat session you start after changing it here.
                 </p>
               )}
             </section>
