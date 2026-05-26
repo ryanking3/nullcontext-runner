@@ -31,6 +31,11 @@ The project currently supports:
 - session registry for persistent sessions
 - lifecycle policy engine for retained sessions
 - structured model registry and model switching
+- corpus registry with txt/md/pdf ingestion
+- hybrid pdf extraction with OCR for sparse pages
+- one-shot grounded retrieval
+- active-chat grounded retrieval
+- corpus lifecycle cleanup, reconcile, and retention controls
 - workspace artifact scanning
 - cleanup reports
 - privacy reports
@@ -76,6 +81,21 @@ Important backend files:
 - `src/chat.rs`  
   Active chat session manager. Keeps long-lived runtime sessions, streams messages, tracks turns, writes per-turn artifacts, and finalizes active chat reports.
 
+- `src/corpus.rs`  
+  Corpus manifest types, artifact paths, and corpus lifecycle metadata.
+
+- `src/corpus_registry.rs`  
+  Persistent corpus index under `~/.nullcontext/corpora/index.json`, corpus retention metadata, startup reconciliation, and corpus lifecycle syncing.
+
+- `src/docs.rs`  
+  Local document ingestion for txt, markdown, and pdf sources, including hybrid native/OCR extraction and corpus report generation.
+
+- `src/embed.rs`  
+  Local embedding backend abstraction and persisted corpus embedding records.
+
+- `src/retrieval.rs`  
+  Corpus querying, prompt grounding, and retrieval provenance shaping.
+
 - `src/audit.rs`  
   Privacy report structures including active chat `SessionProfile`.
 
@@ -105,7 +125,7 @@ apps/web
 Important frontend files:
 
 - `apps/web/src/App.tsx`  
-  Main UI. Handles one-shot mode, active chat mode, streaming, stop control, reports, runtime logs, audit operations, and registry.
+  Main UI. Handles one-shot mode, active chat mode, streaming, stop control, reports, runtime logs, audit operations, session registry, model registry, and corpus registry.
 
 - `apps/web/src/App.css`  
   Minimal terminal-style dark/light UI.
@@ -131,6 +151,8 @@ One prompt creates a full lifecycle:
 
 This is slower but has the strongest cleanup cadence.
 
+One-shot mode can optionally bind a local corpus and inject retrieved context before inference.
+
 ### Active chat mode
 
 A chat session creates a long-lived runtime:
@@ -154,6 +176,25 @@ Active chat currently also supports:
 - bounded recent-context token budgeting
 - bounded recent-context turn limits
 - audit visibility when older turns are dropped from the prompt window
+- optional bound corpus retrieval on every turn
+
+## Corpus Workflows
+
+### Corpus ingestion
+
+NullContext currently supports local corpus ingestion for:
+
+- `txt`
+- `md`
+- `pdf`
+
+PDF ingestion uses a hybrid pipeline:
+
+- native text extraction first
+- OCR for sparse or empty pages when enabled
+- page-level extraction provenance in stored artifacts
+
+Corpus artifacts are retained under the NullContext corpus registry and can be lifecycle-managed separately from chat/session workspaces.
 
 ## API Routes
 
@@ -163,6 +204,13 @@ Current routes:
 GET  /api/health
 POST /api/run
 POST /api/run/stream
+GET  /api/corpora
+POST /api/corpora
+GET  /api/corpora/:corpus_id/report
+POST /api/corpora/:corpus_id/query
+POST /api/corpora/:corpus_id/retention
+POST /api/corpora/:corpus_id/cleanup
+POST /api/corpora/:corpus_id/reconcile
 GET  /api/models
 POST /api/chat/start
 GET  /api/chat/:session_id/status
@@ -245,11 +293,19 @@ Do not commit local config files or model files.
 Active chat config notes:
 
 - `model_id` selects a registered model by ID
+- `corpus_id` binds a registered local corpus by ID
 - `chat_template` supports `auto`, `generic`, `chatml`, and `llama3-instruct`
 - `chat_context_token_budget` is an approximate recent-context budget
 - `chat_context_turn_limit` bounds how many recent prior turns can be included
 - both context settings must be greater than `0`
 - legacy single-model `model_path` configs are still supported and get synthesized into a default registry entry
+
+Corpus notes:
+
+- corpora are stored under `~/.nullcontext/corpora`
+- persistent corpora retain artifacts until manual or scheduled cleanup
+- ephemeral corpora use the system temp directory under `nullcontext/corpora`
+- OCR is local-only and currently depends on local CLI tooling when enabled
 
 ### Workspace Paths
 
@@ -392,6 +448,11 @@ Manual verification should include:
 - scheduled retention cleanup works
 - model registry drawer loads
 - invalid model paths are marked unavailable
+- corpus ingest works for txt/md/pdf inputs
+- corpus drawer loads and shows lifecycle state
+- one-shot corpus grounding works
+- active-chat corpus grounding works
+- corpus lifecycle actions work for retained corpora
 - persistent registry still works when using standard + persistent mode
 
 ## Coding Conventions
@@ -422,6 +483,7 @@ Frontend:
 - Keep the UI local, minimal, terminal-like, and dark/light capable.
 - Avoid heavy UI libraries unless explicitly approved.
 - Keep active chat runtime risk visible.
+- Keep corpus lifecycle state and residual-risk visibility explicit.
 - Keep active chat template/context settings understandable and explicit.
 - Keep End + Sanitize prominent while active runtime is live.
 - Preserve stop button behavior.
@@ -491,8 +553,9 @@ Do not commit:
 
 ## Known Technical Debt
 
-- One-shot and active-chat streaming code duplicate logic.
 - Active session manager is in-memory only.
 - Abandoned sessions after server crash need recovery strategy.
 - Tauri desktop shell is stale relative to web UI.
 - No automated tests.
+- Corpus report viewer inside the corpus drawer is still raw JSON.
+- OCR currently relies on local CLI availability and does not implement full document-layout fidelity.

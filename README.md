@@ -52,7 +52,9 @@ No cloud inference is required.
 - local GGUF model support
 - stdin-based prompt ingestion
 - one-shot streaming inference
+- one-shot corpus-grounded retrieval
 - active chat sessions with runtime reuse
+- active-chat corpus-grounded retrieval
 - configurable inference modes
 - persistent and ephemeral sessions
 - configurable token limits
@@ -74,6 +76,9 @@ No cloud inference is required.
 - scheduled retention expiry cleanup
 - startup lifecycle reconciliation for orphaned sessions/workspaces
 - lifecycle-aware privacy reporting
+- corpus lifecycle cleanup and reconcile actions
+- corpus retention policy controls
+- corpus report syncing after lifecycle changes
 - explicit End + Sanitize workflow for active chat
 - residual risk reporting for long-lived runtimes
 
@@ -109,13 +114,31 @@ The local model registry supports:
 - model file validation
 - llama-server runtime readiness reporting
 
+### Corpus Registry
+
+The local corpus registry supports:
+
+- txt, markdown, and pdf ingestion
+- hybrid pdf extraction with OCR for sparse pages
+- persistent and ephemeral corpora
+- local chunking and embedding artifacts
+- direct corpus querying through the API
+- one-shot and active-chat grounding
+- corpus lifecycle cleanup, reconcile, and retention controls
+- startup lifecycle reconciliation for orphaned corpora
+- retained ingestion reports with lifecycle metadata
+
 ### Local Web UI
 
 The current browser UI supports:
 
 - one-shot prompt execution
+- one-shot corpus selection for grounded runs
 - active chat session start, stream, stop, and end
+- active chat corpus binding for grounded sessions
 - dedicated model registry browser
+- dedicated corpus registry browser
+- path-based corpus ingestion
 - model selection for one-shot and active chat
 - model-default versus manual-override controls
 - selectable active chat prompt template
@@ -219,6 +242,7 @@ Active chat uses:
 - model-aware prompt templates
 - bounded recent-context management
 - audit visibility when older turns are dropped from the prompt window
+- optional bound corpus retrieval on every turn
 
 ---
 
@@ -256,9 +280,38 @@ Example body:
   "mode": "secure",
   "persistent": false,
   "model_id": "qwen-small",
+  "corpus_id": "incident-briefing",
   "chat_template": "auto",
   "chat_context_token_budget": 2048,
   "chat_context_turn_limit": 12
+}
+```
+
+When `corpus_id` is present, `/api/run/stream` retrieves local corpus context first and injects a grounded prompt wrapper before inference.
+
+### Corpus Registry
+
+```http
+GET /api/corpora
+POST /api/corpora
+GET /api/corpora/:corpus_id/report
+POST /api/corpora/:corpus_id/query
+POST /api/corpora/:corpus_id/retention
+POST /api/corpora/:corpus_id/cleanup
+POST /api/corpora/:corpus_id/reconcile
+```
+
+Example ingest body:
+
+```json
+{
+  "name": "incident-briefing",
+  "paths": [
+    "/Users/you/docs/briefing.pdf",
+    "/Users/you/docs/notes"
+  ],
+  "persistent": true,
+  "ocr_enabled": true
 }
 ```
 
@@ -281,6 +334,7 @@ Example body:
   "mode": "secure",
   "persistent": false,
   "model_id": "qwen-small",
+  "corpus_id": "incident-briefing",
   "chat_template": "auto",
   "chat_context_token_budget": 2048,
   "chat_context_turn_limit": 12
@@ -313,6 +367,8 @@ The one-shot and active chat APIs support these optional fields:
 
 - `model_id`
 Selects a registered model by ID
+- `corpus_id`
+Binds a registered local corpus by ID for grounded retrieval
 - `chat_template`
 Values: `auto`, `generic`, `chatml`, `llama3-instruct`
 - `chat_context_token_budget`
@@ -322,6 +378,7 @@ Maximum number of recent prior turns to include in active-chat context
 
 When `chat_template` is `auto`, NullContext resolves a template from the selected model path.
 If the UI is using model defaults, it omits these override fields and lets the selected model drive the effective template and context settings.
+If `corpus_id` is provided when starting active chat, NullContext binds that corpus for retrieval on every subsequent turn until the session ends.
 
 ### End Active Chat Session
 
@@ -390,8 +447,11 @@ NullContext does not currently guarantee:
 - cross-process memory sanitization
 - CUDA memory sanitization
 - forensic memory clearing outside Rust-owned buffers
+- perfect PDF layout reconstruction
+- OCR accuracy for every scanned or image-only PDF
 
 Active chat also keeps a long-lived llama.cpp runtime and in-memory context alive until the user explicitly ends the session.
+Corpus ingestion can recover text from many PDFs, including scanned pages via OCR, but complex layouts, tables, and poor scans may still extract imperfectly.
 
 The privacy reports intentionally expose these residual risks.
 
@@ -603,7 +663,7 @@ Active chat example:
 ```bash
 curl -X POST http://127.0.0.1:3333/api/chat/start \
   -H "Content-Type: application/json" \
-  -d '{"mode":"secure","persistent":false}'
+  -d '{"mode":"secure","persistent":false,"model_id":"qwen-small","corpus_id":"incident-briefing"}'
 ```
 
 ---
@@ -637,11 +697,20 @@ http://localhost:5173
 The active chat session config panel lets you:
 
 - browse the registered model catalog
+- browse the registered corpus catalog
 - pick a model by ID/name before starting a session
+- select a local corpus for grounded one-shot runs or for the next active chat session
 - use per-model defaults or manual overrides for template/context settings
 - choose a prompt template or auto-detect it from the model path
 - set a bounded recent-context token budget
 - set a bounded recent-context turn limit
+
+The corpus browser also lets you:
+
+- ingest corpora from absolute local file and directory paths
+- inspect corpus lifecycle state and retained artifact paths
+- load retained corpus reports
+- run corpus reconcile, cleanup, and retention actions
 
 The model browser also shows:
 
@@ -649,7 +718,7 @@ The model browser also shows:
 - whether the configured `llama-server` path is ready
 - the exact model path, template default, token limit, GPU setting, and context defaults
 
-After a session starts, the runtime banner shows the selected model plus the resolved template and active context policy.
+After a session starts, the runtime banner shows the selected model, any bound corpus, the resolved template, and the active context policy.
 
 ---
 
@@ -675,6 +744,7 @@ The current development focus is:
 
 - structured runtime streaming
 - Server-Sent Events
+- local corpus ingestion and retrieval lifecycle management
 - streaming token output
 - streaming audit events
 - stronger memory hygiene primitives
@@ -694,12 +764,16 @@ The project is functional and supports:
 - local browser UI
 - local API execution
 - one-shot streaming
+- one-shot grounded retrieval
 - active chat sessions
+- active-chat grounded retrieval
 - generation stop control
 - explicit active chat cancellation
 - persistent sessions
 - lifecycle policy engine
 - structured model registry and model switching
+- txt/md/pdf corpus ingestion with hybrid OCR extraction
+- corpus lifecycle controls
 - artifact tracking
 - cleanup reporting
 - audit visualization
