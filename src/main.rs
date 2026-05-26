@@ -169,6 +169,7 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
         &config,
         Some(inference_result.runtime_pid),
         &inference_result.runtime_shutdown,
+        &inference_result.runtime_usage,
     ));
 
     let report_json = report.to_pretty_json()?;

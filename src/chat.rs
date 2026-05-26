@@ -629,6 +629,7 @@ impl ChatSessionManager {
         let turn_artifacts = build_turn_artifacts(&active.session, turn_count);
         let grounded_turn_count = active.retrieval_history.len();
         let runtime_pid = active.runtime.pid();
+        let runtime_usage = active.runtime.observe_usage();
 
         let runtime_shutdown = active.runtime.shutdown()?;
 
@@ -724,6 +725,7 @@ impl ChatSessionManager {
             &active.config,
             Some(runtime_pid),
             &runtime_shutdown,
+            &runtime_usage,
         ));
 
         let report = if let (Some(corpus_id), Some(corpus_name)) = (

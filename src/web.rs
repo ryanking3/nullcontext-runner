@@ -832,6 +832,7 @@ fn run_direct_streaming_session(
 
     let generation_completed = termination == StreamTermination::Completed;
 
+    let runtime_usage = runtime.observe_usage();
     let runtime_shutdown = runtime.shutdown()?;
 
     if !generation_completed {
@@ -1007,6 +1008,7 @@ fn run_direct_streaming_session(
         &config,
         Some(runtime_pid),
         &runtime_shutdown,
+        &runtime_usage,
     ));
     let report = if let Some(retrieval_report) = retrieval_report {
         report.with_retrieval(retrieval_report)

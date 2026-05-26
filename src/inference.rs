@@ -1,6 +1,6 @@
 use crate::cleanup::SanitizationOperation;
 use crate::config::SessionConfig;
-use crate::runtime::{ManagedRuntime, RuntimeShutdownOutcome};
+use crate::runtime::{ManagedRuntime, RuntimeShutdownOutcome, RuntimeUsageSnapshot};
 use crate::sensitive::SensitiveBytes;
 use anyhow::Result;
 use reqwest::blocking::Client;
@@ -12,6 +12,7 @@ pub struct InferenceResult {
     pub response: SensitiveBytes,
     pub runtime_pid: u32,
     pub runtime_shutdown: RuntimeShutdownOutcome,
+    pub runtime_usage: RuntimeUsageSnapshot,
     pub sanitization_operations: Vec<SanitizationOperation>,
 }
 
@@ -44,6 +45,7 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
         config.max_tokens.parse::<u32>()?,
     )?;
 
+    let runtime_usage = runtime.observe_usage();
     let runtime_shutdown = runtime.shutdown()?;
 
     operations.push(SanitizationOperation {
@@ -67,6 +69,7 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
         response: SensitiveBytes::new(response),
         runtime_pid,
         runtime_shutdown,
+        runtime_usage,
         sanitization_operations: operations,
     })
 }

@@ -181,6 +181,12 @@ type LlamaRuntimeReportData = {
   shutdown_method: string;
   process_exit_code?: number | null;
   graceful_shutdown_supported: boolean;
+  observed_resident_bytes?: number | null;
+  observed_virtual_bytes?: number | null;
+  process_memory_source?: string | null;
+  observed_gpu_memory_bytes?: number | null;
+  gpu_memory_source?: string | null;
+  observation_notes: string[];
   cleanup_summary: string;
   residual_risk_summary: string;
   memory_domains: LlamaMemoryDomainReport[];
@@ -2892,6 +2898,39 @@ function App() {
                                 ),
                               },
                               {
+                                label: "observed rss",
+                                value: currentReport.llama_runtime.observed_resident_bytes
+                                  ? formatBytes(
+                                      currentReport.llama_runtime.observed_resident_bytes
+                                    )
+                                  : "unavailable",
+                              },
+                              {
+                                label: "observed virtual",
+                                value: currentReport.llama_runtime.observed_virtual_bytes
+                                  ? formatBytes(
+                                      currentReport.llama_runtime.observed_virtual_bytes
+                                    )
+                                  : "unavailable",
+                              },
+                              {
+                                label: "observed gpu memory",
+                                value: currentReport.llama_runtime.observed_gpu_memory_bytes
+                                  ? formatBytes(
+                                      currentReport.llama_runtime.observed_gpu_memory_bytes
+                                    )
+                                  : "unavailable",
+                              },
+                              {
+                                label: "memory source",
+                                value:
+                                  currentReport.llama_runtime.process_memory_source || "none",
+                              },
+                              {
+                                label: "gpu source",
+                                value: currentReport.llama_runtime.gpu_memory_source || "none",
+                              },
+                              {
                                 label: "model path",
                                 value: currentReport.llama_runtime.model_path,
                               },
@@ -2936,6 +2975,22 @@ function App() {
                               ))}
                             </div>
                           </details>
+
+                          {currentReport.llama_runtime.observation_notes.length > 0 && (
+                            <details className="report-detail" open>
+                              <summary>
+                                <span>observation notes</span>
+                                <span className="pill neutral">
+                                  {currentReport.llama_runtime.observation_notes.length}
+                                </span>
+                              </summary>
+                              <div className="report-risk-block">
+                                {currentReport.llama_runtime.observation_notes.map((note) => (
+                                  <p key={note}>{note}</p>
+                                ))}
+                              </div>
+                            </details>
+                          )}
                         </section>
                       )}
 
