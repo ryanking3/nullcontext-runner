@@ -176,6 +176,13 @@ type LlamaResidentRegionReport = {
   resident_bytes: number;
 };
 
+type LlamaResidentRegionDeltaReport = {
+  region_type: string;
+  before_resident_bytes: number;
+  after_resident_bytes: number;
+  resident_delta_bytes: number;
+};
+
 type LlamaRuntimeReportData = {
   runtime_kind: string;
   runtime_pid?: number | null;
@@ -204,6 +211,8 @@ type LlamaRuntimeReportData = {
   physical_footprint_peak_bytes_after_shutdown?: number | null;
   vmmap_summary_source_after_shutdown?: string | null;
   resident_regions_after_shutdown: LlamaResidentRegionReport[];
+  physical_footprint_delta_bytes?: number | null;
+  resident_region_deltas: LlamaResidentRegionDeltaReport[];
   verification_window_ms: number;
   gpu_entry_present_after_shutdown?: boolean | null;
   gpu_memory_bytes_after_shutdown?: number | null;
@@ -402,6 +411,11 @@ function inspectionStatusClass(status: string): string {
   }
 
   return "pill neutral";
+}
+
+function formatSignedBytesDelta(value: number): string {
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${formatBytes(Math.abs(value))}${value === 0 ? "" : value > 0 ? " increase" : " decrease"}`;
 }
 
 function shortId(id: string): string {
@@ -3109,6 +3123,19 @@ function App() {
                                     : "unavailable",
                               },
                               {
+                                label: "footprint delta",
+                                value:
+                                  currentReport.llama_runtime
+                                    .physical_footprint_delta_bytes === null ||
+                                  currentReport.llama_runtime
+                                    .physical_footprint_delta_bytes === undefined
+                                    ? "unavailable"
+                                    : formatSignedBytesDelta(
+                                        currentReport.llama_runtime
+                                          .physical_footprint_delta_bytes
+                                      ),
+                              },
+                              {
                                 label: "gpu entry after shutdown",
                                 value:
                                   currentReport.llama_runtime
@@ -3275,6 +3302,47 @@ function App() {
                                       <div className="report-path-list">
                                         <div>virtual: {formatBytes(region.virtual_bytes)}</div>
                                         <div>resident: {formatBytes(region.resident_bytes)}</div>
+                                      </div>
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            )}
+                          </details>
+
+                          <details className="report-detail" open>
+                            <summary>
+                              <span>resident region deltas</span>
+                              <span className="pill neutral">
+                                {currentReport.llama_runtime.resident_region_deltas.length}
+                              </span>
+                            </summary>
+                            {currentReport.llama_runtime.resident_region_deltas.length === 0 ? (
+                              <p className="muted-text">no region deltas available</p>
+                            ) : (
+                              <div className="report-list">
+                                {currentReport.llama_runtime.resident_region_deltas.map(
+                                  (region) => (
+                                    <div
+                                      className="report-item"
+                                      key={`delta-${region.region_type}`}
+                                    >
+                                      <div className="report-item-header">
+                                        <strong>{region.region_type}</strong>
+                                        <span className="pill neutral">
+                                          {formatSignedBytesDelta(
+                                            region.resident_delta_bytes
+                                          )}
+                                        </span>
+                                      </div>
+                                      <div className="report-path-list">
+                                        <div>
+                                          before:{" "}
+                                          {formatBytes(region.before_resident_bytes)}
+                                        </div>
+                                        <div>
+                                          after: {formatBytes(region.after_resident_bytes)}
+                                        </div>
                                       </div>
                                     </div>
                                   )

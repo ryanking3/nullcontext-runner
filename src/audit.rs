@@ -10,6 +10,7 @@ use crate::runtime::{
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -110,6 +111,8 @@ pub struct LlamaRuntimeReport {
     pub physical_footprint_peak_bytes_after_shutdown: Option<u64>,
     pub vmmap_summary_source_after_shutdown: Option<String>,
     pub resident_regions_after_shutdown: Vec<LlamaResidentRegionReport>,
+    pub physical_footprint_delta_bytes: Option<i64>,
+    pub resident_region_deltas: Vec<LlamaResidentRegionDeltaReport>,
     pub verification_window_ms: u64,
     pub gpu_entry_present_after_shutdown: Option<bool>,
     pub gpu_memory_bytes_after_shutdown: Option<u64>,
@@ -137,6 +140,14 @@ pub struct LlamaResidentRegionReport {
     pub region_type: String,
     pub virtual_bytes: u64,
     pub resident_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlamaResidentRegionDeltaReport {
+    pub region_type: String,
+    pub before_resident_bytes: u64,
+    pub after_resident_bytes: u64,
+    pub resident_delta_bytes: i64,
 }
 
 impl PrivacyReport {
@@ -354,6 +365,17 @@ pub fn build_llama_runtime_report(
         .iter()
         .map(LlamaResidentRegionReport::from_runtime_region)
         .collect();
+    let resident_region_deltas = build_resident_region_deltas(
+        &usage.resident_regions,
+        &post_shutdown.resident_regions_after_shutdown,
+    );
+    let physical_footprint_delta_bytes = match (
+        usage.physical_footprint_bytes,
+        post_shutdown.physical_footprint_bytes_after_shutdown,
+    ) {
+        (Some(before), Some(after)) => Some(after as i64 - before as i64),
+        _ => None,
+    };
     let inspection_status = runtime_inspection_status(post_shutdown);
     let ram_inspection_status = ram_inspection_status(post_shutdown);
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
@@ -362,6 +384,7 @@ pub fn build_llama_runtime_report(
         &ram_inspection_status,
         &vram_inspection_status,
         post_shutdown,
+        physical_footprint_delta_bytes,
     );
 
     LlamaRuntimeReport {
@@ -396,6 +419,8 @@ pub fn build_llama_runtime_report(
             .vmmap_summary_source_after_shutdown
             .clone(),
         resident_regions_after_shutdown,
+        physical_footprint_delta_bytes,
+        resident_region_deltas,
         verification_window_ms: post_shutdown.verification_window_ms,
         gpu_entry_present_after_shutdown: post_shutdown.gpu_entry_present_after_shutdown,
         gpu_memory_bytes_after_shutdown: post_shutdown.gpu_memory_bytes_after_shutdown,
@@ -472,6 +497,7 @@ fn runtime_inspection_summary(
     ram_inspection_status: &str,
     vram_inspection_status: &str,
     post_shutdown: &RuntimePostShutdownObservation,
+    physical_footprint_delta_bytes: Option<i64>,
 ) -> String {
     match (
         inspection_status,
@@ -498,9 +524,9 @@ fn runtime_inspection_summary(
             "The llama-server PID was still observable after the {} ms verification window, so RAM cleanup evidence remains unfavorable{} and follow-up inspection is recommended.",
             post_shutdown.verification_window_ms
             ,
-            post_shutdown
-                .physical_footprint_bytes_after_shutdown
-                .map(|value| format!("; post-shutdown physical footprint remained {}", value))
+            physical_footprint_delta_bytes
+                .map(format_signed_bytes_delta)
+                .map(|value| format!("; physical footprint delta was {value}"))
                 .unwrap_or_default()
         ),
         (_, _, "gpu_entry_still_observable_after_shutdown") => format!(
@@ -511,6 +537,60 @@ fn runtime_inspection_summary(
             "Post-shutdown inspection completed with mixed or incomplete evidence over a {} ms verification window. Review the RAM and VRAM inspection statuses before making cleanup claims.",
             post_shutdown.verification_window_ms
         ),
+    }
+}
+
+fn build_resident_region_deltas(
+    before: &[RuntimeResidentRegion],
+    after: &[RuntimeResidentRegion],
+) -> Vec<LlamaResidentRegionDeltaReport> {
+    let mut before_map = BTreeMap::new();
+    let mut after_map = BTreeMap::new();
+
+    for region in before {
+        *before_map
+            .entry(region.region_type.clone())
+            .or_insert(0_u64) += region.resident_bytes;
+    }
+
+    for region in after {
+        *after_map.entry(region.region_type.clone()).or_insert(0_u64) += region.resident_bytes;
+    }
+
+    let mut keys: Vec<String> = before_map.keys().chain(after_map.keys()).cloned().collect();
+    keys.sort();
+    keys.dedup();
+
+    let mut deltas: Vec<LlamaResidentRegionDeltaReport> = keys
+        .into_iter()
+        .map(|region_type| {
+            let before_resident_bytes = before_map.get(&region_type).copied().unwrap_or(0);
+            let after_resident_bytes = after_map.get(&region_type).copied().unwrap_or(0);
+
+            LlamaResidentRegionDeltaReport {
+                region_type,
+                before_resident_bytes,
+                after_resident_bytes,
+                resident_delta_bytes: after_resident_bytes as i64 - before_resident_bytes as i64,
+            }
+        })
+        .collect();
+
+    deltas.sort_by(|a, b| {
+        b.resident_delta_bytes
+            .abs()
+            .cmp(&a.resident_delta_bytes.abs())
+            .then_with(|| a.region_type.cmp(&b.region_type))
+    });
+    deltas.truncate(8);
+    deltas
+}
+
+fn format_signed_bytes_delta(value: i64) -> String {
+    if value > 0 {
+        format!("+{value} bytes")
+    } else {
+        format!("{value} bytes")
     }
 }
 
