@@ -1,5 +1,6 @@
 use crate::corpus::{ensure_corpus_artifact_dirs, CorpusLifecycleState, CorpusManifest};
 use crate::corpus_registry::{register_corpus, CorpusIndexEntry};
+use crate::embed::{embed_chunks, EMBEDDING_BACKEND, EMBEDDING_MODEL};
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use lopdf::Document;
@@ -130,8 +131,8 @@ pub fn ingest_corpus(home: &str, request: IngestCorpusRequest) -> Result<IngestC
     } else {
         "disabled".to_string()
     });
-    manifest.embedding_backend = Some("unconfigured".to_string());
-    manifest.embedding_model = Some("unconfigured".to_string());
+    manifest.embedding_backend = Some(EMBEDDING_BACKEND.to_string());
+    manifest.embedding_model = Some(EMBEDDING_MODEL.to_string());
 
     ensure_corpus_artifact_dirs(&manifest.artifact_paths)?;
     write_manifest(&manifest)?;
@@ -148,6 +149,7 @@ pub fn ingest_corpus(home: &str, request: IngestCorpusRequest) -> Result<IngestC
                 CorpusLifecycleState::Ready
             };
             manifest.lifecycle.updated_at = Some(Utc::now().to_rfc3339());
+            let embeddings = embed_chunks(&result.chunks);
 
             result.report.chunk_count = manifest.chunk_count;
             result.report.files_ingested = manifest
@@ -157,10 +159,7 @@ pub fn ingest_corpus(home: &str, request: IngestCorpusRequest) -> Result<IngestC
             write_json(&manifest.artifact_paths.sources_path, &result.sources)?;
             write_json(&manifest.artifact_paths.pages_path, &result.pages)?;
             write_json(&manifest.artifact_paths.chunks_path, &result.chunks)?;
-            write_json(
-                &manifest.artifact_paths.embeddings_path,
-                &Vec::<serde_json::Value>::new(),
-            )?;
+            write_json(&manifest.artifact_paths.embeddings_path, &embeddings)?;
             write_json(
                 &manifest.artifact_paths.ingestion_report_path,
                 &result.report,

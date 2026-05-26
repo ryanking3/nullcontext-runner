@@ -13,6 +13,7 @@ use crate::registry::{
     reconcile_registry_on_startup, register_persistent_session, CleanupReason, RetentionPolicy,
     SessionIndexEntry, SessionLifecycleMetadata, SessionRegistry,
 };
+use crate::retrieval::{query_corpus, QueryCorpusRequest, QueryCorpusResponse};
 use crate::runtime::ManagedRuntime;
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
@@ -140,6 +141,7 @@ pub async fn serve() -> Result<()> {
             "/api/corpora",
             get(list_corpora_route).post(ingest_corpus_route),
         )
+        .route("/api/corpora/:corpus_id/query", post(query_corpus_route))
         .route("/api/models", get(list_models))
         .route("/api/run", post(run_session))
         .route("/api/run/stream", post(run_session_stream))
@@ -282,6 +284,28 @@ async fn ingest_corpus_route(
     match tokio::task::spawn_blocking(move || ingest_corpus(&home, request)).await {
         Ok(Ok(response)) => Json::<IngestCorpusResponse>(response).into_response(),
         Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
+}
+
+async fn query_corpus_route(
+    State(state): State<WebState>,
+    Path(corpus_id): Path<String>,
+    Json(request): Json<QueryCorpusRequest>,
+) -> Response {
+    let home = state.home.as_ref().clone();
+
+    match tokio::task::spawn_blocking(move || query_corpus(&home, &corpus_id, request)).await {
+        Ok(Ok(response)) => Json::<QueryCorpusResponse>(response).into_response(),
+        Ok(Err(error)) => {
+            let message = error.to_string();
+            let status = if message.contains("Corpus not found in registry") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            json_error(status, message)
+        }
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
