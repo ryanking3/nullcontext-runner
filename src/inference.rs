@@ -10,6 +10,7 @@ use zeroize::Zeroize;
 #[derive(Debug)]
 pub struct InferenceResult {
     pub response: SensitiveBytes,
+    pub runtime_pid: u32,
     pub process_exited_cleanly: bool,
     pub sanitization_operations: Vec<SanitizationOperation>,
 }
@@ -33,6 +34,7 @@ struct CompletionResponse {
 
 pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
     let mut runtime = ManagedRuntime::launch(config)?;
+    let runtime_pid = runtime.pid();
 
     println!("Running inference...");
 
@@ -56,6 +58,7 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
 
     Ok(InferenceResult {
         response: SensitiveBytes::new(response),
+        runtime_pid,
         process_exited_cleanly: runtime_terminated,
         sanitization_operations: operations,
     })

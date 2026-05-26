@@ -17,7 +17,7 @@ mod session;
 mod web;
 
 use anyhow::Result;
-use audit::PrivacyReport;
+use audit::{build_llama_runtime_report, PrivacyReport};
 use cleanup::{
     cleanup_ephemeral_workspace, log_sanitization_operation, scan_artifacts, CleanupReport,
     SanitizationOperation,
@@ -164,7 +164,12 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
         inference_result.process_exited_cleanly,
         cleanup_report.clone(),
     )
-    .with_lifecycle(&lifecycle);
+    .with_lifecycle(&lifecycle)
+    .with_llama_runtime(build_llama_runtime_report(
+        &config,
+        Some(inference_result.runtime_pid),
+        inference_result.process_exited_cleanly,
+    ));
 
     let report_json = report.to_pretty_json()?;
 

@@ -46,6 +46,10 @@ impl ManagedRuntime {
         format!("{}/completion", self.base_url)
     }
 
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     pub fn shutdown(&mut self) -> Result<bool> {
         println!("Shutting down runtime...");
 

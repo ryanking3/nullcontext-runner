@@ -1,4 +1,6 @@
-use crate::audit::{PrivacyReport, RetrievalReport, SessionProfile, TurnArtifact};
+use crate::audit::{
+    build_llama_runtime_report, PrivacyReport, RetrievalReport, SessionProfile, TurnArtifact,
+};
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
@@ -626,6 +628,7 @@ impl ChatSessionManager {
         let turn_count = active.turns.len();
         let turn_artifacts = build_turn_artifacts(&active.session, turn_count);
         let grounded_turn_count = active.retrieval_history.len();
+        let runtime_pid = active.runtime.pid();
 
         let runtime_stopped = active.runtime.shutdown()?;
 
@@ -710,7 +713,12 @@ impl ChatSessionManager {
             cleanup_report.clone(),
         )
         .with_lifecycle(&lifecycle)
-        .with_session_profile(profile);
+        .with_session_profile(profile)
+        .with_llama_runtime(build_llama_runtime_report(
+            &active.config,
+            Some(runtime_pid),
+            runtime_stopped,
+        ));
 
         let report = if let (Some(corpus_id), Some(corpus_name)) = (
             active.bound_corpus_id.as_deref(),

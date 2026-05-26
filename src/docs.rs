@@ -252,11 +252,7 @@ pub fn ingest_uploaded_corpus(
                 staging_root: staging.root.display().to_string(),
                 staged_files: staging.staged_files,
                 staged_bytes: staging.staged_bytes,
-                source_filenames: staging
-                    .path_map
-                    .values()
-                    .cloned()
-                    .collect::<Vec<_>>(),
+                source_filenames: staging.path_map.values().cloned().collect::<Vec<_>>(),
                 cleaned_up: cleanup_result.is_ok(),
                 cleanup_error: cleanup_result.err().map(|error| error.to_string()),
             });
@@ -270,8 +266,12 @@ pub fn ingest_uploaded_corpus(
                 }
             }
 
-            let ingestion_report_path = Path::new(&response.corpus.root_path).join("ingestion_report.json");
-            write_json(&ingestion_report_path.display().to_string(), &response.report)?;
+            let ingestion_report_path =
+                Path::new(&response.corpus.root_path).join("ingestion_report.json");
+            write_json(
+                &ingestion_report_path.display().to_string(),
+                &response.report,
+            )?;
 
             Ok(response)
         }
@@ -453,7 +453,10 @@ fn sanitize_upload_filename(index: usize, file_name: &str) -> String {
     format!("{:04}-{}", index + 1, sanitized)
 }
 
-fn rewrite_uploaded_source_paths(corpus_root: &str, path_map: &HashMap<String, String>) -> Result<()> {
+fn rewrite_uploaded_source_paths(
+    corpus_root: &str,
+    path_map: &HashMap<String, String>,
+) -> Result<()> {
     let root = Path::new(corpus_root);
     let sources_path = root.join("sources.json");
     let pages_path = root.join("pages.json");
@@ -758,8 +761,8 @@ fn write_json<T: Serialize>(path: &str, value: &T) -> Result<()> {
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
     let parsed = serde_json::from_str(&raw)
         .with_context(|| format!("Failed to parse {}", path.display()))?;
     Ok(parsed)

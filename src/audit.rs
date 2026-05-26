@@ -1,4 +1,5 @@
 use crate::cleanup::CleanupReport;
+use crate::config::SessionConfig;
 use crate::registry::{
     CleanupReason, RetentionPolicy, SessionLifecycleMetadata, SessionLifecycleState,
 };
@@ -20,6 +21,7 @@ pub struct PrivacyReport {
     pub cleanup: CleanupReport,
     pub session_profile: Option<SessionProfile>,
     pub lifecycle: Option<LifecycleReport>,
+    pub llama_runtime: Option<LlamaRuntimeReport>,
     pub retrieval: Option<RetrievalReport>,
     pub residual_risk: String,
 }
@@ -75,6 +77,28 @@ pub struct RetrievalReport {
     pub context_injected: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlamaRuntimeReport {
+    pub runtime_kind: String,
+    pub runtime_pid: Option<u32>,
+    pub model_id: String,
+    pub model_name: String,
+    pub model_path: String,
+    pub gpu_layers_requested: u32,
+    pub gpu_offload_requested: bool,
+    pub cleanup_summary: String,
+    pub residual_risk_summary: String,
+    pub memory_domains: Vec<LlamaMemoryDomainReport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlamaMemoryDomainReport {
+    pub domain: String,
+    pub exposure_scope: String,
+    pub cleanup_status: String,
+    pub notes: String,
+}
+
 impl PrivacyReport {
     pub fn new(
         session_id: String,
@@ -97,6 +121,7 @@ impl PrivacyReport {
             cleanup,
             session_profile: None,
             lifecycle: None,
+            llama_runtime: None,
             retrieval: None,
             residual_risk:
                 "OS memory, swap, shell history, and llama.cpp internal allocations are not yet sanitized."
@@ -111,6 +136,11 @@ impl PrivacyReport {
 
     pub fn with_lifecycle(mut self, lifecycle: &SessionLifecycleMetadata) -> Self {
         self.lifecycle = Some(LifecycleReport::from_metadata(lifecycle));
+        self
+    }
+
+    pub fn with_llama_runtime(mut self, llama_runtime: LlamaRuntimeReport) -> Self {
+        self.llama_runtime = Some(llama_runtime);
         self
     }
 
@@ -157,6 +187,93 @@ pub fn sync_report_lifecycle(
     fs::write(report_path, report.to_pretty_json()?)?;
 
     Ok(())
+}
+
+pub fn build_llama_runtime_report(
+    config: &SessionConfig,
+    runtime_pid: Option<u32>,
+    process_exited_cleanly: bool,
+) -> LlamaRuntimeReport {
+    let gpu_layers_requested = config.gpu_layers.parse::<u32>().unwrap_or(0);
+    let gpu_offload_requested = gpu_layers_requested > 0;
+
+    let mut memory_domains = vec![
+        LlamaMemoryDomainReport {
+            domain: "llama_process_runtime".to_string(),
+            exposure_scope: "external child process memory and runtime state".to_string(),
+            cleanup_status: if process_exited_cleanly {
+                "successful".to_string()
+            } else {
+                "failed".to_string()
+            },
+            notes: if process_exited_cleanly {
+                "NullContext terminated the llama-server child process, which is the current cleanup boundary for external llama.cpp-owned memory."
+                    .to_string()
+            } else {
+                "The llama-server child process was not confirmed to exit cleanly, so external runtime memory may have remained live longer than intended."
+                    .to_string()
+            },
+        },
+        LlamaMemoryDomainReport {
+            domain: "llama_internal_allocator".to_string(),
+            exposure_scope: "llama.cpp allocator state and freed runtime pages".to_string(),
+            cleanup_status: "warning".to_string(),
+            notes: "NullContext does not currently verify allocator-level clearing inside llama.cpp after shutdown.".to_string(),
+        },
+        LlamaMemoryDomainReport {
+            domain: "model_weights_ram".to_string(),
+            exposure_scope: "loaded GGUF weight residency in external process RAM".to_string(),
+            cleanup_status: "warning".to_string(),
+            notes: "Process termination ends normal access to model-weight memory, but NullContext does not verify whether released OS pages were zeroed or later reused.".to_string(),
+        },
+        LlamaMemoryDomainReport {
+            domain: "kv_cache_state".to_string(),
+            exposure_scope: "prompt context, KV/cache state, and decoded token history inside llama.cpp".to_string(),
+            cleanup_status: "warning".to_string(),
+            notes: "KV/cache lifetime is bounded by runtime lifetime in this build, but NullContext does not yet inspect or sanitize llama.cpp cache internals directly.".to_string(),
+        },
+    ];
+
+    if gpu_offload_requested {
+        memory_domains.push(LlamaMemoryDomainReport {
+            domain: "gpu_vram".to_string(),
+            exposure_scope: "GPU-offloaded model layers and possible prompt/cache-related buffers".to_string(),
+            cleanup_status: "warning".to_string(),
+            notes: "GPU offload was requested, so some llama.cpp state may have resided in VRAM. NullContext does not yet verify or sanitize VRAM contents after shutdown.".to_string(),
+        });
+    } else {
+        memory_domains.push(LlamaMemoryDomainReport {
+            domain: "gpu_vram".to_string(),
+            exposure_scope: "GPU-offloaded model layers and possible prompt/cache-related buffers".to_string(),
+            cleanup_status: "not_attempted".to_string(),
+            notes: "GPU offload was not requested for this session, so NullContext did not expect model residency in VRAM from llama.cpp.".to_string(),
+        });
+    }
+
+    LlamaRuntimeReport {
+        runtime_kind: "llama-server".to_string(),
+        runtime_pid,
+        model_id: config.model_id.clone(),
+        model_name: config.model_name.clone(),
+        model_path: config.model_path.clone(),
+        gpu_layers_requested,
+        gpu_offload_requested,
+        cleanup_summary: if process_exited_cleanly {
+            "NullContext terminated the llama-server runtime, but that process boundary is currently the strongest cleanup action applied to llama.cpp-owned memory domains."
+                .to_string()
+        } else {
+            "NullContext could not confirm clean llama-server shutdown, so runtime-owned memory domains remain more weakly bounded than intended."
+                .to_string()
+        },
+        residual_risk_summary: if gpu_offload_requested {
+            "Allocator state, KV/cache contents, model-weight residency, and possible VRAM-resident buffers remain unverified even after runtime shutdown."
+                .to_string()
+        } else {
+            "Allocator state, KV/cache contents, and model-weight residency in the external llama.cpp process remain unverified even after runtime shutdown."
+                .to_string()
+        },
+        memory_domains,
+    }
 }
 
 fn lifecycle_policy_summary(metadata: &SessionLifecycleMetadata) -> String {

@@ -1,4 +1,4 @@
-use crate::audit::{sync_report_lifecycle, PrivacyReport};
+use crate::audit::{build_llama_runtime_report, sync_report_lifecycle, PrivacyReport};
 use crate::chat::{CancelChatResponse, ChatMessageRequest, ChatSessionManager, StartChatRequest};
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
@@ -816,6 +816,7 @@ fn run_direct_streaming_session(
     let _ = send_runtime(&tx, "Launching llama-server...");
 
     let mut runtime = ManagedRuntime::launch(&config)?;
+    let runtime_pid = runtime.pid();
 
     let _ = send_runtime(&tx, "Runtime healthy.");
     let _ = send_runtime(&tx, "Running streaming inference...");
@@ -994,7 +995,12 @@ fn run_direct_streaming_session(
         runtime_terminated,
         cleanup_report.clone(),
     )
-    .with_lifecycle(&lifecycle);
+    .with_lifecycle(&lifecycle)
+    .with_llama_runtime(build_llama_runtime_report(
+        &config,
+        Some(runtime_pid),
+        runtime_terminated,
+    ));
     let report = if let Some(retrieval_report) = retrieval_report {
         report.with_retrieval(retrieval_report)
     } else {

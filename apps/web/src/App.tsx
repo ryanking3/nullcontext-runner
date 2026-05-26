@@ -163,6 +163,26 @@ type RetrievalReportData = {
   context_injected: boolean;
 };
 
+type LlamaMemoryDomainReport = {
+  domain: string;
+  exposure_scope: string;
+  cleanup_status: string;
+  notes: string;
+};
+
+type LlamaRuntimeReportData = {
+  runtime_kind: string;
+  runtime_pid?: number | null;
+  model_id: string;
+  model_name: string;
+  model_path: string;
+  gpu_layers_requested: number;
+  gpu_offload_requested: boolean;
+  cleanup_summary: string;
+  residual_risk_summary: string;
+  memory_domains: LlamaMemoryDomainReport[];
+};
+
 type PrivacyReportData = {
   session_id: string;
   started_at: string;
@@ -174,6 +194,7 @@ type PrivacyReportData = {
   cleanup: CleanupInfo;
   session_profile?: SessionProfile | null;
   lifecycle?: LifecycleReport | null;
+  llama_runtime?: LlamaRuntimeReportData | null;
   retrieval?: RetrievalReportData | null;
   residual_risk: string;
 };
@@ -2815,6 +2836,84 @@ function App() {
                                 ))}
                               </div>
                             )}
+                          </details>
+                        </section>
+                      )}
+
+                      {currentReport.llama_runtime && (
+                        <section className="report-section">
+                          <div className="panel-title">llama runtime exposure</div>
+                          <ReportGrid
+                            entries={[
+                              {
+                                label: "runtime",
+                                value: currentReport.llama_runtime.runtime_kind,
+                              },
+                              {
+                                label: "runtime pid",
+                                value:
+                                  currentReport.llama_runtime.runtime_pid?.toString() || "none",
+                              },
+                              {
+                                label: "model",
+                                value: `${currentReport.llama_runtime.model_name} (${currentReport.llama_runtime.model_id})`,
+                              },
+                              {
+                                label: "gpu layers requested",
+                                value: String(
+                                  currentReport.llama_runtime.gpu_layers_requested
+                                ),
+                              },
+                              {
+                                label: "gpu offload requested",
+                                value: formatBoolean(
+                                  currentReport.llama_runtime.gpu_offload_requested
+                                ),
+                              },
+                              {
+                                label: "model path",
+                                value: currentReport.llama_runtime.model_path,
+                              },
+                            ]}
+                          />
+
+                          <div className="report-risk-block">
+                            <p>
+                              <strong>cleanup boundary:</strong>{" "}
+                              {currentReport.llama_runtime.cleanup_summary}
+                            </p>
+                            <p>
+                              <strong>runtime-specific residual risk:</strong>{" "}
+                              {currentReport.llama_runtime.residual_risk_summary}
+                            </p>
+                          </div>
+
+                          <details className="report-detail" open>
+                            <summary>
+                              <span>memory domains</span>
+                              <span className="pill neutral">
+                                {currentReport.llama_runtime.memory_domains.length}
+                              </span>
+                            </summary>
+                            <div className="audit-list">
+                              {currentReport.llama_runtime.memory_domains.map((domain) => (
+                                <details
+                                  className="audit-item"
+                                  key={`${domain.domain}-${domain.exposure_scope}`}
+                                >
+                                  <summary>
+                                    <code>{domain.domain}</code>
+                                    <span className={statusClass(domain.cleanup_status)}>
+                                      {domain.cleanup_status}
+                                    </span>
+                                  </summary>
+                                  <p>
+                                    <strong>scope:</strong> {domain.exposure_scope}
+                                  </p>
+                                  <p>{domain.notes}</p>
+                                </details>
+                              ))}
+                            </div>
                           </details>
                         </section>
                       )}
