@@ -20,6 +20,7 @@ pub struct PrivacyReport {
     pub cleanup: CleanupReport,
     pub session_profile: Option<SessionProfile>,
     pub lifecycle: Option<LifecycleReport>,
+    pub retrieval: Option<RetrievalReport>,
     pub residual_risk: String,
 }
 
@@ -56,6 +57,18 @@ pub struct LifecycleReport {
     pub decision_summary: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetrievalReport {
+    pub corpus_id: String,
+    pub corpus_name: String,
+    pub query: String,
+    pub top_k: usize,
+    pub retrieved_chunks: usize,
+    pub source_paths: Vec<String>,
+    pub page_hits: Vec<String>,
+    pub context_injected: bool,
+}
+
 impl PrivacyReport {
     pub fn new(
         session_id: String,
@@ -78,6 +91,7 @@ impl PrivacyReport {
             cleanup,
             session_profile: None,
             lifecycle: None,
+            retrieval: None,
             residual_risk:
                 "OS memory, swap, shell history, and llama.cpp internal allocations are not yet sanitized."
                     .to_string(),
@@ -91,6 +105,11 @@ impl PrivacyReport {
 
     pub fn with_lifecycle(mut self, lifecycle: &SessionLifecycleMetadata) -> Self {
         self.lifecycle = Some(LifecycleReport::from_metadata(lifecycle));
+        self
+    }
+
+    pub fn with_retrieval(mut self, retrieval: RetrievalReport) -> Self {
+        self.retrieval = Some(retrieval);
         self
     }
 

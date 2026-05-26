@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::audit::RetrievalReport;
 use crate::corpus::CorpusManifest;
 use crate::corpus_registry::CorpusRegistry;
 use crate::docs::ChunkRecord;
@@ -38,6 +39,65 @@ pub struct RetrievalResult {
     pub score: f32,
     pub text_preview: String,
     pub text: String,
+}
+
+pub fn build_grounded_prompt(response: &QueryCorpusResponse) -> String {
+    let mut sections = Vec::new();
+    sections.push(format!(
+        "[NullContext Retrieval Context]\nCorpus: {} ({})\nTop-K: {}\n",
+        response.corpus_name, response.corpus_id, response.top_k
+    ));
+
+    for (index, result) in response.results.iter().enumerate() {
+        let page_suffix = result
+            .page_number
+            .map(|page| format!(" page {}", page))
+            .unwrap_or_default();
+        sections.push(format!(
+            "[Source {}]\nPath: {}{}\nScore: {:.4}\n{}\n",
+            index + 1,
+            result.source_path,
+            page_suffix,
+            result.score,
+            result.text
+        ));
+    }
+
+    sections.push(format!(
+        "[User Question]\n{}\n\nAnswer using the retrieval context when relevant. If the corpus does not contain the answer, say so plainly.",
+        response.query
+    ));
+
+    sections.join("\n")
+}
+
+pub fn build_retrieval_report(response: &QueryCorpusResponse) -> RetrievalReport {
+    let mut source_paths = Vec::new();
+    let mut page_hits = Vec::new();
+
+    for result in &response.results {
+        if !source_paths.contains(&result.source_path) {
+            source_paths.push(result.source_path.clone());
+        }
+
+        if let Some(page_number) = result.page_number {
+            let page_hit = format!("{}#page-{}", result.source_path, page_number);
+            if !page_hits.contains(&page_hit) {
+                page_hits.push(page_hit);
+            }
+        }
+    }
+
+    RetrievalReport {
+        corpus_id: response.corpus_id.clone(),
+        corpus_name: response.corpus_name.clone(),
+        query: response.query.clone(),
+        top_k: response.top_k,
+        retrieved_chunks: response.results.len(),
+        source_paths,
+        page_hits,
+        context_injected: true,
+    }
 }
 
 pub fn query_corpus(

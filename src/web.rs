@@ -13,7 +13,10 @@ use crate::registry::{
     reconcile_registry_on_startup, register_persistent_session, CleanupReason, RetentionPolicy,
     SessionIndexEntry, SessionLifecycleMetadata, SessionRegistry,
 };
-use crate::retrieval::{query_corpus, QueryCorpusRequest, QueryCorpusResponse};
+use crate::retrieval::{
+    build_grounded_prompt, build_retrieval_report, query_corpus, QueryCorpusRequest,
+    QueryCorpusResponse,
+};
 use crate::runtime::ManagedRuntime;
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
@@ -87,6 +90,7 @@ pub struct RunRequest {
     mode: Option<String>,
     persistent: Option<bool>,
     model_id: Option<String>,
+    corpus_id: Option<String>,
     chat_template: Option<String>,
     chat_context_token_budget: Option<u32>,
     chat_context_turn_limit: Option<usize>,
@@ -438,6 +442,13 @@ async fn stream_chat_message(
 }
 
 async fn run_session(Json(request): Json<RunRequest>) -> Response {
+    if request.corpus_id.is_some() {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "Corpus-backed retrieval is currently supported on /api/run/stream only.".to_string(),
+        );
+    }
+
     match run_cli_session(request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
@@ -491,6 +502,7 @@ fn run_direct_streaming_session(
     tx: mpsc::Sender<StreamPayload>,
 ) -> Result<()> {
     let persistent = request.persistent.unwrap_or(false);
+    let corpus_id = request.corpus_id.clone();
 
     let mut config = SessionConfig::from_web_request(
         home,
@@ -502,6 +514,51 @@ fn run_direct_streaming_session(
         request.chat_context_token_budget,
         request.chat_context_turn_limit,
     )?;
+
+    let mut retrieval_report = None;
+
+    if let Some(corpus_id) = corpus_id {
+        let _ = send_runtime(&tx, "Retrieving local corpus context...");
+        let retrieval = query_corpus(
+            &config.home,
+            &corpus_id,
+            QueryCorpusRequest {
+                query: config.prompt.as_str().to_string(),
+                top_k: Some(6),
+            },
+        )?;
+        let grounded_prompt = build_grounded_prompt(&retrieval);
+        retrieval_report = Some(build_retrieval_report(&retrieval));
+
+        let _ = send_runtime(
+            &tx,
+            &format!(
+                "Retrieved {} chunk(s) from corpus {} ({}).",
+                retrieval.results.len(),
+                retrieval.corpus_name,
+                retrieval.corpus_id
+            ),
+        );
+        let _ = send_audit(
+            &tx,
+            &SanitizationOperation {
+                operation: "corpus_retrieval_context_injected".to_string(),
+                status: "successful".to_string(),
+                details: format!(
+                    "Injected retrieval context from corpus '{}' ({}) using {} chunk(s) across {} source file(s).",
+                    retrieval.corpus_name,
+                    retrieval.corpus_id,
+                    retrieval.results.len(),
+                    retrieval_report
+                        .as_ref()
+                        .map(|report| report.source_paths.len())
+                        .unwrap_or(0)
+                ),
+            },
+        );
+
+        config.prompt = SensitiveBytes::new(grounded_prompt);
+    }
 
     let session = Session::create()?;
 
@@ -710,6 +767,11 @@ fn run_direct_streaming_session(
         cleanup_report.clone(),
     )
     .with_lifecycle(&lifecycle);
+    let report = if let Some(retrieval_report) = retrieval_report {
+        report.with_retrieval(retrieval_report)
+    } else {
+        report
+    };
 
     let report_json = report.to_pretty_json()?;
 
@@ -736,6 +798,10 @@ fn emit_and_push(
 }
 
 fn run_cli_session(request: RunRequest) -> Result<RunResponse> {
+    if request.corpus_id.is_some() {
+        anyhow::bail!("Corpus-backed retrieval is currently supported on /api/run/stream only.");
+    }
+
     let exe_path = std::env::current_exe()?;
 
     let mode = request.mode.unwrap_or_else(|| "secure".to_string());
