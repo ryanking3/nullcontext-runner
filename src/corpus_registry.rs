@@ -260,7 +260,10 @@ pub fn reconcile_corpora_on_startup(home: &str) -> Result<CorpusStartupReconcili
     Ok(summary)
 }
 
-pub fn sync_corpus_report_lifecycle(report_path: &Path, lifecycle: &CorpusLifecycleMetadata) -> Result<()> {
+pub fn sync_corpus_report_lifecycle(
+    report_path: &Path,
+    lifecycle: &CorpusLifecycleMetadata,
+) -> Result<()> {
     if !report_path.exists() {
         return Ok(());
     }

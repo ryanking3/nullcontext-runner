@@ -231,11 +231,11 @@ fn spawn_retention_scheduler(home: Arc<String>) {
             match result {
                 Ok(Ok((swept, corpus_swept))) if !swept.is_empty() || !corpus_swept.is_empty() => {
                     if !swept.is_empty() {
-                    println!(
-                        "Retention sweep cleaned {} session(s): {}",
-                        swept.len(),
-                        swept.join(", ")
-                    );
+                        println!(
+                            "Retention sweep cleaned {} session(s): {}",
+                            swept.len(),
+                            swept.join(", ")
+                        );
                     }
                     if !corpus_swept.is_empty() {
                         println!(
@@ -394,7 +394,10 @@ async fn show_corpus_report(
     };
 
     let Some(entry) = registry.find(&corpus_id) else {
-        return json_error(StatusCode::NOT_FOUND, format!("Corpus not found: {corpus_id}"));
+        return json_error(
+            StatusCode::NOT_FOUND,
+            format!("Corpus not found: {corpus_id}"),
+        );
     };
 
     match fs::read_to_string(&entry.report_path) {
@@ -430,10 +433,7 @@ async fn update_corpus_retention_policy(
     }
 }
 
-async fn cleanup_corpus(
-    State(state): State<WebState>,
-    Path(corpus_id): Path<String>,
-) -> Response {
+async fn cleanup_corpus(State(state): State<WebState>, Path(corpus_id): Path<String>) -> Response {
     let home = state.home.as_ref().clone();
 
     match tokio::task::spawn_blocking(move || cleanup_registered_corpus(&home, &corpus_id)).await {
@@ -1516,7 +1516,10 @@ fn cleanup_registered_corpus_with_reason(
 
     sync_corpus_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
 
-    Ok(build_corpus_lifecycle_action_response(entry, completion_message))
+    Ok(build_corpus_lifecycle_action_response(
+        entry,
+        completion_message,
+    ))
 }
 
 fn update_registry_corpus_retention_policy(
@@ -1582,10 +1585,7 @@ fn update_registry_corpus_retention_policy(
     Ok(build_corpus_lifecycle_action_response(entry, &message))
 }
 
-fn reconcile_registry_corpus(
-    home: &str,
-    corpus_id: &str,
-) -> Result<CorpusLifecycleActionResponse> {
+fn reconcile_registry_corpus(home: &str, corpus_id: &str) -> Result<CorpusLifecycleActionResponse> {
     let mut registry = CorpusRegistry::load(home)?;
     let message = {
         let entry = registry

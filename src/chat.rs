@@ -687,9 +687,10 @@ impl ChatSessionManager {
             prompt_source: active.config.prompt_source.as_str().to_string(),
             turn_artifacts,
             active_runtime_residual_risk: active_runtime_risk(),
-            grounding_scope: active.bound_corpus_id.as_ref().map(|_| {
-                "corpus_bound_retrieval_per_turn_until_end_sanitize".to_string()
-            }),
+            grounding_scope: active
+                .bound_corpus_id
+                .as_ref()
+                .map(|_| "corpus_bound_retrieval_per_turn_until_end_sanitize".to_string()),
             bound_corpus_id: active.bound_corpus_id.clone(),
             bound_corpus_name: active.bound_corpus_name.clone(),
             grounded_turn_count,
