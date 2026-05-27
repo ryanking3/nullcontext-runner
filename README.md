@@ -68,6 +68,10 @@ No cloud inference is required.
 - recursive artifact scanning
 - Rust-owned buffer zeroization
 - RAM zeroization verification
+- llama runtime exposure reporting
+- live llama runtime RAM/VRAM usage snapshots
+- post-shutdown llama runtime inspection
+- macOS vmmap-based RAM inspection and resident-region delta analysis
 - audit operation tracking
 - sanitization operation reporting
 - structured privacy reports
@@ -120,6 +124,7 @@ The local corpus registry supports:
 
 - txt, markdown, and pdf ingestion
 - hybrid pdf extraction with OCR for sparse pages
+- browser-native file upload ingestion with drag/drop and upload progress
 - persistent and ephemeral corpora
 - local chunking and embedding artifacts
 - direct corpus querying through the API
@@ -139,6 +144,7 @@ The current browser UI supports:
 - dedicated model registry browser
 - dedicated corpus registry browser
 - path-based corpus ingestion
+- browser-native corpus file upload ingestion
 - model selection for one-shot and active chat
 - model-default versus manual-override controls
 - selectable active chat prompt template
@@ -452,6 +458,7 @@ NullContext does not currently guarantee:
 
 Active chat also keeps a long-lived llama.cpp runtime and in-memory context alive until the user explicitly ends the session.
 Corpus ingestion can recover text from many PDFs, including scanned pages via OCR, but complex layouts, tables, and poor scans may still extract imperfectly.
+NullContext now performs best-effort llama runtime inspection, including shutdown-path reporting, live RAM/VRAM observation, post-shutdown verification, and macOS `vmmap` inspection when available. These inspections improve visibility, but they are not proof of allocator zeroization or full RAM/VRAM sanitization.
 
 The privacy reports intentionally expose these residual risks.
 
@@ -708,6 +715,7 @@ The active chat session config panel lets you:
 The corpus browser also lets you:
 
 - ingest corpora from absolute local file and directory paths
+- ingest corpora from browser-selected local files with drag/drop
 - inspect corpus lifecycle state and retained artifact paths
 - load retained corpus reports
 - run corpus reconcile, cleanup, and retention actions
@@ -749,6 +757,7 @@ The current development focus is:
 - streaming audit events
 - stronger memory hygiene primitives
 - VRAM inspection and analysis
+- llama runtime RAM/VRAM inspection and evidence-driven cleanup reporting
 - forensic artifact visibility
 - Linux-native low-level memory work
 
@@ -773,10 +782,12 @@ The project is functional and supports:
 - lifecycle policy engine
 - structured model registry and model switching
 - txt/md/pdf corpus ingestion with hybrid OCR extraction
+- browser-native corpus file uploads
 - corpus lifecycle controls
 - artifact tracking
 - cleanup reporting
 - audit visualization
+- llama runtime inspection reports
 
 However, the project should not yet be considered a hardened secure inference environment.
 

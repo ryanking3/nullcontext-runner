@@ -33,6 +33,7 @@ The project currently supports:
 - structured model registry and model switching
 - corpus registry with txt/md/pdf ingestion
 - hybrid pdf extraction with OCR for sparse pages
+- browser-native corpus file uploads with drag/drop and upload progress
 - one-shot grounded retrieval
 - active-chat grounded retrieval
 - corpus lifecycle cleanup, reconcile, and retention controls
@@ -40,6 +41,10 @@ The project currently supports:
 - cleanup reports
 - privacy reports
 - Rust-owned prompt/response buffer zeroization
+- llama runtime exposure reporting
+- live llama runtime RAM/VRAM usage snapshots
+- post-shutdown llama runtime inspection
+- macOS vmmap-based RAM inspection and before/after region delta reporting
 - active chat final reporting
 
 The project is functional but still early-stage. It should not be described as a hardened secure inference system.
@@ -70,7 +75,7 @@ Important backend files:
   CLI parsing, config loading, security modes, prompt source handling, and `SessionConfig`.
 
 - `src/runtime.rs`  
-  Starts, checks, and stops `llama-server`.
+  Starts, checks, and stops `llama-server`, and performs best-effort runtime RAM/VRAM observation.
 
 - `src/inference.rs`  
   Blocking one-shot inference path used by CLI mode.
@@ -97,7 +102,7 @@ Important backend files:
   Corpus querying, prompt grounding, and retrieval provenance shaping.
 
 - `src/audit.rs`  
-  Privacy report structures including active chat `SessionProfile`.
+  Privacy report structures including active chat `SessionProfile`, llama runtime exposure reporting, and inspection verdicts.
 
 - `src/cleanup.rs`  
   Artifact scanning, cleanup reporting, sanitization operation records.
@@ -125,7 +130,7 @@ apps/web
 Important frontend files:
 
 - `apps/web/src/App.tsx`  
-  Main UI. Handles one-shot mode, active chat mode, streaming, stop control, reports, runtime logs, audit operations, session registry, model registry, and corpus registry.
+  Main UI. Handles one-shot mode, active chat mode, streaming, stop control, reports, runtime logs, audit operations, session registry, model registry, corpus registry, upload ingestion UX, and structured llama runtime inspection views.
 
 - `apps/web/src/App.css`  
   Minimal terminal-style dark/light UI.
@@ -195,6 +200,8 @@ PDF ingestion uses a hybrid pipeline:
 - page-level extraction provenance in stored artifacts
 
 Corpus artifacts are retained under the NullContext corpus registry and can be lifecycle-managed separately from chat/session workspaces.
+
+Corpus ingestion currently also supports browser-native file upload for `txt`, `md`, and `pdf` inputs through the local web UI, including drag/drop and upload progress.
 
 ## API Routes
 
@@ -444,11 +451,14 @@ Manual verification should include:
 - active chat audit stream reports context-window preparation or truncation
 - active chat stop does not kill the session
 - active chat end generates report
+- llama runtime report shows shutdown method and inspection verdicts
+- macOS runtime reports show vmmap footprint and resident-region evidence when available
 - lifecycle registry actions work for retained sessions
 - scheduled retention cleanup works
 - model registry drawer loads
 - invalid model paths are marked unavailable
 - corpus ingest works for txt/md/pdf inputs
+- browser upload ingestion works for txt/md/pdf inputs
 - corpus drawer loads and shows lifecycle state
 - one-shot corpus grounding works
 - active-chat corpus grounding works
@@ -559,3 +569,5 @@ Do not commit:
 - No automated tests.
 - Corpus report viewer inside the corpus drawer is still raw JSON.
 - OCR currently relies on local CLI availability and does not implement full document-layout fidelity.
+- llama runtime RAM inspection is strongest on macOS right now and still relies on best-effort host tooling rather than direct allocator introspection.
+- GPU/VRAM inspection is currently limited and needs stronger Windows/NVIDIA-specific evidence paths.
