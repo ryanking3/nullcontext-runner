@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Hint } from "./components/Hint";
+import { CorpusDrawer } from "./components/CorpusDrawer";
 import { ModelRegistryDrawer } from "./components/ModelRegistryDrawer";
 import { PrivacyReportViewer } from "./components/PrivacyReportViewer";
-import { ReportGrid } from "./components/ReportGrid";
 import { SessionRegistryDrawer } from "./components/SessionRegistryDrawer";
 import type {
   ApiErrorResponse,
@@ -34,12 +34,9 @@ import type {
 } from "./appTypes";
 import {
   formatActiveChatApiError,
-  formatBoolean,
   formatBytes,
   formatDuration,
-  formatTimestamp,
   humanizeSnakeCase,
-  lifecycleStateClass,
   minutesUntil,
   parseCorpusReport,
   parsePositiveInteger,
@@ -2602,539 +2599,58 @@ function App() {
         </div>
       </aside>
 
-      <aside className={`corpus-drawer${corpusDrawerOpen ? " open" : ""}`}>
-        <div className="drawer-header">
-          <div>
-            <h3>corpus registry</h3>
-            <p>ingest local documents, inspect corpus artifacts, and choose a grounded one-shot corpus</p>
-          </div>
-          <div className="drawer-actions">
-            <button className="ghost-button" onClick={loadCorpora}>
-              refresh
-            </button>
-            <button className="ghost-button" onClick={closeDrawers}>
-              close
-            </button>
-          </div>
-        </div>
-
-        <div className="drawer-body corpus-drawer-body">
-          <section className="panel corpus-list-panel">
-            <div className="panel-header">
-              <div className="panel-title">corpora</div>
-              <span className="mini-status">loaded:{corporaLoadedAt}</span>
-            </div>
-
-            <div className="registry-toolbar">
-              <label>
-                search
-                <input
-                  type="search"
-                  value={corpusQuery}
-                  onChange={(event) => setCorpusQuery(event.target.value)}
-                  placeholder="name, id, path, backend..."
-                />
-              </label>
-            </div>
-
-            {corpusLoadError ? (
-              <p className="muted-text">corpus registry unavailable: {corpusLoadError}</p>
-            ) : filteredCorpora.length === 0 ? (
-              <p className="muted-text">
-                {corpora.length === 0 ? "no corpora have been ingested yet" : "no corpora match the current search"}
-              </p>
-            ) : (
-              <div className="session-list model-session-list">
-                {filteredCorpora.map((corpus) => (
-                  <button
-                    className={
-                      selectedCorpusId === corpus.corpus_id ? "session-item selected" : "session-item"
-                    }
-                    key={corpus.corpus_id}
-                    onClick={() => setSelectedCorpusId(corpus.corpus_id)}
-                  >
-                    <div className="registry-session-header">
-                      <span>{corpus.name}</span>
-                      <span className={lifecycleStateClass(corpus.lifecycle.state)}>
-                        {humanizeSnakeCase(corpus.lifecycle.state)}
-                      </span>
-                    </div>
-                    <div className="registry-session-meta">
-                      <small>{corpus.persistent ? "persistent" : "ephemeral"}</small>
-                      <small>{new Date(corpus.created_at).toLocaleString()}</small>
-                    </div>
-                    <small>{shortId(corpus.corpus_id)}</small>
-                    <small>
-                      {corpus.source_count} sources · {corpus.chunk_count} chunks
-                    </small>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="panel corpus-detail-panel">
-            <div className="detail-stack">
-              <section className="corpus-detail-block">
-                <div className="panel-header">
-                  <div className="panel-title">details</div>
-                  {selectedCorpus && (
-                    <span className="mini-status">id:{shortId(selectedCorpus.corpus_id)}</span>
-                  )}
-                </div>
-
-                {!selectedCorpus ? (
-                  <p className="muted-text">select a corpus to inspect its lifecycle and artifact paths</p>
-                ) : (
-                  <>
-                    <div className="registry-lifecycle-summary">
-                      <span className={lifecycleStateClass(selectedCorpus.lifecycle.state)}>
-                        {humanizeSnakeCase(selectedCorpus.lifecycle.state)}
-                      </span>
-                      <span className="pill neutral">
-                        {selectedCorpus.persistent ? "persistent" : "ephemeral"}
-                      </span>
-                    </div>
-
-                    {corpusActionMessage && (
-                      <div
-                        className={
-                          corpusActionFailed ? "registry-action-banner failed" : "registry-action-banner"
-                        }
-                      >
-                        {corpusActionMessage}
-                      </div>
-                    )}
-
-                    <dl className="registry-detail-grid">
-                      <dt>name</dt>
-                      <dd>{selectedCorpus.name}</dd>
-                      <dt>created</dt>
-                      <dd>{formatTimestamp(selectedCorpus.created_at)}</dd>
-                      <dt>retention policy</dt>
-                      <dd>{humanizeSnakeCase(selectedCorpus.lifecycle.retention_policy)}</dd>
-                      <dt>retention deadline</dt>
-                      <dd>
-                        {selectedCorpus.lifecycle.retention_deadline
-                          ? formatTimestamp(selectedCorpus.lifecycle.retention_deadline)
-                          : "none"}
-                      </dd>
-                      <dt>cleanup requested</dt>
-                      <dd>
-                        {selectedCorpus.lifecycle.cleanup_requested_at
-                          ? formatTimestamp(selectedCorpus.lifecycle.cleanup_requested_at)
-                          : "not requested"}
-                      </dd>
-                      <dt>cleanup completed</dt>
-                      <dd>
-                        {selectedCorpus.lifecycle.cleanup_completed_at
-                          ? formatTimestamp(selectedCorpus.lifecycle.cleanup_completed_at)
-                          : "not completed"}
-                      </dd>
-                      <dt>cleanup reason</dt>
-                      <dd>
-                        {selectedCorpus.lifecycle.cleanup_reason
-                          ? humanizeSnakeCase(selectedCorpus.lifecycle.cleanup_reason)
-                          : "none"}
-                      </dd>
-                      <dt>lifecycle updated</dt>
-                      <dd>
-                        {selectedCorpus.lifecycle.updated_at
-                          ? formatTimestamp(selectedCorpus.lifecycle.updated_at)
-                          : "unknown"}
-                      </dd>
-                      <dt>sources</dt>
-                      <dd>{selectedCorpus.source_count}</dd>
-                      <dt>chunks</dt>
-                      <dd>{selectedCorpus.chunk_count}</dd>
-                      <dt>embedding backend</dt>
-                      <dd>{selectedCorpus.embedding_backend || "unknown"}</dd>
-                      <dt>embedding model</dt>
-                      <dd>{selectedCorpus.embedding_model || "unknown"}</dd>
-                      <dt>ocr backend</dt>
-                      <dd>{selectedCorpus.ocr_backend || "unknown"}</dd>
-                      <dt>root path</dt>
-                      <dd className="registry-path">{selectedCorpus.root_path}</dd>
-                      <dt>manifest path</dt>
-                      <dd className="registry-path">{selectedCorpus.manifest_path}</dd>
-                      <dt>report path</dt>
-                      <dd className="registry-path">{selectedCorpus.report_path}</dd>
-                      {selectedCorpusLifecycleResult && (
-                        <>
-                          <dt>root exists</dt>
-                          <dd>{formatBoolean(selectedCorpusLifecycleResult.root_exists)}</dd>
-                          <dt>report exists</dt>
-                          <dd>{formatBoolean(selectedCorpusLifecycleResult.report_exists)}</dd>
-                        </>
-                      )}
-                    </dl>
-
-                    <section className="registry-retention-controls">
-                      <div className="panel-title">retention policy</div>
-                      <div className="registry-filter-row">
-                        <label>
-                          policy
-                          <select
-                            value={corpusRetentionPolicyDraft}
-                            onChange={(event) => setCorpusRetentionPolicyDraft(event.target.value)}
-                            disabled={corpusActionPending !== null}
-                          >
-                            <option value="retain_until_manual_cleanup">manual cleanup</option>
-                            <option value="retain_for_duration">timed retention</option>
-                            <option value="ephemeral_immediate">ephemeral immediate</option>
-                          </select>
-                        </label>
-
-                        {corpusRetentionPolicyDraft === "retain_for_duration" && (
-                          <label>
-                            minutes
-                            <input
-                              type="number"
-                              min={1}
-                              step={1}
-                              value={corpusRetentionMinutesDraft}
-                              onChange={(event) => setCorpusRetentionMinutesDraft(event.target.value)}
-                              disabled={corpusActionPending !== null}
-                            />
-                          </label>
-                        )}
-                      </div>
-
-                      <div className="registry-retention-meta">
-                        <span>
-                          current deadline:{" "}
-                          {selectedCorpus.lifecycle.retention_deadline
-                            ? formatTimestamp(selectedCorpus.lifecycle.retention_deadline)
-                            : "none"}
-                        </span>
-                        <button
-                          onClick={() => saveCorpusRetentionPolicy(selectedCorpus.corpus_id)}
-                          disabled={corpusActionPending !== null}
-                        >
-                          {corpusActionPending === "retention"
-                            ? "saving..."
-                            : "save retention policy"}
-                        </button>
-                      </div>
-                    </section>
-
-                    <div className="registry-actions">
-                      <button
-                        onClick={() => {
-                          setSelectedCorpusId(selectedCorpus.corpus_id);
-                          openConfigDrawer();
-                        }}
-                      >
-                        use for one-shot
-                      </button>
-                      <button
-                        onClick={() => openCorpusReport(selectedCorpus.corpus_id)}
-                        disabled={corpusActionPending !== null}
-                      >
-                        load report
-                      </button>
-                      <button
-                        onClick={() =>
-                          runCorpusLifecycleAction(selectedCorpus.corpus_id, "reconcile")
-                        }
-                        disabled={corpusActionPending !== null}
-                      >
-                        {corpusActionPending === "reconcile" ? "reconciling..." : "reconcile"}
-                      </button>
-                      <button
-                        className="danger-button"
-                        onClick={() =>
-                          runCorpusLifecycleAction(selectedCorpus.corpus_id, "cleanup")
-                        }
-                        disabled={corpusActionPending !== null}
-                      >
-                        {corpusActionPending === "cleanup" ? "cleaning up..." : "cleanup now"}
-                      </button>
-                    </div>
-
-                    {selectedCorpusReport && (
-                      <>
-                        {currentCorpusReport?.upload_staging && (
-                          <section className="report-section">
-                            <div className="panel-title">upload staging</div>
-                            <ReportGrid
-                              entries={[
-                                {
-                                  label: "staging root",
-                                  value: currentCorpusReport.upload_staging.staging_root,
-                                },
-                                {
-                                  label: "staged files",
-                                  value: String(currentCorpusReport.upload_staging.staged_files),
-                                },
-                                {
-                                  label: "staged bytes",
-                                  value: formatBytes(currentCorpusReport.upload_staging.staged_bytes),
-                                },
-                                {
-                                  label: "cleanup status",
-                                  value: currentCorpusReport.upload_staging.cleaned_up
-                                    ? "cleaned up"
-                                    : "retained/failed",
-                                },
-                                {
-                                  label: "cleanup error",
-                                  value:
-                                    currentCorpusReport.upload_staging.cleanup_error || "none",
-                                },
-                              ]}
-                            />
-
-                            <details className="report-detail" open>
-                              <summary>
-                                <span>uploaded filenames</span>
-                                <span className="pill neutral">
-                                  {currentCorpusReport.upload_staging.source_filenames.length}
-                                </span>
-                              </summary>
-                              <div className="report-list">
-                                {currentCorpusReport.upload_staging.source_filenames.map((name) => (
-                                  <div className="report-item" key={name}>
-                                    <div className="report-path-list">
-                                      <div>{name}</div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </details>
-                          </section>
-                        )}
-
-                        <details className="report-detail" open>
-                          <summary>
-                            <span>corpus report</span>
-                            <span className="pill neutral">json</span>
-                          </summary>
-                          <pre>{selectedCorpusReport}</pre>
-                        </details>
-                      </>
-                    )}
-                  </>
-                )}
-              </section>
-
-              <section className="corpus-ingest-panel">
-                <div className="panel-header">
-                  <div className="panel-title">ingest corpus</div>
-                  <span className="mini-status">txt · md · pdf</span>
-                </div>
-
-                {corpusIngestMessage && (
-                  <div
-                    className={
-                      corpusIngestFailed ? "registry-action-banner failed" : "registry-action-banner"
-                    }
-                  >
-                    {corpusIngestMessage}
-                  </div>
-                )}
-
-                <label>
-                  corpus name
-                  <input
-                    value={corpusIngestName}
-                    onChange={(event) => setCorpusIngestName(event.target.value)}
-                    placeholder="incident-response-briefing"
-                    disabled={corpusIngestPending}
-                  />
-                </label>
-
-                <label>
-                  local paths
-                  <textarea
-                    value={corpusIngestPaths}
-                    onChange={(event) => setCorpusIngestPaths(event.target.value)}
-                    placeholder={"/Users/you/docs/briefing.pdf\n/Users/you/docs/notes"}
-                    disabled={corpusIngestPending}
-                  />
-                </label>
-
-                <label>
-                  upload files
-                  <div
-                    className={`upload-dropzone${corpusUploadDragActive ? " active" : ""}${
-                      corpusIngestPending ? " disabled" : ""
-                    }`}
-                    onDragEnter={(event) => {
-                      event.preventDefault();
-                      if (!corpusIngestPending) {
-                        setCorpusUploadDragActive(true);
-                      }
-                    }}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      if (!corpusIngestPending) {
-                        setCorpusUploadDragActive(true);
-                      }
-                    }}
-                    onDragLeave={(event) => {
-                      event.preventDefault();
-                      if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                        return;
-                      }
-                      setCorpusUploadDragActive(false);
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      setCorpusUploadDragActive(false);
-                      if (corpusIngestPending) {
-                        return;
-                      }
-                      handleCorpusUploadSelection(Array.from(event.dataTransfer.files ?? []));
-                    }}
-                  >
-                    <input
-                      key={corpusUploadInputKey}
-                      className="upload-input"
-                      type="file"
-                      accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf"
-                      multiple
-                      disabled={corpusIngestPending}
-                      onChange={(event) =>
-                        handleCorpusUploadSelection(Array.from(event.target.files ?? []))
-                      }
-                    />
-                    <div className="upload-dropzone-copy">
-                      <strong>drop files here or click to browse</strong>
-                      <span>Finder / File Explorer upload for .txt, .md, and .pdf</span>
-                    </div>
-                  </div>
-                </label>
-
-                {corpusUploadFiles.length > 0 && (
-                  <div className="config-summary corpus-upload-summary">
-                    <span>
-                      selected: {corpusUploadFiles.length} file
-                      {corpusUploadFiles.length === 1 ? "" : "s"}
-                    </span>
-                    {corpusUploadFiles.slice(0, 4).map((file) => (
-                      <span key={`${file.name}-${file.size}`}>
-                        {file.name} · {formatBytes(file.size)}
-                      </span>
-                    ))}
-                    {corpusUploadFiles.length > 4 && (
-                      <span>…and {corpusUploadFiles.length - 4} more</span>
-                    )}
-                  </div>
-                )}
-
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    checked={corpusIngestPersistent}
-                    onChange={(event) => setCorpusIngestPersistent(event.target.checked)}
-                    disabled={corpusIngestPending}
-                  />
-                  persistent corpus
-                </label>
-
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    checked={corpusIngestOcrEnabled}
-                    onChange={(event) => setCorpusIngestOcrEnabled(event.target.checked)}
-                    disabled={corpusIngestPending}
-                  />
-                  enable hybrid OCR for sparse PDF pages
-                </label>
-
-                <div className="registry-actions">
-                  <button onClick={ingestCorpusFromForm} disabled={corpusIngestPending}>
-                    {corpusIngestPending ? "ingesting..." : "ingest from paths"}
-                  </button>
-                  <button
-                    onClick={ingestUploadedCorpusFromForm}
-                    disabled={corpusIngestPending || corpusUploadFiles.length === 0}
-                  >
-                    {corpusIngestPending ? "uploading..." : "upload + ingest"}
-                  </button>
-                </div>
-
-                {corpusIngestPending && corpusUploadProgressPercent !== null && (
-                  <div className="upload-progress">
-                    <div className="upload-progress-bar">
-                      <div
-                        className="upload-progress-fill"
-                        style={{ width: `${corpusUploadProgressPercent}%` }}
-                      />
-                    </div>
-                    <div className="upload-progress-meta">
-                      <span>{corpusUploadProgressPercent}%</span>
-                      <span>{corpusUploadProgressLabel || "Uploading corpus files..."}</span>
-                    </div>
-                  </div>
-                )}
-
-                <p className="microcopy">
-                  Upload files to open Finder/File Explorer like a normal chatbot, or enter
-                  absolute local file and directory paths if you want an operator-style ingest.
-                  PDF ingestion uses native text extraction first, then OCRs sparse pages when enabled.
-                </p>
-
-                {lastIngestedCorpusReport && (
-                  <div className="config-summary corpus-ingest-summary">
-                    <span>last ingest: {shortId(lastIngestedCorpusReport.corpus_id)}</span>
-                    <span>
-                      discovered: {lastIngestedCorpusReport.files_discovered} · ingested:{" "}
-                      {lastIngestedCorpusReport.files_ingested}
-                    </span>
-                    <span>
-                      pdf pages: {lastIngestedCorpusReport.pdf_pages_seen} · OCR:{" "}
-                      {lastIngestedCorpusReport.pdf_pages_ocrd}
-                    </span>
-                    <span>chunks: {lastIngestedCorpusReport.chunk_count}</span>
-                    {lastIngestedCorpusReport.upload_staging && (
-                      <span>
-                        upload staging:{" "}
-                        {lastIngestedCorpusReport.upload_staging.cleaned_up
-                          ? "cleaned"
-                          : "retained/failed"}
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {lastIngestedCorpusReport?.upload_staging && (
-                  <section className="report-section compact-report-section">
-                    <div className="panel-title">latest upload staging</div>
-                    <ReportGrid
-                      entries={[
-                        {
-                          label: "staging root",
-                          value: lastIngestedCorpusReport.upload_staging.staging_root,
-                        },
-                        {
-                          label: "staged files",
-                          value: String(lastIngestedCorpusReport.upload_staging.staged_files),
-                        },
-                        {
-                          label: "staged bytes",
-                          value: formatBytes(lastIngestedCorpusReport.upload_staging.staged_bytes),
-                        },
-                        {
-                          label: "cleanup status",
-                          value: lastIngestedCorpusReport.upload_staging.cleaned_up
-                            ? "cleaned up"
-                            : "retained/failed",
-                        },
-                        {
-                          label: "cleanup error",
-                          value: lastIngestedCorpusReport.upload_staging.cleanup_error || "none",
-                        },
-                      ]}
-                    />
-                  </section>
-                )}
-              </section>
-            </div>
-          </section>
-        </div>
-      </aside>
+      <CorpusDrawer
+        open={corpusDrawerOpen}
+        onRefresh={loadCorpora}
+        onClose={closeDrawers}
+        corporaLoadedAt={corporaLoadedAt}
+        corpusQuery={corpusQuery}
+        onCorpusQueryChange={setCorpusQuery}
+        corpusLoadError={corpusLoadError}
+        corpora={corpora}
+        filteredCorpora={filteredCorpora}
+        selectedCorpusId={selectedCorpusId}
+        onSelectCorpus={setSelectedCorpusId}
+        selectedCorpus={selectedCorpus}
+        selectedCorpusLifecycleResult={selectedCorpusLifecycleResult}
+        corpusActionMessage={corpusActionMessage}
+        corpusActionFailed={corpusActionFailed}
+        corpusRetentionPolicyDraft={corpusRetentionPolicyDraft}
+        onCorpusRetentionPolicyDraftChange={setCorpusRetentionPolicyDraft}
+        corpusRetentionMinutesDraft={corpusRetentionMinutesDraft}
+        onCorpusRetentionMinutesDraftChange={setCorpusRetentionMinutesDraft}
+        corpusActionPending={corpusActionPending}
+        onSaveCorpusRetentionPolicy={saveCorpusRetentionPolicy}
+        onUseCorpusForOneShot={(corpusId) => {
+          setSelectedCorpusId(corpusId);
+          openConfigDrawer();
+        }}
+        onOpenCorpusReport={openCorpusReport}
+        onRunCorpusLifecycleAction={runCorpusLifecycleAction}
+        selectedCorpusReport={selectedCorpusReport}
+        currentCorpusReport={currentCorpusReport}
+        corpusIngestMessage={corpusIngestMessage}
+        corpusIngestFailed={corpusIngestFailed}
+        corpusIngestName={corpusIngestName}
+        onCorpusIngestNameChange={setCorpusIngestName}
+        corpusIngestPaths={corpusIngestPaths}
+        onCorpusIngestPathsChange={setCorpusIngestPaths}
+        corpusUploadDragActive={corpusUploadDragActive}
+        corpusIngestPending={corpusIngestPending}
+        onCorpusUploadDragActiveChange={setCorpusUploadDragActive}
+        onCorpusUploadSelection={handleCorpusUploadSelection}
+        corpusUploadInputKey={corpusUploadInputKey}
+        corpusUploadFiles={corpusUploadFiles}
+        corpusIngestPersistent={corpusIngestPersistent}
+        onCorpusIngestPersistentChange={setCorpusIngestPersistent}
+        corpusIngestOcrEnabled={corpusIngestOcrEnabled}
+        onCorpusIngestOcrEnabledChange={setCorpusIngestOcrEnabled}
+        onIngestCorpusFromPaths={ingestCorpusFromForm}
+        onIngestUploadedCorpus={ingestUploadedCorpusFromForm}
+        corpusUploadProgressPercent={corpusUploadProgressPercent}
+        corpusUploadProgressLabel={corpusUploadProgressLabel}
+        lastIngestedCorpusReport={lastIngestedCorpusReport}
+      />
 
       <SessionRegistryDrawer
         open={registryDrawerOpen}
