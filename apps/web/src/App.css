@@ -517,8 +517,9 @@ pre {
 
 .composer {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   gap: 10px;
+  align-items: end;
   border-top: 1px solid var(--border);
   padding: 12px;
 }
@@ -528,6 +529,73 @@ pre {
   color: var(--bg);
   background: var(--text);
   font-weight: 700;
+}
+
+.composer-attach-menu {
+  align-self: stretch;
+}
+
+.composer-attach-menu .popup-panel {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 8px);
+  left: 0;
+  transform-origin: 0 100%;
+}
+
+.composer-attach-button {
+  display: inline-flex;
+  min-width: 42px !important;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  padding: 0 12px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.composer-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.composer-corpus-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  padding: 5px 8px;
+  color: var(--muted);
+  background: var(--input);
+  font-size: 10px;
+  text-transform: lowercase;
+}
+
+.composer-upload-progress {
+  display: inline-flex;
+  min-width: min(340px, 100%);
+  flex: 1 1 280px;
+  align-items: center;
+  gap: 10px;
+}
+
+.composer-upload-progress .upload-progress-bar {
+  flex: 1;
+  min-width: 120px;
+}
+
+.composer-upload-progress span {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: lowercase;
+}
+
+.failed-note {
+  color: var(--failed);
+  font-size: 11px;
 }
 
 .audit-list {
@@ -814,7 +882,15 @@ pre {
   }
 
   .composer {
-    grid-template-columns: 1fr;
+    grid-template-columns: auto 1fr;
+  }
+
+  .composer > button:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .composer-upload-progress {
+    min-width: 0;
   }
 
   .topbar {

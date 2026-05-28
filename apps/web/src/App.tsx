@@ -632,6 +632,8 @@ function ReportGrid({
 function App() {
   const activeAbortController = useRef<AbortController | null>(null);
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
+  const chatUploadMenuRef = useRef<HTMLDivElement | null>(null);
+  const chatUploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const [theme, setTheme] = useState<Theme>("dark");
   const [serverStatus, setServerStatus] = useState<"checking" | "online" | "offline">("checking");
@@ -651,6 +653,7 @@ function App() {
   const [corpusDrawerOpen, setCorpusDrawerOpen] = useState(false);
   const [inspectorView, setInspectorView] = useState<InspectorView>("audit");
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
+  const [chatUploadMenuOpen, setChatUploadMenuOpen] = useState(false);
   const [chatTemplate, setChatTemplate] = useState<ChatTemplateOption>("auto");
   const [chatContextTokenBudget, setChatContextTokenBudget] = useState("2048");
   const [chatContextTurnLimit, setChatContextTurnLimit] = useState("12");
@@ -678,11 +681,16 @@ function App() {
   const [corpusIngestFailed, setCorpusIngestFailed] = useState(false);
   const [corpusUploadFiles, setCorpusUploadFiles] = useState<File[]>([]);
   const [corpusUploadInputKey, setCorpusUploadInputKey] = useState(0);
+  const [chatUploadAccept, setChatUploadAccept] = useState(
+    ".txt,.md,.pdf,text/plain,text/markdown,application/pdf"
+  );
   const [corpusUploadProgressPercent, setCorpusUploadProgressPercent] = useState<number | null>(
     null
   );
   const [corpusUploadProgressLabel, setCorpusUploadProgressLabel] = useState("");
   const [corpusUploadDragActive, setCorpusUploadDragActive] = useState(false);
+  const [chatUploadNotice, setChatUploadNotice] = useState("");
+  const [chatUploadFailed, setChatUploadFailed] = useState(false);
   const [lastIngestedCorpusReport, setLastIngestedCorpusReport] =
     useState<CorpusIngestionReport | null>(null);
   const [corpusActionPending, setCorpusActionPending] = useState<string | null>(null);
@@ -1696,69 +1704,14 @@ function App() {
     setCorpusIngestPending(true);
     setCorpusIngestFailed(false);
     setCorpusIngestMessage("");
-    setCorpusUploadProgressPercent(0);
-    setCorpusUploadProgressLabel("Preparing upload...");
 
     try {
-      const formData = new FormData();
-      formData.append("name", name);
-      formData.append("persistent", String(corpusIngestPersistent));
-      formData.append("ocr_enabled", String(corpusIngestOcrEnabled));
-
-      for (const file of corpusUploadFiles) {
-        formData.append("files", file, file.name);
-      }
-
-      const data = await new Promise<IngestCorpusResponse>((resolve, reject) => {
-        const request = new XMLHttpRequest();
-
-        request.open("POST", `${API_BASE}/api/corpora/upload`);
-        request.responseType = "json";
-
-        request.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
-            setCorpusUploadProgressPercent(percent);
-            setCorpusUploadProgressLabel(
-              `Uploading ${formatBytes(event.loaded)} of ${formatBytes(event.total)}`
-            );
-          } else {
-            setCorpusUploadProgressLabel("Uploading files...");
-          }
-        };
-
-        request.onerror = () => {
-          reject(new Error("Failed to upload corpus files."));
-        };
-
-        request.onload = () => {
-          if (request.status < 200 || request.status >= 300) {
-            const responseText =
-              typeof request.responseText === "string" ? request.responseText : "";
-
-            try {
-              const parsed = JSON.parse(responseText) as ApiErrorResponse;
-              reject(new Error(parsed.error || "Failed to ingest uploaded corpus."));
-            } catch {
-              reject(new Error(responseText || "Failed to ingest uploaded corpus."));
-            }
-            return;
-          }
-
-          const response = request.response as IngestCorpusResponse | null;
-
-          if (!response) {
-            reject(new Error("Uploaded corpus response was empty."));
-            return;
-          }
-
-          resolve(response);
-        };
-
-        request.send(formData);
+      const data = await uploadCorpusFiles({
+        files: corpusUploadFiles,
+        name,
+        persistent: corpusIngestPersistent,
+        ocrEnabled: corpusIngestOcrEnabled,
       });
-      setCorpusUploadProgressPercent(100);
-      setCorpusUploadProgressLabel("Upload finished. Finalizing corpus...");
 
       setLastIngestedCorpusReport(data.report);
       setCorpusIngestMessage(
@@ -1780,12 +1733,153 @@ function App() {
     }
   }
 
-  function handleCorpusUploadSelection(files: File[]) {
-    setCorpusUploadFiles(
-      files.filter((file) =>
-        [".txt", ".md", ".pdf"].some((suffix) => file.name.toLowerCase().endsWith(suffix))
-      )
+  function filterSupportedCorpusFiles(files: File[]) {
+    return files.filter((file) =>
+      [".txt", ".md", ".pdf"].some((suffix) => file.name.toLowerCase().endsWith(suffix))
     );
+  }
+
+  function buildQuickUploadCorpusName(files: File[]) {
+    const first = files[0]?.name ?? "chat-upload";
+    const base = first.replace(/\.[^/.]+$/, "");
+    const safeBase = base
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 36);
+
+    if (files.length === 1) {
+      return `${safeBase || "chat-upload"}-upload`;
+    }
+
+    return `${safeBase || "chat-upload"}-${files.length}-files`;
+  }
+
+  async function uploadCorpusFiles({
+    files,
+    name,
+    persistent,
+    ocrEnabled,
+  }: {
+    files: File[];
+    name: string;
+    persistent: boolean;
+    ocrEnabled: boolean;
+  }) {
+    setCorpusUploadProgressPercent(0);
+    setCorpusUploadProgressLabel("Preparing upload...");
+
+    const formData = new FormData();
+    formData.append("name", name);
+    formData.append("persistent", String(persistent));
+    formData.append("ocr_enabled", String(ocrEnabled));
+
+    for (const file of files) {
+      formData.append("files", file, file.name);
+    }
+
+    const data = await new Promise<IngestCorpusResponse>((resolve, reject) => {
+      const request = new XMLHttpRequest();
+
+      request.open("POST", `${API_BASE}/api/corpora/upload`);
+      request.responseType = "json";
+
+      request.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+          setCorpusUploadProgressPercent(percent);
+          setCorpusUploadProgressLabel(
+            `Uploading ${formatBytes(event.loaded)} of ${formatBytes(event.total)}`
+          );
+        } else {
+          setCorpusUploadProgressLabel("Uploading files...");
+        }
+      };
+
+      request.onerror = () => {
+        reject(new Error("Failed to upload corpus files."));
+      };
+
+      request.onload = () => {
+        if (request.status < 200 || request.status >= 300) {
+          const responseText = typeof request.responseText === "string" ? request.responseText : "";
+
+          try {
+            const parsed = JSON.parse(responseText) as ApiErrorResponse;
+            reject(new Error(parsed.error || "Failed to ingest uploaded corpus."));
+          } catch {
+            reject(new Error(responseText || "Failed to ingest uploaded corpus."));
+          }
+          return;
+        }
+
+        const response = request.response as IngestCorpusResponse | null;
+
+        if (!response) {
+          reject(new Error("Uploaded corpus response was empty."));
+          return;
+        }
+
+        resolve(response);
+      };
+
+      request.send(formData);
+    });
+
+    setCorpusUploadProgressPercent(100);
+    setCorpusUploadProgressLabel("Upload finished. Finalizing corpus...");
+    return data;
+  }
+
+  function handleCorpusUploadSelection(files: File[]) {
+    setCorpusUploadFiles(filterSupportedCorpusFiles(files));
+  }
+
+  function openChatUploadPicker(accept: string) {
+    setChatUploadAccept(accept);
+    setChatUploadMenuOpen(false);
+    chatUploadInputRef.current?.click();
+  }
+
+  async function ingestUploadedCorpusFromChat(files: File[]) {
+    const supportedFiles = filterSupportedCorpusFiles(files);
+
+    if (supportedFiles.length === 0) {
+      setChatUploadFailed(true);
+      setChatUploadNotice("Choose at least one .txt, .md, or .pdf file to upload.");
+      return;
+    }
+
+    setCorpusUploadFiles(supportedFiles);
+    setCorpusIngestPending(true);
+    setChatUploadFailed(false);
+    setChatUploadNotice("");
+
+    try {
+      const data = await uploadCorpusFiles({
+        files: supportedFiles,
+        name: buildQuickUploadCorpusName(supportedFiles),
+        persistent: false,
+        ocrEnabled: true,
+      });
+
+      setLastIngestedCorpusReport(data.report);
+      setSelectedCorpusId(data.corpus.corpus_id);
+      setChatUploadNotice(
+        runtimeMode === "active-chat" && activeChatRuntimeActive
+          ? `Uploaded ${data.corpus.name}. It is selected for one-shot runs and for the next active chat session you start.`
+          : `Uploaded ${data.corpus.name}. It is now the selected grounding corpus for your next run.`
+      );
+      await loadCorpora();
+    } catch (error) {
+      setChatUploadFailed(true);
+      setChatUploadNotice(String(error));
+    } finally {
+      setCorpusIngestPending(false);
+      setCorpusUploadProgressPercent(null);
+      setCorpusUploadProgressLabel("");
+      setChatUploadMenuOpen(false);
+    }
   }
 
   async function openCorpusReport(corpusId: string) {
@@ -1937,6 +2031,7 @@ function App() {
       if (event.key === "Escape") {
         closeDrawers();
         setCommandMenuOpen(false);
+        setChatUploadMenuOpen(false);
       }
     }
 
@@ -1954,12 +2049,20 @@ function App() {
       ) {
         setCommandMenuOpen(false);
       }
+
+      if (
+        chatUploadMenuOpen &&
+        chatUploadMenuRef.current &&
+        !chatUploadMenuRef.current.contains(event.target as Node)
+      ) {
+        setChatUploadMenuOpen(false);
+      }
     }
 
     window.addEventListener("mousedown", closeCommandMenu);
 
     return () => window.removeEventListener("mousedown", closeCommandMenu);
-  }, [commandMenuOpen]);
+  }, [chatUploadMenuOpen, commandMenuOpen]);
 
   useEffect(() => {
     const currentSession = sessions.find((session) => session.session_id === selectedSessionId);
@@ -2641,6 +2744,63 @@ function App() {
           </div>
 
           <div className="composer">
+            <div className="popup-menu composer-attach-menu" ref={chatUploadMenuRef}>
+              <button
+                className="ghost-button popup-trigger composer-attach-button"
+                disabled={
+                  corpusIngestPending ||
+                  runStatus === "running" ||
+                  (runtimeMode === "active-chat" && activeChatRuntimeActive)
+                }
+                onClick={() => setChatUploadMenuOpen((current) => !current)}
+                title={
+                  runtimeMode === "active-chat" && activeChatRuntimeActive
+                    ? "Uploads bind to new active chat sessions, not the one already running."
+                    : "Attach files as a grounding corpus."
+                }
+              >
+                +
+              </button>
+              {chatUploadMenuOpen && (
+                <div className="popup-panel">
+                  <button onClick={() => openChatUploadPicker(".pdf,application/pdf")}>
+                    upload pdf
+                  </button>
+                  <button onClick={() => openChatUploadPicker(".md,text/markdown")}>
+                    upload markdown
+                  </button>
+                  <button onClick={() => openChatUploadPicker(".txt,text/plain")}>
+                    upload text
+                  </button>
+                  <button
+                    onClick={() =>
+                      openChatUploadPicker(
+                        ".txt,.md,.pdf,text/plain,text/markdown,application/pdf"
+                      )
+                    }
+                  >
+                    upload any supported file
+                  </button>
+                </div>
+              )}
+              <input
+                ref={chatUploadInputRef}
+                className="upload-input"
+                type="file"
+                accept={chatUploadAccept}
+                multiple
+                disabled={
+                  corpusIngestPending ||
+                  runStatus === "running" ||
+                  (runtimeMode === "active-chat" && activeChatRuntimeActive)
+                }
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  event.target.value = "";
+                  void ingestUploadedCorpusFromChat(files);
+                }}
+              />
+            </div>
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
@@ -2666,6 +2826,36 @@ function App() {
               >
                 send
               </button>
+            )}
+
+            {(selectedCorpus || chatUploadNotice || corpusIngestPending) && (
+              <div className="composer-meta">
+                {selectedCorpus && (
+                  <span className="composer-corpus-chip">
+                    corpus: {selectedCorpus.name} ·{" "}
+                    {selectedCorpus.persistent ? "persistent" : "ephemeral"}
+                  </span>
+                )}
+                {corpusIngestPending && corpusUploadProgressPercent !== null && (
+                  <div className="composer-upload-progress">
+                    <div className="upload-progress-bar">
+                      <div
+                        className="upload-progress-fill"
+                        style={{ width: `${corpusUploadProgressPercent}%` }}
+                      />
+                    </div>
+                    <span>
+                      {corpusUploadProgressPercent}% ·{" "}
+                      {corpusUploadProgressLabel || "Uploading corpus files..."}
+                    </span>
+                  </div>
+                )}
+                {chatUploadNotice && (
+                  <span className={chatUploadFailed ? "failed-note" : "muted-text"}>
+                    {chatUploadNotice}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </section>
