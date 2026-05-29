@@ -1,6 +1,8 @@
 use crate::config::SessionConfig;
 use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
+#[cfg(target_os = "windows")]
+use serde_json::Value;
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -58,6 +60,14 @@ pub struct RuntimePostShutdownObservation {
     pub observation_notes: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct RuntimeGpuObservation {
+    memory_bytes: Option<u64>,
+    source: Option<String>,
+    pid_observed: Option<bool>,
+    note: Option<String>,
+}
+
 const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
 const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
 
@@ -103,11 +113,11 @@ impl ManagedRuntime {
         let pid = self.pid();
         let mut snapshot = observe_process_memory(pid);
 
-        let (gpu_memory_bytes, gpu_memory_source, gpu_note) = observe_gpu_memory(pid);
-        snapshot.gpu_memory_bytes = gpu_memory_bytes;
-        snapshot.gpu_memory_source = gpu_memory_source;
+        let gpu = observe_gpu_memory(pid);
+        snapshot.gpu_memory_bytes = gpu.memory_bytes;
+        snapshot.gpu_memory_source = gpu.source;
 
-        if let Some(note) = gpu_note {
+        if let Some(note) = gpu.note {
             snapshot.observation_notes.push(note);
         }
 
@@ -203,10 +213,8 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
         None
     };
 
-    let (gpu_memory_bytes_after_shutdown, gpu_check_source, gpu_note) = observe_gpu_memory(pid);
-    let gpu_entry_present_after_shutdown = gpu_check_source
-        .as_ref()
-        .map(|_| gpu_memory_bytes_after_shutdown.is_some());
+    let gpu = observe_gpu_memory(pid);
+    let gpu_entry_present_after_shutdown = gpu.pid_observed;
 
     let mut observation_notes = Vec::new();
 
@@ -214,7 +222,7 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
         observation_notes.push(note);
     }
 
-    if let Some(note) = gpu_note {
+    if let Some(note) = gpu.note {
         observation_notes.push(note);
     }
 
@@ -242,8 +250,8 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
             .unwrap_or_default(),
         verification_window_ms: POST_SHUTDOWN_VERIFICATION_WINDOW_MS,
         gpu_entry_present_after_shutdown,
-        gpu_memory_bytes_after_shutdown,
-        gpu_check_source,
+        gpu_memory_bytes_after_shutdown: gpu.memory_bytes,
+        gpu_check_source: gpu.source,
         observation_notes,
     }
 }
@@ -306,7 +314,131 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(target_os = "windows")]
+fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
+    let pid = _pid;
+    let script = format!(
+        concat!(
+            "$proc = Get-Process -Id {pid} -ErrorAction SilentlyContinue; ",
+            "if (-not $proc) {{ exit 3 }}; ",
+            "$cim = Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction SilentlyContinue; ",
+            "$pagefileBytes = $null; ",
+            "if ($cim -and $cim.PageFileUsage -ne $null) {{ $pagefileBytes = [uint64]$cim.PageFileUsage * 1024 }}; ",
+            "[pscustomobject]@{{ ",
+            "working_set_bytes = [uint64]$proc.WorkingSet64; ",
+            "virtual_bytes = [uint64]$proc.VirtualMemorySize64; ",
+            "private_bytes = [uint64]$proc.PrivateMemorySize64; ",
+            "paged_memory_bytes = [uint64]$proc.PagedMemorySize64; ",
+            "nonpaged_system_bytes = [uint64]$proc.NonpagedSystemMemorySize64; ",
+            "pagefile_bytes = $pagefileBytes ",
+            "}} | ConvertTo-Json -Compress"
+        ),
+        pid = pid
+    );
+
+    match run_windows_powershell(&script) {
+        Ok(output) if output.status.success() => {
+            match serde_json::from_slice::<Value>(&output.stdout) {
+                Ok(value) => {
+                    let resident_bytes = value.get("working_set_bytes").and_then(Value::as_u64);
+                    let virtual_bytes = value.get("virtual_bytes").and_then(Value::as_u64);
+                    let private_bytes = value.get("private_bytes").and_then(Value::as_u64);
+                    let paged_memory_bytes =
+                        value.get("paged_memory_bytes").and_then(Value::as_u64);
+                    let nonpaged_system_bytes =
+                        value.get("nonpaged_system_bytes").and_then(Value::as_u64);
+                    let pagefile_bytes = value.get("pagefile_bytes").and_then(Value::as_u64);
+
+                    let mut observation_notes = Vec::new();
+
+                    if let Some(value) = private_bytes {
+                        observation_notes.push(format!(
+                            "Windows private bytes observed via Get-Process: {value} bytes."
+                        ));
+                    }
+
+                    if let Some(value) = pagefile_bytes {
+                        observation_notes.push(format!(
+                        "Windows pagefile-backed usage observed via Win32_Process: {value} bytes."
+                    ));
+                    }
+
+                    if let Some(value) = paged_memory_bytes {
+                        observation_notes.push(format!(
+                            "Windows paged memory observed via Get-Process: {value} bytes."
+                        ));
+                    }
+
+                    if let Some(value) = nonpaged_system_bytes {
+                        observation_notes.push(format!(
+                        "Windows nonpaged system memory observed via Get-Process: {value} bytes."
+                    ));
+                    }
+
+                    RuntimeUsageSnapshot {
+                        resident_bytes,
+                        virtual_bytes,
+                        process_memory_source: Some(
+                            "PowerShell Get-Process + CIM Win32_Process".to_string(),
+                        ),
+                        physical_footprint_bytes: None,
+                        physical_footprint_peak_bytes: None,
+                        vmmap_summary_source: None,
+                        resident_regions: vec![],
+                        gpu_memory_bytes: None,
+                        gpu_memory_source: None,
+                        observation_notes,
+                    }
+                }
+                Err(error) => RuntimeUsageSnapshot {
+                    resident_bytes: None,
+                    virtual_bytes: None,
+                    process_memory_source: None,
+                    physical_footprint_bytes: None,
+                    physical_footprint_peak_bytes: None,
+                    vmmap_summary_source: None,
+                    resident_regions: vec![],
+                    gpu_memory_bytes: None,
+                    gpu_memory_source: None,
+                    observation_notes: vec![format!(
+                        "Windows process memory observation returned unparsable JSON: {error}."
+                    )],
+                },
+            }
+        }
+        Ok(output) => RuntimeUsageSnapshot {
+            resident_bytes: None,
+            virtual_bytes: None,
+            process_memory_source: None,
+            physical_footprint_bytes: None,
+            physical_footprint_peak_bytes: None,
+            vmmap_summary_source: None,
+            resident_regions: vec![],
+            gpu_memory_bytes: None,
+            gpu_memory_source: None,
+            observation_notes: vec![format!(
+                "Windows process memory observation via PowerShell failed with status {}.",
+                output.status
+            )],
+        },
+        Err(error) => RuntimeUsageSnapshot {
+            resident_bytes: None,
+            virtual_bytes: None,
+            process_memory_source: None,
+            physical_footprint_bytes: None,
+            physical_footprint_peak_bytes: None,
+            vmmap_summary_source: None,
+            resident_regions: vec![],
+            gpu_memory_bytes: None,
+            gpu_memory_source: None,
+            observation_notes: vec![format!(
+                "Windows process memory observation via PowerShell was unavailable: {error}."
+            )],
+        },
+    }
+}
+
+#[cfg(not(any(unix, target_os = "windows")))]
 fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
     RuntimeUsageSnapshot {
         resident_bytes: None,
@@ -324,7 +456,43 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
     }
 }
 
-fn observe_gpu_memory(pid: u32) -> (Option<u64>, Option<String>, Option<String>) {
+fn observe_gpu_memory(pid: u32) -> RuntimeGpuObservation {
+    let mut prior_notes = Vec::new();
+
+    if let Some(observation) = observe_gpu_memory_compute_apps(pid) {
+        if observation.pid_observed == Some(true) {
+            return observation;
+        }
+
+        if let Some(note) = observation.note {
+            prior_notes.push(note);
+        }
+    }
+
+    if let Some(mut observation) = observe_gpu_memory_pmon(pid) {
+        if !prior_notes.is_empty() {
+            observation.note = Some(match observation.note.take() {
+                Some(note) => format!("{} {}", prior_notes.join(" "), note),
+                None => prior_notes.join(" "),
+            });
+        }
+
+        return observation;
+    }
+
+    RuntimeGpuObservation {
+        memory_bytes: None,
+        source: None,
+        pid_observed: None,
+        note: Some(if prior_notes.is_empty() {
+            "GPU memory observation via nvidia-smi was unavailable or inconclusive.".to_string()
+        } else {
+            prior_notes.join(" ")
+        }),
+    }
+}
+
+fn observe_gpu_memory_compute_apps(pid: u32) -> Option<RuntimeGpuObservation> {
     let output = Command::new("nvidia-smi")
         .args([
             "--query-compute-apps=pid,used_gpu_memory",
@@ -342,39 +510,111 @@ fn observe_gpu_memory(pid: u32) -> (Option<u64>, Option<String>, Option<String>)
                 let memory_mb = parts.next().and_then(|value| value.parse::<u64>().ok());
 
                 if observed_pid == Some(pid) {
-                    return (
-                        memory_mb.map(|value| value * 1024 * 1024),
-                        Some("nvidia-smi compute-apps".to_string()),
-                        None,
-                    );
+                    return Some(RuntimeGpuObservation {
+                        memory_bytes: memory_mb.map(|value| value * 1024 * 1024),
+                        source: Some("nvidia-smi compute-apps".to_string()),
+                        pid_observed: Some(true),
+                        note: None,
+                    });
                 }
             }
 
-            (
-                None,
-                Some("nvidia-smi compute-apps".to_string()),
-                Some(
-                    "No matching nvidia-smi compute-apps entry was found for the llama-server PID at observation time."
-                        .to_string(),
-                ),
-            )
+            None
         }
-        Ok(output) => (
-            None,
-            None,
-            Some(format!(
-                "GPU memory observation via nvidia-smi failed with status {}.",
+        Ok(output) => Some(RuntimeGpuObservation {
+            memory_bytes: None,
+            source: None,
+            pid_observed: None,
+            note: Some(format!(
+                "GPU memory observation via nvidia-smi compute-apps failed with status {}.",
                 output.status
             )),
-        ),
-        Err(error) => (
-            None,
-            None,
-            Some(format!(
-                "GPU memory observation via nvidia-smi was unavailable: {error}."
+        }),
+        Err(error) => Some(RuntimeGpuObservation {
+            memory_bytes: None,
+            source: None,
+            pid_observed: None,
+            note: Some(format!(
+                "GPU memory observation via nvidia-smi compute-apps was unavailable: {error}."
             )),
-        ),
+        }),
     }
+}
+
+fn observe_gpu_memory_pmon(pid: u32) -> Option<RuntimeGpuObservation> {
+    let output = Command::new("nvidia-smi")
+        .args(["pmon", "-c", "1"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+
+            for line in stdout.lines() {
+                let trimmed = line.trim();
+
+                if trimmed.is_empty() || trimmed.starts_with('#') {
+                    continue;
+                }
+
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+
+                if parts.len() < 2 {
+                    continue;
+                }
+
+                let observed_pid = parts.get(1).and_then(|value| value.parse::<u32>().ok());
+
+                if observed_pid == Some(pid) {
+                    return Some(RuntimeGpuObservation {
+                        memory_bytes: None,
+                        source: Some("nvidia-smi pmon".to_string()),
+                        pid_observed: Some(true),
+                        note: Some(
+                            "llama-server PID was observed in nvidia-smi pmon, but per-process GPU memory bytes were unavailable from the current NVIDIA tooling path."
+                                .to_string(),
+                        ),
+                    });
+                }
+            }
+
+            Some(RuntimeGpuObservation {
+                memory_bytes: None,
+                source: Some("nvidia-smi compute-apps + pmon".to_string()),
+                pid_observed: Some(false),
+                note: Some(no_matching_gpu_pid_note()),
+            })
+        }
+        Ok(output) => Some(RuntimeGpuObservation {
+            memory_bytes: None,
+            source: None,
+            pid_observed: None,
+            note: Some(format!(
+                "GPU process observation via nvidia-smi pmon failed with status {}.",
+                output.status
+            )),
+        }),
+        Err(error) => Some(RuntimeGpuObservation {
+            memory_bytes: None,
+            source: None,
+            pid_observed: None,
+            note: Some(format!(
+                "GPU process observation via nvidia-smi pmon was unavailable: {error}."
+            )),
+        }),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn no_matching_gpu_pid_note() -> String {
+    "No matching NVIDIA GPU process entry was found for the llama-server PID. On Windows WDDM systems, per-process VRAM visibility can be incomplete even when GPU offload was requested."
+        .to_string()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn no_matching_gpu_pid_note() -> String {
+    "No matching NVIDIA GPU process entry was found for the llama-server PID at observation time."
+        .to_string()
 }
 
 fn observe_process_presence(pid: u32) -> (Option<bool>, Option<String>, Option<String>) {
@@ -411,7 +651,43 @@ fn observe_process_presence(pid: u32) -> (Option<bool>, Option<String>, Option<S
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(target_os = "windows")]
+    {
+        let script = format!(
+            "if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ 'present' }} else {{ 'absent' }}",
+            pid = pid
+        );
+
+        match run_windows_powershell(&script) {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let present = stdout.trim().eq_ignore_ascii_case("present");
+
+                (
+                    Some(present),
+                    Some("PowerShell Get-Process".to_string()),
+                    None,
+                )
+            }
+            Ok(output) => (
+                None,
+                None,
+                Some(format!(
+                    "Post-shutdown process presence check via PowerShell failed with status {}.",
+                    output.status
+                )),
+            ),
+            Err(error) => (
+                None,
+                None,
+                Some(format!(
+                    "Post-shutdown process presence check via PowerShell was unavailable: {error}."
+                )),
+            ),
+        }
+    }
+
+    #[cfg(not(any(unix, target_os = "windows")))]
     {
         (
             None,
@@ -612,6 +888,13 @@ fn parse_vmmap_size(value: &str) -> Option<u64> {
     };
 
     Some((number * multiplier) as u64)
+}
+
+#[cfg(target_os = "windows")]
+fn run_windows_powershell(script: &str) -> std::io::Result<std::process::Output> {
+    Command::new("powershell")
+        .args(["-NoProfile", "-Command", script])
+        .output()
 }
 
 fn read_child_stderr(child: &mut Child) -> String {
