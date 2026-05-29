@@ -7,21 +7,16 @@ import { InspectorPanel } from "./components/InspectorPanel";
 import { SessionConfigDrawer } from "./components/SessionConfigDrawer";
 import { SessionRegistryDrawer } from "./components/SessionRegistryDrawer";
 import { useCorpusManager } from "./hooks/useCorpusManager";
+import { useModelRegistry } from "./hooks/useModelRegistry";
 import { useSessionRegistry } from "./hooks/useSessionRegistry";
 import { useSessionRunner } from "./hooks/useSessionRunner";
 import type {
   ChatTemplateOption,
   InspectorView,
-  ModelRegistrySnapshot,
-  RegisteredModel,
   RuntimeMode,
   Theme,
 } from "./appTypes";
-import { buildFilteredModels } from "./appSelectors";
-import {
-  parsePositiveInteger,
-  readApiError,
-} from "./appUtils";
+import { parsePositiveInteger } from "./appUtils";
 import "./App.css";
 
 const API_BASE = "http://127.0.0.1:3333";
@@ -53,17 +48,27 @@ function App() {
   const [chatContextTurnLimit, setChatContextTurnLimit] = useState("12");
   const [useModelTemplateDefault, setUseModelTemplateDefault] = useState(true);
   const [useModelContextDefaults, setUseModelContextDefaults] = useState(true);
-  const [models, setModels] = useState<RegisteredModel[]>([]);
-  const [runtimeValidation, setRuntimeValidation] =
-    useState<ModelRegistrySnapshot["runtime"] | null>(null);
-  const [selectedModelId, setSelectedModelId] = useState("");
-  const [inspectedModelId, setInspectedModelId] = useState("");
-  const [modelsLoadedAt, setModelsLoadedAt] = useState("never");
-  const [modelLoadError, setModelLoadError] = useState("");
-  const [modelQuery, setModelQuery] = useState("");
   const [chatUploadAccept, setChatUploadAccept] = useState(
     ".txt,.md,.pdf,text/plain,text/markdown,application/pdf"
   );
+  const {
+    models,
+    runtimeValidation,
+    selectedModelId,
+    setSelectedModelId,
+    inspectedModelId,
+    setInspectedModelId,
+    modelsLoadedAt,
+    modelLoadError,
+    modelQuery,
+    setModelQuery,
+    selectedModel,
+    filteredModels,
+    inspectedModel,
+    loadModels,
+  } = useModelRegistry({
+    apiBase: API_BASE,
+  });
   const {
     corpora,
     selectedCorpusId,
@@ -126,54 +131,6 @@ function App() {
       setServerStatus("offline");
     } finally {
       setHealthCheckedAt(new Date().toLocaleTimeString());
-    }
-  }
-
-  async function loadModels() {
-    try {
-      const response = await fetch(`${API_BASE}/api/models`);
-
-      if (!response.ok) {
-        const error = await readApiError(response, "Failed to load model registry.");
-        throw new Error(error);
-      }
-
-      const data = (await response.json()) as ModelRegistrySnapshot;
-      const nextModels = data.models ?? [];
-
-      setModels(nextModels);
-      setRuntimeValidation(data.runtime ?? null);
-      setModelLoadError("");
-      setSelectedModelId((current) => {
-        if (current && nextModels.some((model) => model.id === current)) {
-          return current;
-        }
-
-        if (nextModels.some((model) => model.id === data.default_model_id)) {
-          return data.default_model_id;
-        }
-
-        return nextModels[0]?.id ?? "";
-      });
-      setInspectedModelId((current) => {
-        if (current && nextModels.some((model) => model.id === current)) {
-          return current;
-        }
-
-        if (nextModels.some((model) => model.id === data.default_model_id)) {
-          return data.default_model_id;
-        }
-
-        return nextModels[0]?.id ?? "";
-      });
-    } catch (error) {
-      setModels([]);
-      setRuntimeValidation(null);
-      setModelLoadError(String(error));
-      setSelectedModelId("");
-      setInspectedModelId("");
-    } finally {
-      setModelsLoadedAt(new Date().toLocaleTimeString());
     }
   }
 
@@ -333,15 +290,6 @@ function App() {
     return () => window.removeEventListener("mousedown", closeCommandMenu);
   }, [chatUploadMenuOpen, commandMenuOpen]);
 
-  const selectedModel =
-    models.find((model) => model.id === selectedModelId) ??
-    models.find((model) => model.default_selected) ??
-    null;
-  const filteredModels = buildFilteredModels(models, modelQuery);
-  const inspectedModel =
-    filteredModels.find((model) => model.id === inspectedModelId) ??
-    models.find((model) => model.id === inspectedModelId) ??
-    selectedModel;
   const effectiveTemplate = useModelTemplateDefault
     ? selectedModel?.chat_template || "auto"
     : chatTemplate;
