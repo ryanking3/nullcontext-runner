@@ -7,12 +7,12 @@ import { InspectorPanel } from "./components/InspectorPanel";
 import { SessionConfigDrawer } from "./components/SessionConfigDrawer";
 import { SessionRegistryDrawer } from "./components/SessionRegistryDrawer";
 import { useAppShell } from "./hooks/useAppShell";
+import { useAppViewModel } from "./hooks/useAppViewModel";
 import { useCorpusManager } from "./hooks/useCorpusManager";
 import { useModelRegistry } from "./hooks/useModelRegistry";
 import { useSessionRegistry } from "./hooks/useSessionRegistry";
 import { useSessionRunner } from "./hooks/useSessionRunner";
 import type { ChatTemplateOption, InspectorView, RuntimeMode } from "./appTypes";
-import { parsePositiveInteger } from "./appUtils";
 import "./App.css";
 
 const API_BASE = "http://127.0.0.1:3333";
@@ -196,16 +196,6 @@ function App() {
       setChatUploadMenuOpen(false);
     }
   }
-
-  const effectiveTemplate = useModelTemplateDefault
-    ? selectedModel?.chat_template || "auto"
-    : chatTemplate;
-  const effectiveContextBudget = useModelContextDefaults
-    ? selectedModel?.chat_context_token_budget ?? null
-    : parsePositiveInteger(chatContextTokenBudget);
-  const effectiveContextTurnLimit = useModelContextDefaults
-    ? selectedModel?.chat_context_turn_limit ?? null
-    : parsePositiveInteger(chatContextTurnLimit);
   const {
     runStatus,
     messages,
@@ -253,26 +243,64 @@ function App() {
     onCloseDrawers: closeDrawers,
     onCloseCommandMenu: () => setCommandMenuOpen(false),
   });
-  const inspectorTabs: Array<{
-    id: InspectorView;
-    label: string;
-    count?: number;
-    disabled?: boolean;
-  }> = [
-    { id: "audit", label: "audit", count: auditOperations.length },
-    { id: "runtime", label: "runtime" },
-    { id: "report", label: "report" },
-    { id: "stderr", label: "stderr", disabled: !stderr },
-  ];
-  const activeRuntimeModelName =
-    activeChatRuntimeActive && activeChatModelName
-      ? activeChatModelName
-      : selectedModel?.name || "unconfigured";
-  const activeRuntimeModelId =
-    activeChatRuntimeActive && activeChatModelId
-      ? activeChatModelId
-      : selectedModel?.id || "";
-  const currentReportRaw = selectedReport || privacyReport;
+  const {
+    effectiveTemplate,
+    effectiveContextBudget,
+    effectiveContextTurnLimit,
+    inspectorTabs,
+    activeRuntimeModelName,
+    activeRuntimeModelId,
+    currentReportRaw,
+  } = useAppViewModel({
+    selectedModel,
+    useModelTemplateDefault,
+    chatTemplate,
+    useModelContextDefaults,
+    chatContextTokenBudget,
+    chatContextTurnLimit,
+    auditOperationsCount: auditOperations.length,
+    stderr,
+    activeChatRuntimeActive,
+    activeChatModelName,
+    activeChatModelId,
+    selectedReport,
+    privacyReport,
+  });
+
+  function handleUseModelForNextSession(modelId: string) {
+    setSelectedModelId(modelId);
+    closeDrawers();
+  }
+
+  function handleSelectModelAndOpenConfig(modelId: string) {
+    setSelectedModelId(modelId);
+    openConfigDrawer();
+  }
+
+  function handleUseCorpusForOneShot(corpusId: string) {
+    setSelectedCorpusId(corpusId);
+    openConfigDrawer();
+  }
+
+  function handleClearRegistryFilters() {
+    setRegistryQuery("");
+    setRegistryModeFilter("all");
+    setRegistryOutcomeFilter("all");
+    setRegistrySortOrder("newest");
+  }
+
+  function handleOpenLatestReport() {
+    if (!latestSession) {
+      return;
+    }
+
+    setSelectedSessionId(latestSession.session_id);
+    openSessionReport(latestSession.session_id);
+  }
+
+  function handleToggleRawReport() {
+    setShowRawReport((current) => !current);
+  }
 
   return (
     <main
@@ -382,7 +410,7 @@ function App() {
         runtimeLogs={runtimeLogs}
         currentReportRaw={currentReportRaw}
         showRawReport={showRawReport}
-        onToggleRaw={() => setShowRawReport((current) => !current)}
+        onToggleRaw={handleToggleRawReport}
         stderr={stderr}
       />
 
@@ -409,14 +437,8 @@ function App() {
         onInspectModel={setInspectedModelId}
         selectedModelId={selectedModelId}
         inspectedModel={inspectedModel}
-        onUseForNextSession={(modelId) => {
-          setSelectedModelId(modelId);
-          closeDrawers();
-        }}
-        onSelectAndOpenConfig={(modelId) => {
-          setSelectedModelId(modelId);
-          openConfigDrawer();
-        }}
+        onUseForNextSession={handleUseModelForNextSession}
+        onSelectAndOpenConfig={handleSelectModelAndOpenConfig}
       />
       <SessionConfigDrawer
         open={configDrawerOpen}
@@ -475,10 +497,7 @@ function App() {
         onCorpusRetentionMinutesDraftChange={setCorpusRetentionMinutesDraft}
         corpusActionPending={corpusActionPending}
         onSaveCorpusRetentionPolicy={saveCorpusRetentionPolicy}
-        onUseCorpusForOneShot={(corpusId) => {
-          setSelectedCorpusId(corpusId);
-          openConfigDrawer();
-        }}
+        onUseCorpusForOneShot={handleUseCorpusForOneShot}
         onOpenCorpusReport={openCorpusReport}
         onRunCorpusLifecycleAction={runCorpusLifecycleAction}
         selectedCorpusReport={selectedCorpusReport}
@@ -522,20 +541,8 @@ function App() {
         filteredSessions={filteredSessions}
         sessions={sessions}
         latestSession={latestSession}
-        onClearFilters={() => {
-          setRegistryQuery("");
-          setRegistryModeFilter("all");
-          setRegistryOutcomeFilter("all");
-          setRegistrySortOrder("newest");
-        }}
-        onOpenLatestReport={() => {
-          if (!latestSession) {
-            return;
-          }
-
-          setSelectedSessionId(latestSession.session_id);
-          openSessionReport(latestSession.session_id);
-        }}
+        onClearFilters={handleClearRegistryFilters}
+        onOpenLatestReport={handleOpenLatestReport}
         selectedSessionId={selectedSessionId}
         onSelectSession={setSelectedSessionId}
         selectedSession={selectedSession}
