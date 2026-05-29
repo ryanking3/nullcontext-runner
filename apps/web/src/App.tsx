@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { AppSidebar } from "./components/AppSidebar";
 import { CorpusDrawer } from "./components/CorpusDrawer";
 import { ChatWorkspace } from "./components/ChatWorkspace";
@@ -6,51 +6,29 @@ import { ModelRegistryDrawer } from "./components/ModelRegistryDrawer";
 import { InspectorPanel } from "./components/InspectorPanel";
 import { SessionConfigDrawer } from "./components/SessionConfigDrawer";
 import { SessionRegistryDrawer } from "./components/SessionRegistryDrawer";
+import { useAppShell } from "./hooks/useAppShell";
 import { useCorpusManager } from "./hooks/useCorpusManager";
 import { useModelRegistry } from "./hooks/useModelRegistry";
 import { useSessionRegistry } from "./hooks/useSessionRegistry";
 import { useSessionRunner } from "./hooks/useSessionRunner";
-import type {
-  ChatTemplateOption,
-  InspectorView,
-  RuntimeMode,
-  Theme,
-} from "./appTypes";
+import type { ChatTemplateOption, InspectorView, RuntimeMode } from "./appTypes";
 import { parsePositiveInteger } from "./appUtils";
 import "./App.css";
 
 const API_BASE = "http://127.0.0.1:3333";
 
 function App() {
-  const commandMenuRef = useRef<HTMLDivElement | null>(null);
-  const chatUploadMenuRef = useRef<HTMLDivElement | null>(null);
-  const chatUploadInputRef = useRef<HTMLInputElement | null>(null);
-
-  const [theme, setTheme] = useState<Theme>("dark");
-  const [serverStatus, setServerStatus] = useState<"checking" | "online" | "offline">("checking");
-  const [healthCheckedAt, setHealthCheckedAt] = useState<string>("never");
-
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>("one-shot");
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState("secure");
   const [persistent, setPersistent] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
-  const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
-  const [registryDrawerOpen, setRegistryDrawerOpen] = useState(false);
-  const [corpusDrawerOpen, setCorpusDrawerOpen] = useState(false);
   const [inspectorView, setInspectorView] = useState<InspectorView>("audit");
-  const [commandMenuOpen, setCommandMenuOpen] = useState(false);
-  const [chatUploadMenuOpen, setChatUploadMenuOpen] = useState(false);
   const [chatTemplate, setChatTemplate] = useState<ChatTemplateOption>("auto");
   const [chatContextTokenBudget, setChatContextTokenBudget] = useState("2048");
   const [chatContextTurnLimit, setChatContextTurnLimit] = useState("12");
   const [useModelTemplateDefault, setUseModelTemplateDefault] = useState(true);
   const [useModelContextDefaults, setUseModelContextDefaults] = useState(true);
-  const [chatUploadAccept, setChatUploadAccept] = useState(
-    ".txt,.md,.pdf,text/plain,text/markdown,application/pdf"
-  );
   const {
     models,
     runtimeValidation,
@@ -121,45 +99,6 @@ function App() {
     apiBase: API_BASE,
   });
 
-  async function checkHealth() {
-    setServerStatus("checking");
-
-    try {
-      const response = await fetch(`${API_BASE}/api/health`);
-      setServerStatus(response.ok ? "online" : "offline");
-    } catch {
-      setServerStatus("offline");
-    } finally {
-      setHealthCheckedAt(new Date().toLocaleTimeString());
-    }
-  }
-
-  function closeDrawers() {
-    setConfigDrawerOpen(false);
-    setModelDrawerOpen(false);
-    setRegistryDrawerOpen(false);
-    setCorpusDrawerOpen(false);
-  }
-
-  function openConfigDrawer() {
-    setModelDrawerOpen(false);
-    setRegistryDrawerOpen(false);
-    setConfigDrawerOpen(true);
-    setCommandMenuOpen(false);
-  }
-
-  function openModelDrawer() {
-    setConfigDrawerOpen(false);
-    setRegistryDrawerOpen(false);
-    setCorpusDrawerOpen(false);
-    setModelDrawerOpen(true);
-    setCommandMenuOpen(false);
-
-    if (!inspectedModelId && models.length > 0) {
-      setInspectedModelId(selectedModelId || models[0].id);
-    }
-  }
-
   const {
     sessions,
     registryLoadedAt,
@@ -199,36 +138,53 @@ function App() {
       setInspectorOpen(true);
     },
   });
-
-  function openRegistryDrawer() {
-    setConfigDrawerOpen(false);
-    setModelDrawerOpen(false);
-    setCorpusDrawerOpen(false);
-    setRegistryDrawerOpen(true);
-    setCommandMenuOpen(false);
-
-    if (!selectedSessionId && sessions.length > 0) {
-      setSelectedSessionId(sessions[0].session_id);
-    }
-  }
-
-  function openCorpusDrawer() {
-    setConfigDrawerOpen(false);
-    setModelDrawerOpen(false);
-    setRegistryDrawerOpen(false);
-    setCorpusDrawerOpen(true);
-    setCommandMenuOpen(false);
-
-    if (!selectedCorpusId && corpora.length > 0) {
-      setSelectedCorpusId(corpora[0].corpus_id);
-    }
-  }
-
-  function openChatUploadPicker(accept: string) {
-    setChatUploadAccept(accept);
-    setChatUploadMenuOpen(false);
-    chatUploadInputRef.current?.click();
-  }
+  const {
+    commandMenuRef,
+    chatUploadMenuRef,
+    chatUploadInputRef,
+    theme,
+    setTheme,
+    serverStatus,
+    healthCheckedAt,
+    sidebarCollapsed,
+    setSidebarCollapsed,
+    configDrawerOpen,
+    modelDrawerOpen,
+    registryDrawerOpen,
+    corpusDrawerOpen,
+    commandMenuOpen,
+    setCommandMenuOpen,
+    chatUploadMenuOpen,
+    setChatUploadMenuOpen,
+    chatUploadAccept,
+    checkHealth,
+    closeDrawers,
+    openConfigDrawer,
+    openModelDrawer,
+    openRegistryDrawer,
+    openCorpusDrawer,
+    openChatUploadPicker,
+  } = useAppShell({
+    apiBase: API_BASE,
+    onLoadSessions: loadSessions,
+    onLoadModels: loadModels,
+    onLoadCorpora: loadCorpora,
+    onOpenModelDrawerSelectDefault: () => {
+      if (!inspectedModelId && models.length > 0) {
+        setInspectedModelId(selectedModelId || models[0].id);
+      }
+    },
+    onOpenRegistryDrawerSelectDefault: () => {
+      if (!selectedSessionId && sessions.length > 0) {
+        setSelectedSessionId(sessions[0].session_id);
+      }
+    },
+    onOpenCorpusDrawerSelectDefault: () => {
+      if (!selectedCorpusId && corpora.length > 0) {
+        setSelectedCorpusId(corpora[0].corpus_id);
+      }
+    },
+  });
 
   async function ingestUploadedCorpusFromChat(files: File[]) {
     try {
@@ -240,55 +196,6 @@ function App() {
       setChatUploadMenuOpen(false);
     }
   }
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
-
-  useEffect(() => {
-    checkHealth();
-    loadSessions();
-    loadModels();
-    loadCorpora();
-  }, []);
-
-  useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        closeDrawers();
-        setCommandMenuOpen(false);
-        setChatUploadMenuOpen(false);
-      }
-    }
-
-    window.addEventListener("keydown", closeOnEscape);
-
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, []);
-
-  useEffect(() => {
-    function closeCommandMenu(event: MouseEvent) {
-      if (
-        commandMenuOpen &&
-        commandMenuRef.current &&
-        !commandMenuRef.current.contains(event.target as Node)
-      ) {
-        setCommandMenuOpen(false);
-      }
-
-      if (
-        chatUploadMenuOpen &&
-        chatUploadMenuRef.current &&
-        !chatUploadMenuRef.current.contains(event.target as Node)
-      ) {
-        setChatUploadMenuOpen(false);
-      }
-    }
-
-    window.addEventListener("mousedown", closeCommandMenu);
-
-    return () => window.removeEventListener("mousedown", closeCommandMenu);
-  }, [chatUploadMenuOpen, commandMenuOpen]);
 
   const effectiveTemplate = useModelTemplateDefault
     ? selectedModel?.chat_template || "auto"
@@ -504,7 +411,7 @@ function App() {
         inspectedModel={inspectedModel}
         onUseForNextSession={(modelId) => {
           setSelectedModelId(modelId);
-          setModelDrawerOpen(false);
+          closeDrawers();
         }}
         onSelectAndOpenConfig={(modelId) => {
           setSelectedModelId(modelId);
