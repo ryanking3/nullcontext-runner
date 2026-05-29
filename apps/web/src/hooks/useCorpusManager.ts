@@ -6,20 +6,17 @@ import type {
   CorpusLifecycleActionResponse,
   CorpusRegistrySnapshot,
   IngestCorpusResponse,
-  RuntimeMode,
 } from "../appTypes";
 import { buildFilteredCorpora } from "../appSelectors";
-import { formatBytes, minutesUntil, parseCorpusReport, parsePositiveInteger, readApiError } from "../appUtils";
+import {
+  formatBytes,
+  minutesUntil,
+  parseCorpusReport,
+  parsePositiveInteger,
+  readApiError,
+} from "../appUtils";
 
-export function useCorpusManager({
-  apiBase,
-  runtimeMode,
-  activeChatRuntimeActive,
-}: {
-  apiBase: string;
-  runtimeMode: RuntimeMode;
-  activeChatRuntimeActive: boolean;
-}) {
+export function useCorpusManager({ apiBase }: { apiBase: string }) {
   const [corpora, setCorpora] = useState<CorpusIndexEntry[]>([]);
   const [selectedCorpusId, setSelectedCorpusId] = useState("");
   const [corporaLoadedAt, setCorporaLoadedAt] = useState("never");
@@ -292,7 +289,10 @@ export function useCorpusManager({
     setCorpusUploadFiles(filterSupportedCorpusFiles(files));
   }
 
-  async function ingestUploadedCorpusFromChat(files: File[]) {
+  async function ingestUploadedCorpusFromChat(
+    files: File[],
+    options: { runtimeMode: "one-shot" | "active-chat"; activeChatRuntimeActive: boolean }
+  ) {
     const supportedFiles = filterSupportedCorpusFiles(files);
 
     if (supportedFiles.length === 0) {
@@ -317,7 +317,7 @@ export function useCorpusManager({
       setLastIngestedCorpusReport(data.report);
       setSelectedCorpusId(data.corpus.corpus_id);
       setChatUploadNotice(
-        runtimeMode === "active-chat" && activeChatRuntimeActive
+        options.runtimeMode === "active-chat" && options.activeChatRuntimeActive
           ? `Uploaded ${data.corpus.name}. It is selected for one-shot runs and for the next active chat session you start.`
           : `Uploaded ${data.corpus.name}. It is now the selected grounding corpus for your next run.`
       );

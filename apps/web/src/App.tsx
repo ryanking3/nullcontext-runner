@@ -7,13 +7,8 @@ import { InspectorPanel } from "./components/InspectorPanel";
 import { SessionConfigDrawer } from "./components/SessionConfigDrawer";
 import { SessionRegistryDrawer } from "./components/SessionRegistryDrawer";
 import { useCorpusManager } from "./hooks/useCorpusManager";
+import { useSessionRunner } from "./hooks/useSessionRunner";
 import type {
-  AuditOperation,
-  ChatCancelResponse,
-  ChatEndResponse,
-  ChatMessage,
-  ChatStartResponse,
-  ChatStatusResponse,
   ChatTemplateOption,
   InspectorView,
   ModelRegistrySnapshot,
@@ -21,12 +16,10 @@ import type {
   RegistryModeFilter,
   RegistryOutcomeFilter,
   RegistrySortOrder,
-  RunStatus,
   RuntimeMode,
   SessionIndexEntry,
   SessionLifecycleActionResponse,
   SessionRegistry,
-  StreamPayload,
   Theme,
 } from "./appTypes";
 import {
@@ -35,10 +28,8 @@ import {
   buildLatestSession,
 } from "./appSelectors";
 import {
-  formatActiveChatApiError,
   minutesUntil,
   parsePositiveInteger,
-  parseSseBlock,
   readApiError,
 } from "./appUtils";
 import "./App.css";
@@ -46,7 +37,6 @@ import "./App.css";
 const API_BASE = "http://127.0.0.1:3333";
 
 function App() {
-  const activeAbortController = useRef<AbortController | null>(null);
   const commandMenuRef = useRef<HTMLDivElement | null>(null);
   const chatUploadMenuRef = useRef<HTMLDivElement | null>(null);
   const chatUploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -60,7 +50,6 @@ function App() {
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState("secure");
   const [persistent, setPersistent] = useState(false);
-  const [runStatus, setRunStatus] = useState<RunStatus>("idle");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
@@ -85,28 +74,6 @@ function App() {
   const [modelQuery, setModelQuery] = useState("");
   const [chatUploadAccept, setChatUploadAccept] = useState(
     ".txt,.md,.pdf,text/plain,text/markdown,application/pdf"
-  );
-
-  const [activeChatSessionId, setActiveChatSessionId] = useState("");
-  const [activeChatWorkspace, setActiveChatWorkspace] = useState("");
-  const [activeChatModelId, setActiveChatModelId] = useState("");
-  const [activeChatModelName, setActiveChatModelName] = useState("");
-  const [activeChatCorpusId, setActiveChatCorpusId] = useState("");
-  const [activeChatCorpusName, setActiveChatCorpusName] = useState("");
-  const [activeChatTurns, setActiveChatTurns] = useState(0);
-  const [activeChatGroundedTurns, setActiveChatGroundedTurns] = useState(0);
-  const [activeChatRuntimeActive, setActiveChatRuntimeActive] = useState(false);
-  const [activeChatStartedAt, setActiveChatStartedAt] = useState<number | null>(null);
-  const [activeRuntimeElapsedMs, setActiveRuntimeElapsedMs] = useState(0);
-  const [activeChatRisk, setActiveChatRisk] = useState(
-    "Runtime is inactive. No active chat KV/cache state is currently held by NullContext."
-  );
-  const [activeChatStopNotice, setActiveChatStopNotice] = useState("");
-  const [activeChatResolvedTemplate, setActiveChatResolvedTemplate] = useState("");
-  const [activeChatHistoryPolicy, setActiveChatHistoryPolicy] = useState("");
-  const [activeChatContextBudget, setActiveChatContextBudget] = useState<number | null>(null);
-  const [activeChatContextTurnLimit, setActiveChatContextTurnLimit] = useState<number | null>(
-    null
   );
   const {
     corpora,
@@ -158,15 +125,7 @@ function App() {
     saveCorpusRetentionPolicy,
   } = useCorpusManager({
     apiBase: API_BASE,
-    runtimeMode,
-    activeChatRuntimeActive,
   });
-
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [runtimeLogs, setRuntimeLogs] = useState("");
-  const [privacyReport, setPrivacyReport] = useState("");
-  const [stderr, setStderr] = useState("");
-  const [auditOperations, setAuditOperations] = useState<AuditOperation[]>([]);
 
   const [sessions, setSessions] = useState<SessionIndexEntry[]>([]);
   const [selectedReport, setSelectedReport] = useState<string>("");
@@ -179,7 +138,6 @@ function App() {
     useState<SessionLifecycleActionResponse | null>(null);
   const [retentionPolicyDraft, setRetentionPolicyDraft] = useState("retain_until_manual_cleanup");
   const [retentionMinutesDraft, setRetentionMinutesDraft] = useState("60");
-  const [activeChatCancelPending, setActiveChatCancelPending] = useState(false);
   const [registryQuery, setRegistryQuery] = useState("");
   const [registryModeFilter, setRegistryModeFilter] = useState<RegistryModeFilter>("all");
   const [registryOutcomeFilter, setRegistryOutcomeFilter] =
@@ -268,288 +226,6 @@ function App() {
     }
   }
 
-  function resetRunPanels() {
-    setRuntimeLogs("");
-    setPrivacyReport("");
-    setStderr("");
-    setAuditOperations([]);
-    setSelectedReport("");
-    setShowRawReport(false);
-  }
-
-  function resetOneShotConversation() {
-    setMessages([]);
-    resetRunPanels();
-    setActiveChatStopNotice("");
-  }
-
-  function appendAssistantText(text: string) {
-    setMessages((current) => {
-      const next = [...current];
-      const last = next[next.length - 1];
-
-      if (last?.role === "assistant") {
-        next[next.length - 1] = {
-          ...last,
-          content: `${last.content}${text}`,
-        };
-      } else {
-        next.push({
-          role: "assistant",
-          content: text,
-        });
-      }
-
-      return next;
-    });
-  }
-
-  function handleStreamPayload(payload: StreamPayload) {
-    switch (payload.type) {
-      case "runtime": {
-        if (payload.message) {
-          setRuntimeLogs((current) => `${current}${payload.message}\n`);
-        }
-        break;
-      }
-
-      case "audit": {
-        if (payload.operation && payload.status && payload.details) {
-          setAuditOperations((current) => [
-            ...current,
-            {
-              operation: payload.operation ?? "unknown",
-              status: payload.status ?? "unknown",
-              details: payload.details ?? "",
-            },
-          ]);
-        }
-        break;
-      }
-
-      case "model": {
-        if (payload.text) {
-          appendAssistantText(payload.text);
-          setRuntimeLogs((current) => {
-            if (current.includes("--- Model Output ---\n<RESPONSE>\n")) {
-              return current;
-            }
-
-            return `${current}--- Model Output ---\n<RESPONSE>\n`;
-          });
-        }
-        break;
-      }
-
-      case "report": {
-        if (payload.text) {
-          setPrivacyReport((current) => `${current}${payload.text}`);
-        }
-        break;
-      }
-
-      case "stderr": {
-        if (payload.message) {
-          setStderr((current) => `${current}${payload.message}\n`);
-        }
-        break;
-      }
-
-      case "error": {
-        if (payload.message) {
-          setStderr((current) => `${current}${payload.message}\n`);
-        }
-        setActiveChatCancelPending(false);
-        setRunStatus("failed");
-        break;
-      }
-
-      case "complete": {
-        if (runtimeMode === "active-chat" && activeChatCancelPending && !payload.success) {
-          setRunStatus("idle");
-          setActiveChatCancelPending(false);
-          setActiveChatStopNotice(
-            "Cancelled this active-chat generation. Any partial assistant text still visible in the transcript was not committed to backend chat history. The runtime remains active until you send another message or use End + Sanitize."
-          );
-          setRuntimeLogs((current) => `${current}Active chat generation cancelled.\n`);
-        } else {
-          if (runtimeMode === "active-chat" && activeChatCancelPending && payload.success) {
-            setActiveChatStopNotice(
-              "Cancellation was requested, but the generation finished before the runtime stopped the turn."
-            );
-          }
-          setRunStatus(payload.success ? "success" : "failed");
-          setActiveChatCancelPending(false);
-        }
-
-        if (persistent) {
-          loadSessions();
-        }
-
-        if (runtimeMode === "active-chat" && payload.success) {
-          refreshActiveChatStatus();
-        }
-
-        break;
-      }
-
-      default: {
-        setRuntimeLogs((current) => `${current}${JSON.stringify(payload)}\n`);
-      }
-    }
-  }
-
-  async function consumeSseResponse(response: Response, signal: AbortSignal) {
-    if (!response.body) {
-      throw new Error("Streaming response body was empty");
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-
-    let buffer = "";
-
-    while (true) {
-      if (signal.aborted) {
-        break;
-      }
-
-      const { value, done } = await reader.read();
-
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-
-      const blocks = buffer.split("\n\n");
-      buffer = blocks.pop() ?? "";
-
-      for (const block of blocks) {
-        const payload = parseSseBlock(block);
-
-        if (payload) {
-          handleStreamPayload(payload);
-        }
-      }
-    }
-
-    if (!signal.aborted && buffer.trim()) {
-      const payload = parseSseBlock(buffer);
-
-      if (payload) {
-        handleStreamPayload(payload);
-      }
-    }
-  }
-
-  async function stopGeneration() {
-    if (runtimeMode === "active-chat" && activeChatSessionId) {
-      setActiveChatStopNotice(
-        "Cancellation requested for this active-chat generation. Waiting for the runtime to stop the current turn before clearing it from backend chat history."
-      );
-      setActiveChatCancelPending(true);
-
-      try {
-        const response = await fetch(`${API_BASE}/api/chat/${activeChatSessionId}/cancel`, {
-          method: "POST",
-        });
-
-        if (!response.ok) {
-          const error = await readApiError(
-            response,
-            "Failed to cancel active chat generation."
-          );
-          throw new Error(formatActiveChatApiError("cancel", error));
-        }
-
-        const data = (await response.json()) as ChatCancelResponse;
-
-        setRuntimeLogs((current) => `${current}${data.message}\n`);
-        setAuditOperations((current) => [
-          ...current,
-          {
-            operation: "client_generation_cancel_requested",
-            status: "warning",
-            details:
-              "Client requested explicit cancellation for the current active-chat generation. The runtime will stop the current turn without committing it to chat history.",
-          },
-        ]);
-
-        return;
-      } catch (error) {
-        setActiveChatCancelPending(false);
-        setActiveChatStopNotice(String(error));
-        setStderr((current) => `${current}${String(error)}\n`);
-        setRuntimeLogs(
-          (current) =>
-            `${current}Active chat cancel request failed. Closing the client stream as a fallback.\n`
-        );
-      }
-    }
-
-    activeAbortController.current?.abort();
-    activeAbortController.current = null;
-
-    setRunStatus("failed");
-    setRuntimeLogs((current) => `${current}Generation stopped by user.\n`);
-    setActiveChatStopNotice(
-      runtimeMode === "active-chat"
-        ? "Stopped this active-chat generation by closing the client stream. Any partial assistant text still visible in the transcript was not committed to backend chat history. The runtime remains active until you send another message or use End + Sanitize."
-        : ""
-    );
-
-    setAuditOperations((current) => [
-      ...current,
-      {
-        operation: "client_generation_stop",
-        status: "warning",
-        details:
-          runtimeMode === "active-chat"
-            ? "Client stopped the current active-chat generation by closing the stream. The chat runtime remains active."
-            : "Client stopped the one-shot generation. Backend cleanup should continue server-side.",
-      },
-    ]);
-  }
-
-  function readActiveChatConfigInputs() {
-    if (useModelTemplateDefault || useModelContextDefaults) {
-      if (!selectedModel) {
-        throw new Error("Select a registered model before starting a session.");
-      }
-    }
-
-    const overrides: {
-      chat_template?: ChatTemplateOption;
-      chat_context_token_budget?: number;
-      chat_context_turn_limit?: number;
-    } = {};
-
-    if (!useModelTemplateDefault) {
-      overrides.chat_template = chatTemplate;
-    }
-
-    if (!useModelContextDefaults) {
-      const tokenBudget = parsePositiveInteger(chatContextTokenBudget);
-      const turnLimit = parsePositiveInteger(chatContextTurnLimit);
-
-      if (tokenBudget === null) {
-        throw new Error(
-          "Active chat context token budget must be a whole number greater than 0."
-        );
-      }
-
-      if (turnLimit === null) {
-        throw new Error("Active chat context turn limit must be a whole number greater than 0.");
-      }
-
-      overrides.chat_context_token_budget = tokenBudget;
-      overrides.chat_context_turn_limit = turnLimit;
-    }
-
-    return overrides;
-  }
-
   function closeDrawers() {
     setConfigDrawerOpen(false);
     setModelDrawerOpen(false);
@@ -598,324 +274,6 @@ function App() {
     if (!selectedCorpusId && corpora.length > 0) {
       setSelectedCorpusId(corpora[0].corpus_id);
     }
-  }
-
-  async function runOneShot() {
-    resetOneShotConversation();
-    setRunStatus("running");
-
-    const currentPrompt = prompt;
-    const controller = new AbortController();
-    activeAbortController.current = controller;
-
-    setMessages([
-      {
-        role: "user",
-        content: currentPrompt,
-      },
-      {
-        role: "assistant",
-        content: "",
-      },
-    ]);
-
-    try {
-      const activeChatConfig = readActiveChatConfigInputs();
-      setCommandMenuOpen(false);
-      const response = await fetch(`${API_BASE}/api/run/stream`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt: currentPrompt,
-          mode,
-          persistent,
-          model_id: selectedModelId || undefined,
-          corpus_id: selectedCorpusId || undefined,
-          ...activeChatConfig,
-        }),
-        signal: controller.signal,
-      });
-
-      await consumeSseResponse(response, controller.signal);
-    } catch (error) {
-      if (controller.signal.aborted) {
-        setRunStatus("failed");
-      } else {
-        setStderr(String(error));
-        setRunStatus("failed");
-      }
-    } finally {
-      if (activeAbortController.current === controller) {
-        activeAbortController.current = null;
-      }
-    }
-  }
-
-  async function startActiveChat() {
-    resetRunPanels();
-    setActiveChatStopNotice("");
-    setActiveChatCancelPending(false);
-    setRunStatus("running");
-    closeDrawers();
-    setCommandMenuOpen(false);
-
-    try {
-      const activeChatConfig = readActiveChatConfigInputs();
-      const response = await fetch(`${API_BASE}/api/chat/start`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          mode,
-          persistent,
-          model_id: selectedModelId || undefined,
-          corpus_id: selectedCorpusId || undefined,
-          ...activeChatConfig,
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await readApiError(response, "Failed to start active chat session.");
-        throw new Error(formatActiveChatApiError("start", error));
-      }
-
-      const data = (await response.json()) as ChatStartResponse;
-
-      setRuntimeMode("active-chat");
-      setActiveChatSessionId(data.session_id);
-      setActiveChatWorkspace(data.workspace);
-      setActiveChatModelId(data.model_id);
-      setActiveChatModelName(data.model_name);
-      setActiveChatCorpusId(data.corpus_id || "");
-      setActiveChatCorpusName(data.corpus_name || "");
-      setActiveChatTurns(data.turns);
-      setActiveChatGroundedTurns(data.grounded_turns);
-      setActiveChatRuntimeActive(data.runtime_active);
-      setActiveChatStartedAt(Date.now());
-      setActiveRuntimeElapsedMs(0);
-      setActiveChatRisk(
-        "Runtime is active. llama.cpp remains loaded, KV/cache state may remain live, and chat context remains in memory until End + Sanitize."
-      );
-      setActiveChatResolvedTemplate(data.chat_template);
-      setActiveChatHistoryPolicy(data.history_policy);
-      setActiveChatContextBudget(data.chat_context_token_budget);
-      setActiveChatContextTurnLimit(data.chat_context_turn_limit);
-      setRunStatus("success");
-
-      setRuntimeLogs((current) =>
-        `${current}Started active chat session ${data.session_id}\nWorkspace: ${data.workspace}\n`
-      );
-    } catch (error) {
-      setStderr(String(error));
-      setRunStatus("failed");
-    }
-  }
-
-  async function refreshActiveChatStatus() {
-    if (!activeChatSessionId) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`${API_BASE}/api/chat/${activeChatSessionId}/status`);
-
-      if (!response.ok) {
-        return;
-      }
-
-      const data = (await response.json()) as ChatStatusResponse;
-
-      setActiveChatTurns(data.turns);
-      if (typeof data.grounded_turns === "number") {
-        setActiveChatGroundedTurns(data.grounded_turns);
-      }
-      setActiveChatRuntimeActive(data.runtime_active);
-      setActiveChatWorkspace(data.workspace);
-
-      if (data.model_id) {
-        setActiveChatModelId(data.model_id);
-      }
-
-      if (data.model_name) {
-        setActiveChatModelName(data.model_name);
-      }
-
-      if (data.corpus_id) {
-        setActiveChatCorpusId(data.corpus_id);
-      }
-
-      if (data.corpus_name) {
-        setActiveChatCorpusName(data.corpus_name);
-      }
-
-      if (typeof data.runtime_duration_ms === "number") {
-        setActiveRuntimeElapsedMs(data.runtime_duration_ms);
-      }
-
-      if (data.chat_template) {
-        setActiveChatResolvedTemplate(data.chat_template);
-      }
-
-      if (typeof data.chat_context_token_budget === "number") {
-        setActiveChatContextBudget(data.chat_context_token_budget);
-      }
-
-      if (typeof data.chat_context_turn_limit === "number") {
-        setActiveChatContextTurnLimit(data.chat_context_turn_limit);
-      }
-
-      if (data.history_policy) {
-        setActiveChatHistoryPolicy(data.history_policy);
-      }
-
-      if (data.residual_risk) {
-        setActiveChatRisk(data.residual_risk);
-      }
-    } catch {
-      // Non-critical UI refresh failure.
-    }
-  }
-
-  async function endActiveChat() {
-    if (!activeChatSessionId) {
-      return;
-    }
-
-    setRunStatus("running");
-    setActiveChatStopNotice("");
-    setActiveChatCancelPending(false);
-    setCommandMenuOpen(false);
-
-    try {
-      const response = await fetch(`${API_BASE}/api/chat/${activeChatSessionId}/end`, {
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        const error = await readApiError(response, "Failed to end active chat session.");
-        const friendlyError = formatActiveChatApiError("end", error);
-        setActiveChatStopNotice(friendlyError);
-        throw new Error(friendlyError);
-      }
-
-      const data = (await response.json()) as ChatEndResponse;
-
-      setActiveChatRuntimeActive(false);
-      setActiveChatTurns(0);
-      setActiveChatStartedAt(null);
-      setActiveRuntimeElapsedMs(0);
-      setActiveChatRisk(
-        "Runtime is inactive. Active chat buffers were finalized according to the session cleanup policy."
-      );
-      setActiveChatResolvedTemplate("");
-      setActiveChatHistoryPolicy("");
-      setActiveChatContextBudget(null);
-      setActiveChatContextTurnLimit(null);
-      setActiveChatModelId("");
-      setActiveChatModelName("");
-      setActiveChatCorpusId("");
-      setActiveChatCorpusName("");
-      setActiveChatGroundedTurns(0);
-      setShowRawReport(false);
-      setPrivacyReport(JSON.stringify(data.report, null, 2));
-      setRuntimeLogs((current) =>
-        `${current}Ended active chat session ${data.session_id}\nRuntime stopped: ${data.runtime_stopped}\n`
-      );
-
-      setActiveChatSessionId("");
-      setActiveChatWorkspace("");
-      setRunStatus("success");
-
-      if (persistent) {
-        await loadSessions();
-      }
-    } catch (error) {
-      setStderr(String(error));
-      setRunStatus("failed");
-    }
-  }
-
-  async function sendActiveChatMessage() {
-    if (!activeChatSessionId) {
-      setStderr("No active chat session. Start a session first.");
-      setRunStatus("failed");
-      return;
-    }
-
-    setRunStatus("running");
-    setRuntimeLogs("");
-    setPrivacyReport("");
-    setStderr("");
-    setAuditOperations([]);
-    setActiveChatStopNotice("");
-    setActiveChatCancelPending(false);
-    setCommandMenuOpen(false);
-
-    const currentPrompt = prompt;
-    const controller = new AbortController();
-    activeAbortController.current = controller;
-
-    setMessages((current) => [
-      ...current,
-      {
-        role: "user",
-        content: currentPrompt,
-      },
-      {
-        role: "assistant",
-        content: "",
-      },
-    ]);
-
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/chat/${activeChatSessionId}/message/stream`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            prompt: currentPrompt,
-          }),
-          signal: controller.signal,
-        }
-      );
-
-      if (!response.ok) {
-        const error = await readApiError(response, "Failed to send active chat message.");
-        throw new Error(formatActiveChatApiError("message", error));
-      }
-
-      await consumeSseResponse(response, controller.signal);
-
-      if (!controller.signal.aborted) {
-        setPrompt("");
-      }
-    } catch (error) {
-      if (controller.signal.aborted) {
-        setRunStatus("failed");
-      } else {
-        setStderr(String(error));
-        setRunStatus("failed");
-      }
-    } finally {
-      if (activeAbortController.current === controller) {
-        activeAbortController.current = null;
-      }
-    }
-  }
-
-  async function runSession() {
-    if (runtimeMode === "one-shot") {
-      await runOneShot();
-      return;
-    }
-
-    await sendActiveChatMessage();
   }
 
   async function openReport(sessionId: string) {
@@ -1041,7 +399,10 @@ function App() {
 
   async function ingestUploadedCorpusFromChat(files: File[]) {
     try {
-      await ingestUploadedCorpusFromChatAction(files);
+      await ingestUploadedCorpusFromChatAction(files, {
+        runtimeMode,
+        activeChatRuntimeActive,
+      });
     } finally {
       setChatUploadMenuOpen(false);
     }
@@ -1057,34 +418,6 @@ function App() {
     loadModels();
     loadCorpora();
   }, []);
-
-  useEffect(() => {
-    if (!activeChatRuntimeActive || activeChatStartedAt === null) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      setActiveRuntimeElapsedMs(Date.now() - activeChatStartedAt);
-    }, 1000);
-
-    return () => window.clearInterval(interval);
-  }, [activeChatRuntimeActive, activeChatStartedAt]);
-
-  useEffect(() => {
-    function warnBeforeUnload(event: BeforeUnloadEvent) {
-      if (!activeChatRuntimeActive) {
-        return;
-      }
-
-      event.preventDefault();
-      event.returnValue =
-        "An active NullContext chat session is still running. End + Sanitize before leaving.";
-    }
-
-    window.addEventListener("beforeunload", warnBeforeUnload);
-
-    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [activeChatRuntimeActive]);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -1163,6 +496,71 @@ function App() {
     sessions,
   ]);
 
+  const selectedModel =
+    models.find((model) => model.id === selectedModelId) ??
+    models.find((model) => model.default_selected) ??
+    null;
+  const filteredModels = buildFilteredModels(models, modelQuery);
+  const inspectedModel =
+    filteredModels.find((model) => model.id === inspectedModelId) ??
+    models.find((model) => model.id === inspectedModelId) ??
+    selectedModel;
+  const effectiveTemplate = useModelTemplateDefault
+    ? selectedModel?.chat_template || "auto"
+    : chatTemplate;
+  const effectiveContextBudget = useModelContextDefaults
+    ? selectedModel?.chat_context_token_budget ?? null
+    : parsePositiveInteger(chatContextTokenBudget);
+  const effectiveContextTurnLimit = useModelContextDefaults
+    ? selectedModel?.chat_context_turn_limit ?? null
+    : parsePositiveInteger(chatContextTurnLimit);
+  const {
+    runStatus,
+    messages,
+    runtimeLogs,
+    privacyReport,
+    stderr,
+    auditOperations,
+    activeChatSessionId,
+    activeChatWorkspace,
+    activeChatModelId,
+    activeChatModelName,
+    activeChatCorpusId,
+    activeChatCorpusName,
+    activeChatTurns,
+    activeChatGroundedTurns,
+    activeChatRuntimeActive,
+    activeRuntimeElapsedMs,
+    activeChatRisk,
+    activeChatStopNotice,
+    activeChatResolvedTemplate,
+    activeChatHistoryPolicy,
+    activeChatContextBudget,
+    activeChatContextTurnLimit,
+    startActiveChat,
+    endActiveChat,
+    runSession,
+    stopGeneration,
+  } = useSessionRunner({
+    apiBase: API_BASE,
+    runtimeMode,
+    setRuntimeMode,
+    prompt,
+    setPrompt,
+    mode,
+    persistent,
+    selectedModelId,
+    selectedCorpusId,
+    selectedModel,
+    useModelTemplateDefault,
+    useModelContextDefaults,
+    chatTemplate,
+    chatContextTokenBudget,
+    chatContextTurnLimit,
+    onLoadSessions: loadSessions,
+    onCloseDrawers: closeDrawers,
+    onCloseCommandMenu: () => setCommandMenuOpen(false),
+  });
   const inspectorTabs: Array<{
     id: InspectorView;
     label: string;
@@ -1188,24 +586,6 @@ function App() {
     registryActionResult && registryActionResult.session_id === selectedSessionId
       ? registryActionResult
       : null;
-  const selectedModel =
-    models.find((model) => model.id === selectedModelId) ??
-    models.find((model) => model.default_selected) ??
-    null;
-  const filteredModels = buildFilteredModels(models, modelQuery);
-  const inspectedModel =
-    filteredModels.find((model) => model.id === inspectedModelId) ??
-    models.find((model) => model.id === inspectedModelId) ??
-    selectedModel;
-  const effectiveTemplate = useModelTemplateDefault
-    ? selectedModel?.chat_template || "auto"
-    : chatTemplate;
-  const effectiveContextBudget = useModelContextDefaults
-    ? selectedModel?.chat_context_token_budget ?? null
-    : parsePositiveInteger(chatContextTokenBudget);
-  const effectiveContextTurnLimit = useModelContextDefaults
-    ? selectedModel?.chat_context_turn_limit ?? null
-    : parsePositiveInteger(chatContextTurnLimit);
   const activeRuntimeModelName =
     activeChatRuntimeActive && activeChatModelName
       ? activeChatModelName
