@@ -99,6 +99,11 @@ function App() {
     apiBase: API_BASE,
   });
 
+  function handleOpenInspectorReport() {
+    setInspectorView("report");
+    setInspectorOpen(true);
+  }
+
   const {
     sessions,
     registryLoadedAt,
@@ -133,11 +138,27 @@ function App() {
   } = useSessionRegistry({
     apiBase: API_BASE,
     inspectorView,
-    onOpenInspectorReport: () => {
-      setInspectorView("report");
-      setInspectorOpen(true);
-    },
+    onOpenInspectorReport: handleOpenInspectorReport,
   });
+
+  function ensureModelDrawerSelection() {
+    if (!inspectedModelId && models.length > 0) {
+      setInspectedModelId(selectedModelId || models[0].id);
+    }
+  }
+
+  function ensureRegistrySessionSelection() {
+    if (!selectedSessionId && sessions.length > 0) {
+      setSelectedSessionId(sessions[0].session_id);
+    }
+  }
+
+  function ensureCorpusSelection() {
+    if (!selectedCorpusId && corpora.length > 0) {
+      setSelectedCorpusId(corpora[0].corpus_id);
+    }
+  }
+
   const {
     commandMenuRef,
     chatUploadMenuRef,
@@ -169,21 +190,9 @@ function App() {
     onLoadSessions: loadSessions,
     onLoadModels: loadModels,
     onLoadCorpora: loadCorpora,
-    onOpenModelDrawerSelectDefault: () => {
-      if (!inspectedModelId && models.length > 0) {
-        setInspectedModelId(selectedModelId || models[0].id);
-      }
-    },
-    onOpenRegistryDrawerSelectDefault: () => {
-      if (!selectedSessionId && sessions.length > 0) {
-        setSelectedSessionId(sessions[0].session_id);
-      }
-    },
-    onOpenCorpusDrawerSelectDefault: () => {
-      if (!selectedCorpusId && corpora.length > 0) {
-        setSelectedCorpusId(corpora[0].corpus_id);
-      }
-    },
+    onOpenModelDrawerSelectDefault: ensureModelDrawerSelection,
+    onOpenRegistryDrawerSelectDefault: ensureRegistrySessionSelection,
+    onOpenCorpusDrawerSelectDefault: ensureCorpusSelection,
   });
 
   async function ingestUploadedCorpusFromChat(files: File[]) {
@@ -196,6 +205,11 @@ function App() {
       setChatUploadMenuOpen(false);
     }
   }
+
+  function handleCloseCommandMenu() {
+    setCommandMenuOpen(false);
+  }
+
   const {
     runStatus,
     messages,
@@ -241,7 +255,7 @@ function App() {
     chatContextTurnLimit,
     onLoadSessions: loadSessions,
     onCloseDrawers: closeDrawers,
-    onCloseCommandMenu: () => setCommandMenuOpen(false),
+    onCloseCommandMenu: handleCloseCommandMenu,
   });
   const {
     effectiveTemplate,
@@ -302,12 +316,14 @@ function App() {
     setShowRawReport((current) => !current);
   }
 
+  const shellClassName = `shell${sidebarCollapsed ? " sidebar-collapsed" : ""}${
+    inspectorOpen ? "" : " inspector-hidden"
+  }`;
+  const drawersOpen =
+    configDrawerOpen || modelDrawerOpen || registryDrawerOpen || corpusDrawerOpen;
+
   return (
-    <main
-      className={`shell${sidebarCollapsed ? " sidebar-collapsed" : ""}${
-        inspectorOpen ? "" : " inspector-hidden"
-      }`}
-    >
+    <main className={shellClassName}>
       <AppSidebar
         sidebarCollapsed={sidebarCollapsed}
         onSidebarCollapsedChange={setSidebarCollapsed}
@@ -415,11 +431,7 @@ function App() {
       />
 
       <div
-        className={`drawer-backdrop${
-          configDrawerOpen || modelDrawerOpen || registryDrawerOpen || corpusDrawerOpen
-            ? " open"
-            : ""
-        }`}
+        className={`drawer-backdrop${drawersOpen ? " open" : ""}`}
         onClick={closeDrawers}
       />
       <ModelRegistryDrawer
