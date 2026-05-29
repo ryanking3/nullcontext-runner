@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CorpusDrawer } from "./components/CorpusDrawer";
 import { ChatWorkspace } from "./components/ChatWorkspace";
 import { ModelRegistryDrawer } from "./components/ModelRegistryDrawer";
-import { PrivacyReportViewer } from "./components/PrivacyReportViewer";
+import { InspectorPanel } from "./components/InspectorPanel";
 import { SessionConfigDrawer } from "./components/SessionConfigDrawer";
 import { SessionRegistryDrawer } from "./components/SessionRegistryDrawer";
 import type {
@@ -41,7 +41,6 @@ import {
   parsePositiveInteger,
   parseSseBlock,
   readApiError,
-  statusClass,
 } from "./appUtils";
 import "./App.css";
 
@@ -1989,69 +1988,19 @@ function App() {
         corpusUploadProgressLabel={corpusUploadProgressLabel}
       />
 
-      {inspectorOpen && (
-        <aside className="inspector">
-          <section className="panel inspector-shell">
-            <div className="panel-header">
-              <div className="panel-title">inspector</div>
-              <button className="ghost-button" onClick={() => setInspectorOpen(false)}>
-                hide
-              </button>
-            </div>
-
-            <div className="inspector-tabs">
-              {inspectorTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  className={inspectorView === tab.id ? "selected" : ""}
-                  disabled={tab.disabled}
-                  onClick={() => setInspectorView(tab.id)}
-                  title={tab.disabled ? "No data yet" : undefined}
-                >
-                  {tab.label}
-                  {typeof tab.count === "number" ? ` (${tab.count})` : ""}
-                </button>
-              ))}
-            </div>
-
-            <div className="inspector-panel">
-              {inspectorView === "audit" && (
-                <>
-                  {auditOperations.length === 0 ? (
-                    <p className="muted-text">audit operations appear during a run</p>
-                  ) : (
-                    <div className="audit-list">
-                      {auditOperations.map((operation, index) => (
-                        <details className="audit-item" key={`${operation.operation}-${index}`}>
-                          <summary>
-                            <code>{operation.operation}</code>
-                            <span className={statusClass(operation.status)}>{operation.status}</span>
-                          </summary>
-                          <p>{operation.details}</p>
-                        </details>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-
-              {inspectorView === "runtime" && <pre>{runtimeLogs || "no runtime logs yet"}</pre>}
-
-                            {inspectorView === "report" && (
-                <PrivacyReportViewer
-                  rawReport={currentReportRaw}
-                  showRawReport={showRawReport}
-                  onToggleRaw={() => setShowRawReport((current) => !current)}
-                />
-              )}
-
-              {inspectorView === "stderr" && (
-                <pre>{stderr || "no stderr captured"}</pre>
-              )}
-            </div>
-          </section>
-        </aside>
-      )}
+      <InspectorPanel
+        open={inspectorOpen}
+        onClose={() => setInspectorOpen(false)}
+        tabs={inspectorTabs}
+        inspectorView={inspectorView}
+        onInspectorViewChange={setInspectorView}
+        auditOperations={auditOperations}
+        runtimeLogs={runtimeLogs}
+        currentReportRaw={currentReportRaw}
+        showRawReport={showRawReport}
+        onToggleRaw={() => setShowRawReport((current) => !current)}
+        stderr={stderr}
+      />
 
       <div
         className={`drawer-backdrop${
