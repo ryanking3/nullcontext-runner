@@ -35,6 +35,12 @@ import type {
   Theme,
 } from "./appTypes";
 import {
+  buildFilteredCorpora,
+  buildFilteredModels,
+  buildFilteredSessions,
+  buildLatestSession,
+} from "./appSelectors";
+import {
   formatActiveChatApiError,
   formatBytes,
   minutesUntil,
@@ -1518,62 +1524,13 @@ function App() {
   }, [corpora, selectedCorpusId]);
 
   useEffect(() => {
-    const nextSessions = [...sessions]
-      .filter((session) => {
-        if (registryModeFilter !== "all" && session.security_mode !== registryModeFilter) {
-          return false;
-        }
-
-        switch (registryOutcomeFilter) {
-          case "cleanup-failed":
-            if (!session.cleanup_attempted || session.cleanup_successful) {
-              return false;
-            }
-            break;
-          case "workspace-retained":
-            if (session.workspace_deleted) {
-              return false;
-            }
-            break;
-          case "artifacts":
-            if (session.artifacts_detected <= 0) {
-              return false;
-            }
-            break;
-          case "history-stored":
-            if (!session.history_stored) {
-              return false;
-            }
-            break;
-          default:
-            break;
-        }
-
-        const query = registryQuery.trim().toLowerCase();
-
-        if (!query) {
-          return true;
-        }
-
-        return [
-          session.session_id,
-          session.security_mode,
-          session.prompt_source,
-          session.backend,
-          session.model_path,
-          session.workspace,
-          session.report_path,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(query);
-      })
-      .sort((left, right) => {
-        const leftTime = new Date(left.started_at).getTime();
-        const rightTime = new Date(right.started_at).getTime();
-
-        return registrySortOrder === "newest" ? rightTime - leftTime : leftTime - rightTime;
-      });
+    const nextSessions = buildFilteredSessions(
+      sessions,
+      registryQuery,
+      registryModeFilter,
+      registryOutcomeFilter,
+      registrySortOrder
+    );
 
     if (nextSessions.length === 0) {
       if (selectedSessionId !== "") {
@@ -1605,69 +1562,14 @@ function App() {
     { id: "report", label: "report" },
     { id: "stderr", label: "stderr", disabled: !stderr },
   ];
-  const query = registryQuery.trim().toLowerCase();
-  const filteredSessions = [...sessions]
-    .filter((session) => {
-      if (registryModeFilter !== "all" && session.security_mode !== registryModeFilter) {
-        return false;
-      }
-
-      switch (registryOutcomeFilter) {
-        case "cleanup-failed":
-          if (!session.cleanup_attempted || session.cleanup_successful) {
-            return false;
-          }
-          break;
-        case "workspace-retained":
-          if (session.workspace_deleted) {
-            return false;
-          }
-          break;
-        case "artifacts":
-          if (session.artifacts_detected <= 0) {
-            return false;
-          }
-          break;
-        case "history-stored":
-          if (!session.history_stored) {
-            return false;
-          }
-          break;
-        default:
-          break;
-      }
-
-      if (!query) {
-        return true;
-      }
-
-      return [
-        session.session_id,
-        session.security_mode,
-        session.prompt_source,
-        session.backend,
-        session.model_id ?? "",
-        session.model_name ?? "",
-        session.model_path,
-        session.workspace,
-        session.report_path,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(query);
-    })
-    .sort((left, right) => {
-      const leftTime = new Date(left.started_at).getTime();
-      const rightTime = new Date(right.started_at).getTime();
-
-      return registrySortOrder === "newest" ? rightTime - leftTime : leftTime - rightTime;
-    });
-  const latestSession = [...sessions].sort((left, right) => {
-    const leftTime = new Date(left.started_at).getTime();
-    const rightTime = new Date(right.started_at).getTime();
-
-    return rightTime - leftTime;
-  })[0];
+  const filteredSessions = buildFilteredSessions(
+    sessions,
+    registryQuery,
+    registryModeFilter,
+    registryOutcomeFilter,
+    registrySortOrder
+  );
+  const latestSession = buildLatestSession(sessions);
   const selectedSession =
     filteredSessions.find((session) => session.session_id === selectedSessionId) ?? null;
   const selectedLifecycleResult =
@@ -1678,27 +1580,7 @@ function App() {
     models.find((model) => model.id === selectedModelId) ??
     models.find((model) => model.default_selected) ??
     null;
-  const corpusQueryText = corpusQuery.trim().toLowerCase();
-  const filteredCorpora = corpora.filter((corpus) => {
-    if (!corpusQueryText) {
-      return true;
-    }
-
-    return [
-      corpus.corpus_id,
-      corpus.name,
-      corpus.root_path,
-      corpus.manifest_path,
-      corpus.embedding_backend ?? "",
-      corpus.embedding_model ?? "",
-      corpus.ocr_backend ?? "",
-      corpus.lifecycle.state,
-      corpus.lifecycle.retention_policy,
-    ]
-      .join(" ")
-      .toLowerCase()
-      .includes(corpusQueryText);
-  });
+  const filteredCorpora = buildFilteredCorpora(corpora, corpusQuery);
   const selectedCorpus =
     filteredCorpora.find((corpus) => corpus.corpus_id === selectedCorpusId) ??
     corpora.find((corpus) => corpus.corpus_id === selectedCorpusId) ??
@@ -1707,23 +1589,7 @@ function App() {
     corpusActionResult && corpusActionResult.corpus_id === selectedCorpusId
       ? corpusActionResult
       : null;
-  const modelQueryText = modelQuery.trim().toLowerCase();
-  const filteredModels = models.filter((model) => {
-    if (!modelQueryText) {
-      return true;
-    }
-
-    return [
-      model.id,
-      model.name,
-      model.description ?? "",
-      model.model_path,
-      model.chat_template,
-    ]
-      .join(" ")
-      .toLowerCase()
-      .includes(modelQueryText);
-  });
+  const filteredModels = buildFilteredModels(models, modelQuery);
   const inspectedModel =
     filteredModels.find((model) => model.id === inspectedModelId) ??
     models.find((model) => model.id === inspectedModelId) ??
