@@ -34,6 +34,7 @@ The project currently supports:
 - corpus registry with txt/md/pdf ingestion
 - hybrid pdf extraction with OCR for sparse pages
 - browser-native corpus file uploads with drag/drop and upload progress
+- chatbot-style composer uploads for grounding corpora
 - one-shot grounded retrieval
 - active-chat grounded retrieval
 - corpus lifecycle cleanup, reconcile, and retention controls
@@ -45,6 +46,8 @@ The project currently supports:
 - live llama runtime RAM/VRAM usage snapshots
 - post-shutdown llama runtime inspection
 - macOS vmmap-based RAM inspection and before/after region delta reporting
+- Windows PowerShell-based process memory observation
+- NVIDIA `nvidia-smi` compute-apps and `pmon` fallback inspection paths
 - active chat final reporting
 
 The project is functional but still early-stage. It should not be described as a hardened secure inference system.
@@ -75,7 +78,7 @@ Important backend files:
   CLI parsing, config loading, security modes, prompt source handling, and `SessionConfig`.
 
 - `src/runtime.rs`  
-  Starts, checks, and stops `llama-server`, and performs best-effort runtime RAM/VRAM observation.
+  Starts, checks, and stops `llama-server`, and performs best-effort runtime RAM/VRAM observation across macOS and Windows/NVIDIA host-tooling paths.
 
 - `src/inference.rs`  
   Blocking one-shot inference path used by CLI mode.
@@ -130,7 +133,7 @@ apps/web
 Important frontend files:
 
 - `apps/web/src/App.tsx`  
-  Main UI. Handles one-shot mode, active chat mode, streaming, stop control, reports, runtime logs, audit operations, session registry, model registry, corpus registry, upload ingestion UX, and structured llama runtime inspection views.
+  Main UI composition layer. Wires one-shot mode, active chat mode, streaming, stop control, reports, runtime logs, audit operations, session registry, model registry, corpus registry, upload ingestion UX, and structured llama runtime inspection views through extracted hooks and components.
 
 - `apps/web/src/App.css`  
   Minimal terminal-style dark/light UI.
@@ -201,7 +204,7 @@ PDF ingestion uses a hybrid pipeline:
 
 Corpus artifacts are retained under the NullContext corpus registry and can be lifecycle-managed separately from chat/session workspaces.
 
-Corpus ingestion currently also supports browser-native file upload for `txt`, `md`, and `pdf` inputs through the local web UI, including drag/drop and upload progress.
+Corpus ingestion currently also supports browser-native file upload for `txt`, `md`, and `pdf` inputs through the local web UI, including drag/drop, upload progress, and chatbot-style composer uploads for quick grounding corpora.
 
 ## API Routes
 
@@ -453,6 +456,8 @@ Manual verification should include:
 - active chat end generates report
 - llama runtime report shows shutdown method and inspection verdicts
 - macOS runtime reports show vmmap footprint and resident-region evidence when available
+- Windows runtime reports show PowerShell process-memory evidence when available
+- NVIDIA-backed runs report either compute-apps VRAM bytes or `pmon` PID visibility notes when available
 - lifecycle registry actions work for retained sessions
 - scheduled retention cleanup works
 - model registry drawer loads
@@ -570,4 +575,4 @@ Do not commit:
 - Corpus report viewer inside the corpus drawer is still raw JSON.
 - OCR currently relies on local CLI availability and does not implement full document-layout fidelity.
 - llama runtime RAM inspection is strongest on macOS right now and still relies on best-effort host tooling rather than direct allocator introspection.
-- GPU/VRAM inspection is currently limited and needs stronger Windows/NVIDIA-specific evidence paths.
+- Windows/NVIDIA runtime inspection needs live validation against real driver/runtime combinations, and current VRAM evidence is still host-tooling based rather than true allocator introspection or sanitization.

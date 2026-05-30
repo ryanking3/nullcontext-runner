@@ -72,6 +72,8 @@ No cloud inference is required.
 - live llama runtime RAM/VRAM usage snapshots
 - post-shutdown llama runtime inspection
 - macOS vmmap-based RAM inspection and resident-region delta analysis
+- Windows PowerShell-based process memory observation
+- NVIDIA `nvidia-smi` compute-apps and `pmon` fallback inspection paths
 - audit operation tracking
 - sanitization operation reporting
 - structured privacy reports
@@ -145,6 +147,7 @@ The current browser UI supports:
 - dedicated corpus registry browser
 - path-based corpus ingestion
 - browser-native corpus file upload ingestion
+- chatbot-style composer uploads for txt/md/pdf grounding corpora
 - model selection for one-shot and active chat
 - model-default versus manual-override controls
 - selectable active chat prompt template
@@ -458,7 +461,8 @@ NullContext does not currently guarantee:
 
 Active chat also keeps a long-lived llama.cpp runtime and in-memory context alive until the user explicitly ends the session.
 Corpus ingestion can recover text from many PDFs, including scanned pages via OCR, but complex layouts, tables, and poor scans may still extract imperfectly.
-NullContext now performs best-effort llama runtime inspection, including shutdown-path reporting, live RAM/VRAM observation, post-shutdown verification, and macOS `vmmap` inspection when available. These inspections improve visibility, but they are not proof of allocator zeroization or full RAM/VRAM sanitization.
+NullContext now performs best-effort llama runtime inspection, including shutdown-path reporting, live RAM/VRAM observation, post-shutdown verification, macOS `vmmap` inspection when available, and Windows/NVIDIA fallback observation paths. These inspections improve visibility, but they are not proof of allocator zeroization or full RAM/VRAM sanitization.
+On Windows in particular, PowerShell process metrics and NVIDIA tooling can still be incomplete or driver-mode dependent, especially for per-process VRAM visibility under WDDM.
 
 The privacy reports intentionally expose these residual risks.
 
@@ -716,6 +720,7 @@ The corpus browser also lets you:
 
 - ingest corpora from absolute local file and directory paths
 - ingest corpora from browser-selected local files with drag/drop
+- ingest grounding files directly from the chat composer `+` menu
 - inspect corpus lifecycle state and retained artifact paths
 - load retained corpus reports
 - run corpus reconcile, cleanup, and retention actions
@@ -758,6 +763,7 @@ The current development focus is:
 - stronger memory hygiene primitives
 - VRAM inspection and analysis
 - llama runtime RAM/VRAM inspection and evidence-driven cleanup reporting
+- Windows/NVIDIA runtime inspection validation
 - forensic artifact visibility
 - Linux-native low-level memory work
 
@@ -783,6 +789,7 @@ The project is functional and supports:
 - structured model registry and model switching
 - txt/md/pdf corpus ingestion with hybrid OCR extraction
 - browser-native corpus file uploads
+- chatbot-style composer uploads for grounding corpora
 - corpus lifecycle controls
 - artifact tracking
 - cleanup reporting
