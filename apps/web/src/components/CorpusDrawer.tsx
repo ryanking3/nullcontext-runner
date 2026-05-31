@@ -1,4 +1,4 @@
-import { ReportGrid } from "./ReportGrid";
+import { CorpusReportViewer } from "./CorpusReportViewer";
 import type {
   CorpusIndexEntry,
   CorpusIngestionReport,
@@ -350,66 +350,12 @@ export function CorpusDrawer({
                     </button>
                   </div>
 
-                  {selectedCorpusReport && (
-                    <>
-                      {currentCorpusReport?.upload_staging && (
-                        <section className="report-section">
-                          <div className="panel-title">upload staging</div>
-                          <ReportGrid
-                            entries={[
-                              {
-                                label: "staging root",
-                                value: currentCorpusReport.upload_staging.staging_root,
-                              },
-                              {
-                                label: "staged files",
-                                value: String(currentCorpusReport.upload_staging.staged_files),
-                              },
-                              {
-                                label: "staged bytes",
-                                value: formatBytes(currentCorpusReport.upload_staging.staged_bytes),
-                              },
-                              {
-                                label: "cleanup status",
-                                value: currentCorpusReport.upload_staging.cleaned_up
-                                  ? "cleaned up"
-                                  : "retained/failed",
-                              },
-                              {
-                                label: "cleanup error",
-                                value: currentCorpusReport.upload_staging.cleanup_error || "none",
-                              },
-                            ]}
-                          />
-
-                          <details className="report-detail" open>
-                            <summary>
-                              <span>uploaded filenames</span>
-                              <span className="pill neutral">
-                                {currentCorpusReport.upload_staging.source_filenames.length}
-                              </span>
-                            </summary>
-                            <div className="report-list">
-                              {currentCorpusReport.upload_staging.source_filenames.map((name) => (
-                                <div className="report-item" key={name}>
-                                  <div className="report-path-list">
-                                    <div>{name}</div>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </details>
-                        </section>
-                      )}
-
-                      <details className="report-detail" open>
-                        <summary>
-                          <span>corpus report</span>
-                          <span className="pill neutral">json</span>
-                        </summary>
-                        <pre>{selectedCorpusReport}</pre>
-                      </details>
-                    </>
+                  {selectedCorpusReport && currentCorpusReport && (
+                    <CorpusReportViewer
+                      title="corpus report"
+                      report={currentCorpusReport}
+                      rawJson={selectedCorpusReport}
+                    />
                   )}
                 </>
               )}
@@ -590,36 +536,12 @@ export function CorpusDrawer({
                 </div>
               )}
 
-              {lastIngestedCorpusReport?.upload_staging && (
-                <section className="report-section compact-report-section">
-                  <div className="panel-title">latest upload staging</div>
-                  <ReportGrid
-                    entries={[
-                      {
-                        label: "staging root",
-                        value: lastIngestedCorpusReport.upload_staging.staging_root,
-                      },
-                      {
-                        label: "staged files",
-                        value: String(lastIngestedCorpusReport.upload_staging.staged_files),
-                      },
-                      {
-                        label: "staged bytes",
-                        value: formatBytes(lastIngestedCorpusReport.upload_staging.staged_bytes),
-                      },
-                      {
-                        label: "cleanup status",
-                        value: lastIngestedCorpusReport.upload_staging.cleaned_up
-                          ? "cleaned up"
-                          : "retained/failed",
-                      },
-                      {
-                        label: "cleanup error",
-                        value: lastIngestedCorpusReport.upload_staging.cleanup_error || "none",
-                      },
-                    ]}
-                  />
-                </section>
+              {lastIngestedCorpusReport && (
+                <CorpusReportViewer
+                  title="latest ingest report"
+                  report={lastIngestedCorpusReport}
+                  compact
+                />
               )}
             </section>
           </div>
