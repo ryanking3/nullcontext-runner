@@ -572,7 +572,6 @@ Do not commit:
 - Abandoned sessions after server crash need recovery strategy.
 - Tauri desktop shell is stale relative to web UI.
 - No automated tests.
-- Corpus report viewer inside the corpus drawer is still raw JSON.
 - OCR currently relies on local CLI availability and does not implement full document-layout fidelity.
 - llama runtime RAM inspection is strongest on macOS right now and still relies on best-effort host tooling rather than direct allocator introspection.
 - Windows/NVIDIA runtime inspection needs live validation against real driver/runtime combinations, and current VRAM evidence is still host-tooling based rather than true allocator introspection or sanitization.

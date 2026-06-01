@@ -134,6 +134,7 @@ The local corpus registry supports:
 - corpus lifecycle cleanup, reconcile, and retention controls
 - startup lifecycle reconciliation for orphaned corpora
 - retained ingestion reports with lifecycle metadata
+- structured corpus report viewing with optional raw JSON inspection
 
 ### Local Web UI
 
@@ -148,6 +149,7 @@ The current browser UI supports:
 - path-based corpus ingestion
 - browser-native corpus file upload ingestion
 - chatbot-style composer uploads for txt/md/pdf grounding corpora
+- structured corpus report viewing inside the corpus browser
 - model selection for one-shot and active chat
 - model-default versus manual-override controls
 - selectable active chat prompt template
