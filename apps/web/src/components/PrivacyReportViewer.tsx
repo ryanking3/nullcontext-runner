@@ -12,6 +12,34 @@ import {
   statusClass,
 } from "../appUtils";
 
+function inspectionMetricValue(value?: number | null) {
+  if (value === undefined || value === null) {
+    return "none";
+  }
+
+  return formatBytes(value);
+}
+
+function runtimeInspectionTakeaway(
+  overallStatus: string,
+  ramStatus: string,
+  vramStatus: string
+) {
+  if (overallStatus === "process_still_observable_after_shutdown") {
+    return "The runtime process was still visible after shutdown, so cleanup evidence is currently unfavorable.";
+  }
+
+  if (vramStatus === "gpu_entry_still_observable_after_shutdown") {
+    return "GPU residency was still visible after shutdown, so VRAM exposure remains explicitly observable.";
+  }
+
+  if (ramStatus === "resident_memory_not_observed_after_shutdown") {
+    return "NullContext did not observe the runtime PID or residual process memory after shutdown, which is good evidence but not proof of sanitization.";
+  }
+
+  return "Inspection completed, but some memory domains remain inconclusive or host-tooling dependent.";
+}
+
 export function PrivacyReportViewer({
   rawReport,
   showRawReport,
@@ -198,6 +226,84 @@ export function PrivacyReportViewer({
       {currentReport.llama_runtime && (
         <section className="report-section">
           <div className="panel-title">llama runtime exposure</div>
+
+          <section className="runtime-summary-card">
+            <div className="runtime-summary-header">
+              <div>
+                <strong>inspection verdict</strong>
+                <p>
+                  {runtimeInspectionTakeaway(
+                    currentReport.llama_runtime.inspection_status,
+                    currentReport.llama_runtime.ram_inspection_status,
+                    currentReport.llama_runtime.vram_inspection_status
+                  )}
+                </p>
+              </div>
+              <div className="registry-lifecycle-summary">
+                <span
+                  className={inspectionStatusClass(currentReport.llama_runtime.inspection_status)}
+                >
+                  overall {humanizeSnakeCase(currentReport.llama_runtime.inspection_status)}
+                </span>
+                <span
+                  className={inspectionStatusClass(
+                    currentReport.llama_runtime.ram_inspection_status
+                  )}
+                >
+                  ram {humanizeSnakeCase(currentReport.llama_runtime.ram_inspection_status)}
+                </span>
+                <span
+                  className={inspectionStatusClass(
+                    currentReport.llama_runtime.vram_inspection_status
+                  )}
+                >
+                  vram {humanizeSnakeCase(currentReport.llama_runtime.vram_inspection_status)}
+                </span>
+              </div>
+            </div>
+
+            <div className="runtime-summary-metrics">
+              <div className="runtime-summary-metric">
+                <span className="runtime-summary-label">live rss</span>
+                <strong>
+                  {inspectionMetricValue(currentReport.llama_runtime.observed_resident_bytes)}
+                </strong>
+              </div>
+              <div className="runtime-summary-metric">
+                <span className="runtime-summary-label">footprint</span>
+                <strong>
+                  {inspectionMetricValue(currentReport.llama_runtime.physical_footprint_bytes)}
+                </strong>
+              </div>
+              <div className="runtime-summary-metric">
+                <span className="runtime-summary-label">gpu memory</span>
+                <strong>
+                  {inspectionMetricValue(currentReport.llama_runtime.observed_gpu_memory_bytes)}
+                </strong>
+              </div>
+              <div className="runtime-summary-metric">
+                <span className="runtime-summary-label">after shutdown</span>
+                <strong>
+                  {currentReport.llama_runtime.process_present_after_shutdown === undefined ||
+                  currentReport.llama_runtime.process_present_after_shutdown === null
+                    ? "unknown"
+                    : currentReport.llama_runtime.process_present_after_shutdown
+                      ? "still present"
+                      : "not observed"}
+                </strong>
+              </div>
+            </div>
+
+            <div className="runtime-summary-meta">
+              <span>
+                source: {currentReport.llama_runtime.process_memory_source || "none"}
+              </span>
+              <span>window: {currentReport.llama_runtime.verification_window_ms} ms</span>
+              <span>
+                shutdown: {humanizeSnakeCase(currentReport.llama_runtime.shutdown_method)}
+              </span>
+            </div>
+          </section>
 
           <div className="report-risk-block">
             <p>{currentReport.llama_runtime.inspection_summary}</p>
