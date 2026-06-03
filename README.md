@@ -290,8 +290,8 @@ Example body:
   "prompt": "Explain secure local inference.",
   "mode": "secure",
   "persistent": false,
-  "model_id": "qwen-small",
-  "corpus_id": "incident-briefing",
+  "model_id": "<configured-model-id>",
+  "corpus_id": "<optional-corpus-id>",
   "chat_template": "auto",
   "chat_context_token_budget": 2048,
   "chat_context_turn_limit": 12
@@ -344,8 +344,8 @@ Example body:
 {
   "mode": "secure",
   "persistent": false,
-  "model_id": "qwen-small",
-  "corpus_id": "incident-briefing",
+  "model_id": "<configured-model-id>",
+  "corpus_id": "<optional-corpus-id>",
   "chat_template": "auto",
   "chat_context_token_budget": 2048,
   "chat_context_turn_limit": 12
@@ -676,7 +676,17 @@ Active chat example:
 ```bash
 curl -X POST http://127.0.0.1:3333/api/chat/start \
   -H "Content-Type: application/json" \
-  -d '{"mode":"secure","persistent":false,"model_id":"qwen-small","corpus_id":"incident-briefing"}'
+  -d '{"mode":"secure","persistent":false,"model_id":"<configured-model-id>","corpus_id":"<optional-corpus-id>"}'
+```
+
+For Windows/NVIDIA validation, capture the live `llama-server` PID during an active chat session and compare NullContext's report with host tooling:
+
+```powershell
+Get-Process -Id <pid>
+Get-CimInstance Win32_Process -Filter "ProcessId = <pid>"
+nvidia-smi
+nvidia-smi --query-compute-apps=pid,used_gpu_memory --format=csv,noheader,nounits
+nvidia-smi pmon -c 1
 ```
 
 ---

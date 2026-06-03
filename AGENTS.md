@@ -404,7 +404,7 @@ Start active chat:
 ```bash
 curl -X POST http://127.0.0.1:3333/api/chat/start \
   -H "Content-Type: application/json" \
-  -d '{"mode":"secure","persistent":false,"model_id":"qwen-small","chat_template":"auto","chat_context_token_budget":2048,"chat_context_turn_limit":12}'
+  -d '{"mode":"secure","persistent":false,"model_id":"<configured-model-id>","chat_template":"auto","chat_context_token_budget":2048,"chat_context_turn_limit":12}'
 ```
 
 Send active chat message:
@@ -419,6 +419,16 @@ End active chat:
 
 ```bash
 curl -X POST http://127.0.0.1:3333/api/chat/<session-id>/end
+```
+
+Windows/NVIDIA validation checks:
+
+```powershell
+Get-Process -Id <pid>
+Get-CimInstance Win32_Process -Filter "ProcessId = <pid>"
+nvidia-smi
+nvidia-smi --query-compute-apps=pid,used_gpu_memory --format=csv,noheader,nounits
+nvidia-smi pmon -c 1
 ```
 
 ## Testing Expectations
@@ -458,6 +468,7 @@ Manual verification should include:
 - macOS runtime reports show vmmap footprint and resident-region evidence when available
 - Windows runtime reports show PowerShell process-memory evidence when available
 - NVIDIA-backed runs report either compute-apps VRAM bytes or `pmon` PID visibility notes when available
+- Windows/NVIDIA validation compares the report against live `Get-Process`, `Win32_Process`, `nvidia-smi compute-apps`, and `nvidia-smi pmon` output for the same llama-server PID
 - lifecycle registry actions work for retained sessions
 - scheduled retention cleanup works
 - model registry drawer loads
