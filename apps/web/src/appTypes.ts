@@ -66,6 +66,7 @@ export type SessionLifecycleMetadata = {
   cleanup_requested_at?: string | null;
   cleanup_completed_at?: string | null;
   cleanup_reason?: string | null;
+  state_note?: string | null;
   updated_at?: string | null;
 };
 
@@ -140,6 +141,7 @@ export type LifecycleReport = {
   cleanup_requested_at?: string | null;
   cleanup_completed_at?: string | null;
   cleanup_reason?: string | null;
+  state_note?: string | null;
   updated_at?: string | null;
   policy_summary: string;
   decision_summary: string;

@@ -329,6 +329,8 @@ export function SessionRegistryDrawer({
                     ? humanizeSnakeCase(selectedSession.lifecycle.cleanup_reason)
                     : "none"}
                 </dd>
+                <dt>state note</dt>
+                <dd>{selectedSession.lifecycle.state_note || "none"}</dd>
                 <dt>lifecycle updated</dt>
                 <dd>
                   {selectedSession.lifecycle.updated_at

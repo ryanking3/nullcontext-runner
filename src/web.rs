@@ -1460,22 +1460,39 @@ fn reconcile_registry_session(
 
         if entry.cleanup_successful && !workspace_exists {
             entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            entry.lifecycle.state_note = Some(
+                "Manual reconciliation confirmed that lifecycle cleanup had already succeeded and the retained workspace is gone."
+                    .to_string(),
+            );
             "Registry matches a cleaned-up session. Workspace is gone and lifecycle cleanup succeeded."
                 .to_string()
         } else if !workspace_exists && !entry.cleanup_successful {
-            entry.mark_orphaned();
+            entry.mark_orphaned_with_note(
+                "Manual reconciliation found that the retained workspace is missing even though successful lifecycle cleanup was never recorded. The session was marked orphaned for review."
+                    .to_string(),
+            );
             "Workspace is missing even though the session was not recorded as cleaned successfully. Marked session as orphaned."
                 .to_string()
         } else if workspace_exists && entry.cleanup_successful {
-            entry.mark_orphaned();
+            entry.mark_orphaned_with_note(
+                "Manual reconciliation found that the retained workspace still exists even though cleanup had been recorded as successful. The session was marked orphaned for review."
+                    .to_string(),
+            );
             "Workspace still exists even though cleanup was previously recorded as successful. Marked session as orphaned for investigation."
                 .to_string()
         } else if !report_exists && !entry.cleanup_successful {
-            entry.mark_orphaned();
+            entry.mark_orphaned_with_note(
+                "Manual reconciliation found that the retained report is missing even though successful cleanup was never recorded. The session was marked orphaned for review."
+                    .to_string(),
+            );
             "Report file is missing while lifecycle cleanup was not recorded as successful. Marked session as orphaned."
                 .to_string()
         } else {
             entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            entry.lifecycle.state_note = Some(
+                "Manual reconciliation confirmed that the registry entry still matches the retained session artifacts on disk."
+                    .to_string(),
+            );
             "Registry paths are present and no reconciliation changes were needed.".to_string()
         }
     };

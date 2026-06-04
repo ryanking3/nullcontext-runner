@@ -134,6 +134,8 @@ pub struct SessionLifecycleMetadata {
     #[serde(default)]
     pub cleanup_reason: Option<CleanupReason>,
     #[serde(default)]
+    pub state_note: Option<String>,
+    #[serde(default)]
     pub updated_at: Option<String>,
 }
 
@@ -245,6 +247,10 @@ impl SessionIndexEntry {
         self.lifecycle.state = SessionLifecycleState::CleanupPending;
         self.lifecycle.cleanup_requested_at = Some(current_timestamp());
         self.lifecycle.cleanup_reason = Some(reason);
+        self.lifecycle.state_note = Some(
+            "Lifecycle cleanup was requested and NullContext is preparing to archive the report and remove the retained workspace."
+                .to_string(),
+        );
         self.lifecycle.updated_at = self.lifecycle.cleanup_requested_at.clone();
     }
 
@@ -261,13 +267,28 @@ impl SessionIndexEntry {
         };
         self.lifecycle.cleanup_completed_at = Some(current_timestamp());
         self.lifecycle.cleanup_reason = Some(reason);
+        self.lifecycle.state_note = Some(if cleanup.successful {
+            "Lifecycle cleanup finished and NullContext recorded the retained workspace cleanup result."
+                .to_string()
+        } else {
+            "Lifecycle cleanup finished with a failed or partial result. Operator follow-up may still be required."
+                .to_string()
+        });
         self.lifecycle.updated_at = self.lifecycle.cleanup_completed_at.clone();
     }
 
     #[allow(dead_code)]
     pub fn mark_orphaned(&mut self) {
+        self.mark_orphaned_with_note(
+            "Lifecycle reconciliation detected an inconsistency between the registry entry and on-disk session artifacts."
+                .to_string(),
+        );
+    }
+
+    pub fn mark_orphaned_with_note(&mut self, note: String) {
         self.lifecycle.state = SessionLifecycleState::Orphaned;
         self.lifecycle.cleanup_reason = Some(CleanupReason::StartupOrphanReconciliation);
+        self.lifecycle.state_note = Some(note);
         self.lifecycle.updated_at = Some(current_timestamp());
     }
 
@@ -294,6 +315,10 @@ impl SessionLifecycleMetadata {
                 cleanup_requested_at: None,
                 cleanup_completed_at: None,
                 cleanup_reason: None,
+                state_note: Some(
+                    "Session is currently live in memory and has not yet reached its cleanup boundary."
+                        .to_string(),
+                ),
                 updated_at,
             };
         }
@@ -305,6 +330,10 @@ impl SessionLifecycleMetadata {
             cleanup_requested_at: None,
             cleanup_completed_at: None,
             cleanup_reason: None,
+            state_note: Some(
+                "Persistent active chat was registered at session start so startup reconciliation can flag it if NullContext exits unexpectedly."
+                    .to_string(),
+            ),
             updated_at,
         }
     }
@@ -326,6 +355,10 @@ impl SessionLifecycleMetadata {
                 cleanup_requested_at: None,
                 cleanup_completed_at: updated_at.clone(),
                 cleanup_reason: Some(CleanupReason::EphemeralPolicy),
+                state_note: Some(
+                    "Session reached its ephemeral cleanup boundary and NullContext recorded the cleanup result."
+                        .to_string(),
+                ),
                 updated_at,
             };
         }
@@ -337,6 +370,10 @@ impl SessionLifecycleMetadata {
             cleanup_requested_at: None,
             cleanup_completed_at: None,
             cleanup_reason: None,
+            state_note: Some(
+                "Session ended cleanly and its retained artifacts remain available under the current lifecycle policy."
+                    .to_string(),
+            ),
             updated_at,
         }
     }
@@ -551,7 +588,10 @@ fn reconcile_entry(entry: &mut SessionIndexEntry) -> ReconciliationOutcome {
     let report_exists = Path::new(&entry.report_path).exists();
 
     if entry.lifecycle.state == SessionLifecycleState::CleanupPending {
-        entry.mark_orphaned();
+        entry.mark_orphaned_with_note(
+            "Startup found this retained session still marked cleanup_pending, so the prior cleanup attempt likely ended before completion and needs operator review."
+                .to_string(),
+        );
         return ReconciliationOutcome::Changed(
             "Startup found a session still marked cleanup_pending; reclassified as orphaned."
                 .to_string(),
@@ -559,7 +599,10 @@ fn reconcile_entry(entry: &mut SessionIndexEntry) -> ReconciliationOutcome {
     }
 
     if entry.lifecycle.state == SessionLifecycleState::Active {
-        entry.mark_orphaned();
+        entry.mark_orphaned_with_note(
+            "Startup found this retained session still marked active. The in-memory runtime could not be recovered after restart, so the session was marked orphaned for review."
+                .to_string(),
+        );
         return ReconciliationOutcome::Changed(
             "Startup found a registry entry still marked active; reclassified as orphaned because active in-memory state cannot be recovered after restart."
                 .to_string(),
@@ -568,7 +611,10 @@ fn reconcile_entry(entry: &mut SessionIndexEntry) -> ReconciliationOutcome {
 
     if entry.cleanup_successful && !workspace_exists {
         if !report_exists {
-            entry.mark_orphaned();
+            entry.mark_orphaned_with_note(
+                "Cleanup had been recorded as successful and the workspace is gone, but the saved report path is also missing. The session was marked orphaned for investigation."
+                    .to_string(),
+            );
             return ReconciliationOutcome::Changed(
                 "Cleanup had been recorded as successful and the workspace is gone, but the report path is missing; marked orphaned for investigation."
                     .to_string(),
@@ -582,7 +628,10 @@ fn reconcile_entry(entry: &mut SessionIndexEntry) -> ReconciliationOutcome {
     }
 
     if !workspace_exists && !entry.cleanup_successful {
-        entry.mark_orphaned();
+        entry.mark_orphaned_with_note(
+            "The retained workspace is missing even though successful lifecycle cleanup was never recorded. The session was marked orphaned for investigation."
+                .to_string(),
+        );
         return ReconciliationOutcome::Changed(
             "Workspace is missing even though lifecycle cleanup was not recorded as successful; marked orphaned."
                 .to_string(),
@@ -590,7 +639,10 @@ fn reconcile_entry(entry: &mut SessionIndexEntry) -> ReconciliationOutcome {
     }
 
     if workspace_exists && entry.cleanup_successful {
-        entry.mark_orphaned();
+        entry.mark_orphaned_with_note(
+            "Lifecycle cleanup had been recorded as successful, but the retained workspace still exists on disk. The session was marked orphaned for investigation."
+                .to_string(),
+        );
         return ReconciliationOutcome::Changed(
             "Workspace still exists even though cleanup was previously recorded as successful; marked orphaned."
                 .to_string(),
@@ -598,7 +650,10 @@ fn reconcile_entry(entry: &mut SessionIndexEntry) -> ReconciliationOutcome {
     }
 
     if !report_exists && !entry.cleanup_successful {
-        entry.mark_orphaned();
+        entry.mark_orphaned_with_note(
+            "The retained session report is missing even though lifecycle cleanup was not recorded as successful. The session was marked orphaned for investigation."
+                .to_string(),
+        );
         return ReconciliationOutcome::Changed(
             "Report path is missing while cleanup was not recorded as successful; marked orphaned."
                 .to_string(),

@@ -63,6 +63,7 @@ pub struct LifecycleReport {
     pub cleanup_requested_at: Option<String>,
     pub cleanup_completed_at: Option<String>,
     pub cleanup_reason: Option<String>,
+    pub state_note: Option<String>,
     pub updated_at: Option<String>,
     pub policy_summary: String,
     pub decision_summary: String,
@@ -218,6 +219,7 @@ impl LifecycleReport {
                 .cleanup_reason
                 .as_ref()
                 .map(|reason| reason.as_str().to_string()),
+            state_note: metadata.state_note.clone(),
             updated_at: metadata.updated_at.clone(),
             policy_summary: lifecycle_policy_summary(metadata),
             decision_summary: lifecycle_decision_summary(metadata),
@@ -655,6 +657,10 @@ fn lifecycle_policy_summary(metadata: &SessionLifecycleMetadata) -> String {
 }
 
 fn lifecycle_decision_summary(metadata: &SessionLifecycleMetadata) -> String {
+    if let Some(note) = &metadata.state_note {
+        return note.clone();
+    }
+
     match metadata.state {
         SessionLifecycleState::CompletedRetained => {
             "Session completed and its retained artifacts remain available under the current lifecycle policy."

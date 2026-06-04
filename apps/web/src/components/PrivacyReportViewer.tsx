@@ -163,6 +163,10 @@ export function PrivacyReportViewer({
                   : "none",
               },
               {
+                label: "state note",
+                value: currentReport.lifecycle.state_note || "none",
+              },
+              {
                 label: "updated",
                 value: currentReport.lifecycle.updated_at
                   ? formatTimestamp(currentReport.lifecycle.updated_at)
