@@ -166,19 +166,19 @@ export function AppSidebar({
               <span>
                 corpus:{" "}
                 {selectedCorpus
-                  ? `${selectedCorpus.name} · ${selectedCorpus.persistent ? "persistent" : "ephemeral"}`
+                  ? `${selectedCorpus.name} | ${selectedCorpus.persistent ? "persistent" : "ephemeral"}`
                   : "none"}
               </span>
               <span>
                 template: {effectiveTemplate}
-                {useModelTemplateDefault ? " · model" : " · override"}
+                {useModelTemplateDefault ? " | model" : " | override"}
               </span>
               <span>
                 context:{" "}
                 {effectiveContextBudget !== null && effectiveContextTurnLimit !== null
                   ? `${effectiveContextBudget} tok / ${effectiveContextTurnLimit} turns`
                   : "invalid"}
-                {useModelContextDefaults ? " · model" : " · override"}
+                {useModelContextDefaults ? " | model" : " | override"}
               </span>
             </div>
 

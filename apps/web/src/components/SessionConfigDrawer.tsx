@@ -102,8 +102,8 @@ export function SessionConfigDrawer({
                   models.map((model) => (
                     <option key={model.id} value={model.id} disabled={!model.selectable}>
                       {model.name}
-                      {model.default_selected ? " · default" : ""}
-                      {!model.selectable ? " · unavailable" : ""}
+                      {model.default_selected ? " | default" : ""}
+                      {!model.selectable ? " | unavailable" : ""}
                     </option>
                   ))
                 )}
@@ -166,7 +166,7 @@ export function SessionConfigDrawer({
                 <span>id: {selectedCorpus.corpus_id}</span>
                 <span>lifecycle: {humanizeSnakeCase(selectedCorpus.lifecycle.state)}</span>
                 <span>
-                  chunks: {selectedCorpus.chunk_count} · sources: {selectedCorpus.source_count}
+                  chunks: {selectedCorpus.chunk_count} | sources: {selectedCorpus.source_count}
                 </span>
               </div>
             ) : (

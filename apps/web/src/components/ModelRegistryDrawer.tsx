@@ -124,7 +124,7 @@ export function ModelRegistryDrawer({
                     <small>{model.id}</small>
                     <small>{model.chat_template}</small>
                   </div>
-                  <small>{model.max_tokens} tok · {model.gpu_layers} gpu layers</small>
+                  <small>{model.max_tokens} tok | {model.gpu_layers} gpu layers</small>
                 </button>
               ))}
             </div>

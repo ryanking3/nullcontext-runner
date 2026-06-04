@@ -424,7 +424,7 @@ export function ChatWorkspace({
             <div className="composer-meta">
               {selectedCorpus && (
                 <span className="composer-corpus-chip">
-                  corpus: {selectedCorpus.name} ·{" "}
+                  corpus: {selectedCorpus.name} |{" "}
                   {selectedCorpus.persistent ? "persistent" : "ephemeral"}
                 </span>
               )}
@@ -437,7 +437,7 @@ export function ChatWorkspace({
                     />
                   </div>
                   <span>
-                    {corpusUploadProgressPercent}% ·{" "}
+                    {corpusUploadProgressPercent}% |{" "}
                     {corpusUploadProgressLabel || "Uploading corpus files..."}
                   </span>
                 </div>

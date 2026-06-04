@@ -176,7 +176,7 @@ export function CorpusDrawer({
                   </div>
                   <small>{shortId(corpus.corpus_id)}</small>
                   <small>
-                    {corpus.source_count} sources · {corpus.chunk_count} chunks
+                    {corpus.source_count} sources | {corpus.chunk_count} chunks
                   </small>
                 </button>
               ))}
@@ -364,7 +364,7 @@ export function CorpusDrawer({
             <section className="corpus-ingest-panel">
               <div className="panel-header">
                 <div className="panel-title">ingest corpus</div>
-                <span className="mini-status">txt · md · pdf</span>
+                <span className="mini-status">txt | md | pdf</span>
               </div>
 
               {corpusIngestMessage && (
@@ -453,7 +453,7 @@ export function CorpusDrawer({
                   </span>
                   {corpusUploadFiles.slice(0, 4).map((file) => (
                     <span key={`${file.name}-${file.size}`}>
-                      {file.name} · {formatBytes(file.size)}
+                      {file.name} | {formatBytes(file.size)}
                     </span>
                   ))}
                   {corpusUploadFiles.length > 4 && (
@@ -519,11 +519,11 @@ export function CorpusDrawer({
                 <div className="config-summary corpus-ingest-summary">
                   <span>last ingest: {shortId(lastIngestedCorpusReport.corpus_id)}</span>
                   <span>
-                    discovered: {lastIngestedCorpusReport.files_discovered} · ingested:{" "}
+                    discovered: {lastIngestedCorpusReport.files_discovered} | ingested:{" "}
                     {lastIngestedCorpusReport.files_ingested}
                   </span>
                   <span>
-                    pdf pages: {lastIngestedCorpusReport.pdf_pages_seen} · OCR:{" "}
+                    pdf pages: {lastIngestedCorpusReport.pdf_pages_seen} | OCR:{" "}
                     {lastIngestedCorpusReport.pdf_pages_ocrd}
                   </span>
                   <span>chunks: {lastIngestedCorpusReport.chunk_count}</span>

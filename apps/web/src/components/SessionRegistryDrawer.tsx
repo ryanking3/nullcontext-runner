@@ -439,7 +439,7 @@ export function SessionRegistryDrawer({
                   disabled={selectedSessionIsActive}
                   title={
                     selectedSessionIsActive
-                      ? "Active chat reports are written when the session ends."
+                      ? "End + Sanitize first. Active chat reports are written when the session ends."
                       : undefined
                   }
                 >
@@ -450,7 +450,7 @@ export function SessionRegistryDrawer({
                   disabled={registryActionPending !== null || selectedSessionIsActive}
                   title={
                     selectedSessionIsActive
-                      ? "Active retained chats must end before reconciliation can run."
+                      ? "End + Sanitize first. Reconciliation only applies after the retained chat is no longer live."
                       : undefined
                   }
                 >
@@ -462,7 +462,7 @@ export function SessionRegistryDrawer({
                   disabled={registryActionPending !== null || selectedSessionIsActive}
                   title={
                     selectedSessionIsActive
-                      ? "Active retained chats must end before lifecycle cleanup can run."
+                      ? "End + Sanitize first. Lifecycle cleanup only runs after the retained chat is no longer live."
                       : undefined
                   }
                 >

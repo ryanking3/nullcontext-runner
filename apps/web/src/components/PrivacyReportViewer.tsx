@@ -101,7 +101,8 @@ export function PrivacyReportViewer({
         <div className="report-toolbar-copy">
           <strong>privacy report</strong>
           <span>
-            session {shortId(currentReport.session_id)} · {formatTimestamp(currentReport.started_at)}
+            session {shortId(currentReport.session_id)} |{" "}
+            {formatTimestamp(currentReport.started_at)}
           </span>
         </div>
 
