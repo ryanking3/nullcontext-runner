@@ -1240,6 +1240,15 @@ async fn show_report(State(state): State<WebState>, Path(session_id): Path<Strin
         );
     };
 
+    if entry.lifecycle.state == SessionLifecycleState::Active {
+        return json_error(
+            StatusCode::CONFLICT,
+            format!(
+                "Session {session_id} is still active. Privacy reports are written when the active chat ends and sanitization completes."
+            ),
+        );
+    }
+
     match fs::read_to_string(&entry.report_path) {
         Ok(report) => match serde_json::from_str::<serde_json::Value>(&report) {
             Ok(json) => Json(json).into_response(),

@@ -62,9 +62,24 @@ export function useSessionRegistry({
     setSelectedSessionId(sessionId);
     setShowRawReport(false);
 
+    const session = sessions.find((entry) => entry.session_id === sessionId);
+    if (session?.lifecycle.state === "active") {
+      setSelectedReport(
+        "This persistent active chat is still live. NullContext writes the privacy report when the session ends and sanitization completes."
+      );
+      return;
+    }
+
     try {
       const response = await fetch(`${apiBase}/api/reports/${sessionId}`);
       const data = await response.json();
+
+      if (!response.ok) {
+        const error = typeof data?.error === "string" ? data.error : "Failed to load report.";
+        setSelectedReport(error);
+        return;
+      }
+
       setSelectedReport(JSON.stringify(data, null, 2));
     } catch (error) {
       setSelectedReport(String(error));

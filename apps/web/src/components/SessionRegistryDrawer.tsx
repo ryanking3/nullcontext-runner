@@ -420,7 +420,15 @@ export function SessionRegistryDrawer({
               </section>
 
               <div className="registry-actions">
-                <button onClick={() => onOpenSessionReport(selectedSession.session_id)}>
+                <button
+                  onClick={() => onOpenSessionReport(selectedSession.session_id)}
+                  disabled={selectedSession.lifecycle.state === "active"}
+                  title={
+                    selectedSession.lifecycle.state === "active"
+                      ? "Active chat reports are written when the session ends."
+                      : undefined
+                  }
+                >
                   open report in inspector
                 </button>
                 <button
@@ -442,6 +450,12 @@ export function SessionRegistryDrawer({
                 Registry browsing stays separate from the live runtime shell so report inspection and
                 lifecycle actions don&apos;t compete with conversation and runtime controls.
               </p>
+              {selectedSession.lifecycle.state === "active" && (
+                <p className="microcopy">
+                  This retained chat is still active, so its privacy report will appear only after
+                  End + Sanitize completes.
+                </p>
+              )}
             </>
           )}
         </section>
