@@ -5,6 +5,7 @@ use reqwest::blocking::Client;
 #[cfg(target_os = "windows")]
 use serde_json::Value;
 use std::io::Read;
+use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -76,6 +77,8 @@ const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
 impl ManagedRuntime {
     pub fn launch(config: &SessionConfig) -> Result<Self> {
         stdout_line("Launching llama-server...");
+        let port = reserve_local_runtime_port()?;
+        let base_url = format!("http://127.0.0.1:{port}");
 
         let child = Command::new(&config.llama_path)
             .arg("-m")
@@ -85,19 +88,17 @@ impl ManagedRuntime {
             .arg("--host")
             .arg("127.0.0.1")
             .arg("--port")
-            .arg("8080")
+            .arg(port.to_string())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("Failed to launch llama-server at {}", config.llama_path))?;
 
-        let mut runtime = Self {
-            child,
-            base_url: "http://127.0.0.1:8080".to_string(),
-        };
+        let mut runtime = Self { child, base_url };
 
         runtime.wait_until_ready(Duration::from_secs(60))?;
 
+        stdout_line(format!("Runtime endpoint: {}", runtime.base_url));
         stdout_line("Runtime healthy.");
 
         Ok(runtime)
@@ -182,6 +183,17 @@ impl ManagedRuntime {
 
         bail!("llama-server did not become ready within {:?}", timeout)
     }
+}
+
+fn reserve_local_runtime_port() -> Result<u16> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .context("Failed to reserve a localhost port for llama-server")?;
+    let port = listener
+        .local_addr()
+        .context("Failed to read reserved localhost port for llama-server")?
+        .port();
+    drop(listener);
+    Ok(port)
 }
 
 pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
