@@ -377,14 +377,18 @@ export function SessionRegistryDrawer({
                 <dd className="registry-path">{selectedSession.model_path}</dd>
                 <dt>report path</dt>
                 <dd className="registry-path">{selectedSession.report_path}</dd>
-                {selectedLifecycleResult && (
-                  <>
-                    <dt>workspace exists</dt>
-                    <dd>{formatBoolean(selectedLifecycleResult.workspace_exists)}</dd>
-                    <dt>report exists</dt>
-                    <dd>{formatBoolean(selectedLifecycleResult.report_exists)}</dd>
-                  </>
-                )}
+                <dt>workspace exists</dt>
+                <dd>
+                  {formatBoolean(
+                    selectedLifecycleResult?.workspace_exists ?? selectedSession.workspace_exists
+                  )}
+                </dd>
+                <dt>report exists</dt>
+                <dd>
+                  {formatBoolean(
+                    selectedLifecycleResult?.report_exists ?? selectedSession.report_exists
+                  )}
+                </dd>
               </dl>
 
               <section className="registry-retention-controls">
@@ -436,10 +440,12 @@ export function SessionRegistryDrawer({
               <div className="registry-actions">
                 <button
                   onClick={() => onOpenSessionReport(selectedSession.session_id)}
-                  disabled={selectedSessionIsActive}
+                  disabled={selectedSessionIsActive || !selectedSession.report_exists}
                   title={
                     selectedSessionIsActive
                       ? "End + Sanitize first. Active chat reports are written when the session ends."
+                      : !selectedSession.report_exists
+                        ? "No saved report is currently available for this retained session."
                       : undefined
                   }
                 >

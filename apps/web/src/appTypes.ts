@@ -86,6 +86,8 @@ export type SessionIndexEntry = {
   cleanup_attempted: boolean;
   cleanup_successful: boolean;
   workspace_deleted: boolean;
+  workspace_exists: boolean;
+  report_exists: boolean;
   lifecycle: SessionLifecycleMetadata;
 };
 

@@ -72,6 +72,33 @@ struct ErrorResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct SessionRegistrySnapshotResponse {
+    sessions: Vec<SessionRegistryEntryResponse>,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionRegistryEntryResponse {
+    session_id: String,
+    started_at: String,
+    security_mode: String,
+    prompt_source: String,
+    history_stored: bool,
+    backend: String,
+    model_id: String,
+    model_name: String,
+    model_path: String,
+    workspace: String,
+    report_path: String,
+    artifacts_detected: usize,
+    cleanup_attempted: bool,
+    cleanup_successful: bool,
+    workspace_deleted: bool,
+    workspace_exists: bool,
+    report_exists: bool,
+    lifecycle: SessionLifecycleMetadata,
+}
+
+#[derive(Debug, Serialize)]
 struct SessionLifecycleActionResponse {
     session_id: String,
     lifecycle_state: String,
@@ -1177,7 +1204,7 @@ fn send_payload(tx: &mpsc::Sender<StreamPayload>, payload: StreamPayload) -> boo
 
 async fn list_sessions(State(state): State<WebState>) -> Response {
     match SessionRegistry::load(&state.home) {
-        Ok(registry) => Json(registry).into_response(),
+        Ok(registry) => Json(build_session_registry_snapshot(registry)).into_response(),
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
@@ -1586,6 +1613,39 @@ fn build_lifecycle_action_response(
         workspace: entry.workspace.clone(),
         report_path: entry.report_path.clone(),
         message: message.to_string(),
+    }
+}
+
+fn build_session_registry_snapshot(registry: SessionRegistry) -> SessionRegistrySnapshotResponse {
+    SessionRegistrySnapshotResponse {
+        sessions: registry
+            .sessions
+            .into_iter()
+            .map(build_session_registry_entry_response)
+            .collect(),
+    }
+}
+
+fn build_session_registry_entry_response(entry: SessionIndexEntry) -> SessionRegistryEntryResponse {
+    SessionRegistryEntryResponse {
+        workspace_exists: FsPath::new(&entry.workspace).exists(),
+        report_exists: FsPath::new(&entry.report_path).exists(),
+        session_id: entry.session_id,
+        started_at: entry.started_at,
+        security_mode: entry.security_mode,
+        prompt_source: entry.prompt_source,
+        history_stored: entry.history_stored,
+        backend: entry.backend,
+        model_id: entry.model_id,
+        model_name: entry.model_name,
+        model_path: entry.model_path,
+        workspace: entry.workspace,
+        report_path: entry.report_path,
+        artifacts_detected: entry.artifacts_detected,
+        cleanup_attempted: entry.cleanup_attempted,
+        cleanup_successful: entry.cleanup_successful,
+        workspace_deleted: entry.workspace_deleted,
+        lifecycle: entry.lifecycle,
     }
 }
 
