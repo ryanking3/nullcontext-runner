@@ -99,6 +99,31 @@ struct SessionRegistryEntryResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct CorpusRegistrySnapshotResponse {
+    corpora: Vec<CorpusRegistryEntryResponse>,
+}
+
+#[derive(Debug, Serialize)]
+struct CorpusRegistryEntryResponse {
+    corpus_id: String,
+    name: String,
+    created_at: String,
+    persistent: bool,
+    root_path: String,
+    manifest_path: String,
+    report_path: String,
+    source_count: usize,
+    chunk_count: usize,
+    embedding_backend: Option<String>,
+    embedding_model: Option<String>,
+    ocr_backend: Option<String>,
+    root_exists: bool,
+    manifest_exists: bool,
+    report_exists: bool,
+    lifecycle: crate::corpus::CorpusLifecycleMetadata,
+}
+
+#[derive(Debug, Serialize)]
 struct SessionLifecycleActionResponse {
     session_id: String,
     lifecycle_state: String,
@@ -374,7 +399,7 @@ async fn list_models(State(state): State<WebState>) -> Response {
 
 async fn list_corpora_route(State(state): State<WebState>) -> Response {
     match list_corpora(&state.home) {
-        Ok(registry) => Json::<CorpusRegistry>(registry).into_response(),
+        Ok(registry) => Json(build_corpus_registry_snapshot(registry)).into_response(),
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
@@ -1645,6 +1670,37 @@ fn build_session_registry_entry_response(entry: SessionIndexEntry) -> SessionReg
         cleanup_attempted: entry.cleanup_attempted,
         cleanup_successful: entry.cleanup_successful,
         workspace_deleted: entry.workspace_deleted,
+        lifecycle: entry.lifecycle,
+    }
+}
+
+fn build_corpus_registry_snapshot(registry: CorpusRegistry) -> CorpusRegistrySnapshotResponse {
+    CorpusRegistrySnapshotResponse {
+        corpora: registry
+            .corpora
+            .into_iter()
+            .map(build_corpus_registry_entry_response)
+            .collect(),
+    }
+}
+
+fn build_corpus_registry_entry_response(entry: CorpusIndexEntry) -> CorpusRegistryEntryResponse {
+    CorpusRegistryEntryResponse {
+        root_exists: FsPath::new(&entry.root_path).exists(),
+        manifest_exists: FsPath::new(&entry.manifest_path).exists(),
+        report_exists: FsPath::new(&entry.report_path).exists(),
+        corpus_id: entry.corpus_id,
+        name: entry.name,
+        created_at: entry.created_at,
+        persistent: entry.persistent,
+        root_path: entry.root_path,
+        manifest_path: entry.manifest_path,
+        report_path: entry.report_path,
+        source_count: entry.source_count,
+        chunk_count: entry.chunk_count,
+        embedding_backend: entry.embedding_backend,
+        embedding_model: entry.embedding_model,
+        ocr_backend: entry.ocr_backend,
         lifecycle: entry.lifecycle,
     }
 }

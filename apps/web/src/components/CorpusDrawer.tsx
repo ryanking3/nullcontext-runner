@@ -268,14 +268,20 @@ export function CorpusDrawer({
                     <dd className="registry-path">{selectedCorpus.manifest_path}</dd>
                     <dt>report path</dt>
                     <dd className="registry-path">{selectedCorpus.report_path}</dd>
-                    {selectedCorpusLifecycleResult && (
-                      <>
-                        <dt>root exists</dt>
-                        <dd>{formatBoolean(selectedCorpusLifecycleResult.root_exists)}</dd>
-                        <dt>report exists</dt>
-                        <dd>{formatBoolean(selectedCorpusLifecycleResult.report_exists)}</dd>
-                      </>
-                    )}
+                    <dt>root exists</dt>
+                    <dd>
+                      {formatBoolean(
+                        selectedCorpusLifecycleResult?.root_exists ?? selectedCorpus.root_exists
+                      )}
+                    </dd>
+                    <dt>manifest exists</dt>
+                    <dd>{formatBoolean(selectedCorpus.manifest_exists)}</dd>
+                    <dt>report exists</dt>
+                    <dd>
+                      {formatBoolean(
+                        selectedCorpusLifecycleResult?.report_exists ?? selectedCorpus.report_exists
+                      )}
+                    </dd>
                   </dl>
 
                   <section className="registry-retention-controls">
@@ -331,7 +337,12 @@ export function CorpusDrawer({
                     </button>
                     <button
                       onClick={() => onOpenCorpusReport(selectedCorpus.corpus_id)}
-                      disabled={corpusActionPending !== null}
+                      disabled={corpusActionPending !== null || !selectedCorpus.report_exists}
+                      title={
+                        !selectedCorpus.report_exists
+                          ? "No saved corpus report is currently available for this corpus."
+                          : undefined
+                      }
                     >
                       load report
                     </button>

@@ -56,6 +56,9 @@ export type CorpusIndexEntry = {
   embedding_backend?: string | null;
   embedding_model?: string | null;
   ocr_backend?: string | null;
+  root_exists: boolean;
+  manifest_exists: boolean;
+  report_exists: boolean;
   lifecycle: CorpusLifecycleMetadata;
 };
 
@@ -377,6 +380,7 @@ export type CorpusLifecycleActionResponse = {
   retention_deadline?: string | null;
   cleanup_reason?: string | null;
   root_exists: boolean;
+  manifest_exists?: boolean;
   report_exists: boolean;
   root_path: string;
   manifest_path: string;
