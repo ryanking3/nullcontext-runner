@@ -246,6 +246,8 @@ export function CorpusDrawer({
                         ? humanizeSnakeCase(selectedCorpus.lifecycle.cleanup_reason)
                         : "none"}
                     </dd>
+                    <dt>state note</dt>
+                    <dd>{selectedCorpus.lifecycle.state_note || "none"}</dd>
                     <dt>lifecycle updated</dt>
                     <dd>
                       {selectedCorpus.lifecycle.updated_at
@@ -275,7 +277,12 @@ export function CorpusDrawer({
                       )}
                     </dd>
                     <dt>manifest exists</dt>
-                    <dd>{formatBoolean(selectedCorpus.manifest_exists)}</dd>
+                    <dd>
+                      {formatBoolean(
+                        selectedCorpusLifecycleResult?.manifest_exists ??
+                          selectedCorpus.manifest_exists
+                      )}
+                    </dd>
                     <dt>report exists</dt>
                     <dd>
                       {formatBoolean(

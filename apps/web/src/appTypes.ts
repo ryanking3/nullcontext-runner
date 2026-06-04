@@ -40,6 +40,7 @@ export type CorpusLifecycleMetadata = {
   cleanup_requested_at?: string | null;
   cleanup_completed_at?: string | null;
   cleanup_reason?: string | null;
+  state_note?: string | null;
   updated_at?: string | null;
 };
 

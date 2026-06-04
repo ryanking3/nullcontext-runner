@@ -154,6 +154,10 @@ pub fn ingest_corpus(home: &str, request: IngestCorpusRequest) -> Result<IngestC
 
     let mut manifest = CorpusManifest::new(request.name, home, persistent);
     manifest.lifecycle.state = CorpusLifecycleState::Building;
+    manifest.lifecycle.state_note = Some(
+        "Corpus ingestion is running and NullContext is building the manifest, extracted text, chunks, embeddings, and report artifacts."
+            .to_string(),
+    );
     manifest.lifecycle.updated_at = Some(Utc::now().to_rfc3339());
     manifest.chunk_strategy = format!("char_window:{}:{}", CHUNK_SIZE_CHARS, CHUNK_OVERLAP_CHARS);
     manifest.ocr_backend = Some(if ocr_enabled {
@@ -178,6 +182,13 @@ pub fn ingest_corpus(home: &str, request: IngestCorpusRequest) -> Result<IngestC
             } else {
                 CorpusLifecycleState::Ready
             };
+            manifest.lifecycle.state_note = Some(if result.report.files_failed > 0 {
+                "Corpus ingestion completed with some source-level failures, but NullContext finalized a usable retrieval corpus from the successfully processed inputs."
+                    .to_string()
+            } else {
+                "Corpus ingestion completed successfully and retrieval artifacts are ready under the current lifecycle policy."
+                    .to_string()
+            });
             manifest.lifecycle.updated_at = Some(Utc::now().to_rfc3339());
             let embeddings = embed_chunks(&result.chunks);
 
@@ -206,6 +217,10 @@ pub fn ingest_corpus(home: &str, request: IngestCorpusRequest) -> Result<IngestC
         }
         Err(error) => {
             manifest.lifecycle.state = CorpusLifecycleState::IngestionFailed;
+            manifest.lifecycle.state_note = Some(
+                "Corpus ingestion failed before NullContext could finalize a usable retrieval corpus."
+                    .to_string(),
+            );
             manifest.lifecycle.updated_at = Some(Utc::now().to_rfc3339());
             let _ = write_manifest(&manifest);
             let _ = register_corpus(home, &manifest);

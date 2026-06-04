@@ -148,6 +148,7 @@ struct CorpusLifecycleActionResponse {
     retention_deadline: Option<String>,
     cleanup_reason: Option<String>,
     root_exists: bool,
+    manifest_exists: bool,
     report_exists: bool,
     root_path: String,
     manifest_path: String,
@@ -1860,30 +1861,47 @@ fn reconcile_registry_corpus(home: &str, corpus_id: &str) -> Result<CorpusLifecy
             && !root_exists
         {
             entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            entry.lifecycle.state_note = Some(
+                "Manual reconciliation confirmed that lifecycle cleanup had already succeeded and the corpus root is gone."
+                    .to_string(),
+            );
             "Registry matches a cleaned-up corpus. Root directory is gone and lifecycle cleanup succeeded."
                 .to_string()
         } else if !root_exists
             && entry.lifecycle.state != crate::corpus::CorpusLifecycleState::CleanupSucceeded
             && entry.lifecycle.state != crate::corpus::CorpusLifecycleState::CleanupFailed
         {
-            entry.mark_orphaned();
+            entry.mark_orphaned_with_note(
+                "Manual reconciliation found that the corpus root is missing even though successful lifecycle cleanup was never recorded. The corpus was marked orphaned for review."
+                    .to_string(),
+            );
             "Corpus root is missing even though cleanup was not recorded as successful. Marked corpus as orphaned."
                 .to_string()
         } else if root_exists
             && entry.lifecycle.state == crate::corpus::CorpusLifecycleState::CleanupSucceeded
         {
-            entry.mark_orphaned();
+            entry.mark_orphaned_with_note(
+                "Manual reconciliation found that the corpus root still exists even though cleanup had been recorded as successful. The corpus was marked orphaned for review."
+                    .to_string(),
+            );
             "Corpus root still exists even though cleanup was previously recorded as successful. Marked corpus as orphaned for investigation."
                 .to_string()
         } else if !report_exists
             && entry.lifecycle.state != crate::corpus::CorpusLifecycleState::CleanupSucceeded
             && entry.lifecycle.state != crate::corpus::CorpusLifecycleState::CleanupFailed
         {
-            entry.mark_orphaned();
+            entry.mark_orphaned_with_note(
+                "Manual reconciliation found that the retained corpus report is missing even though successful cleanup was never recorded. The corpus was marked orphaned for review."
+                    .to_string(),
+            );
             "Corpus report is missing while cleanup was not recorded as successful. Marked corpus as orphaned."
                 .to_string()
         } else {
             entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            entry.lifecycle.state_note = Some(
+                "Manual reconciliation confirmed that the corpus registry entry still matches the corpus artifacts on disk."
+                    .to_string(),
+            );
             "Registry paths are present and no corpus reconciliation changes were needed."
                 .to_string()
         }
@@ -1980,6 +1998,7 @@ fn build_corpus_lifecycle_action_response(
             .as_ref()
             .map(|reason| reason.as_str().to_string()),
         root_exists: FsPath::new(&entry.root_path).exists(),
+        manifest_exists: FsPath::new(&entry.manifest_path).exists(),
         report_exists: FsPath::new(&entry.report_path).exists(),
         root_path: entry.root_path.clone(),
         manifest_path: entry.manifest_path.clone(),

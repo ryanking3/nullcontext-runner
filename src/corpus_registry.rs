@@ -110,6 +110,10 @@ impl CorpusIndexEntry {
         self.lifecycle.state = CorpusLifecycleState::CleanupPending;
         self.lifecycle.cleanup_requested_at = Some(current_timestamp());
         self.lifecycle.cleanup_reason = Some(reason);
+        self.lifecycle.state_note = Some(
+            "Lifecycle cleanup was requested and NullContext is preparing to archive the corpus report and remove retained corpus artifacts."
+                .to_string(),
+        );
         self.lifecycle.updated_at = self.lifecycle.cleanup_requested_at.clone();
     }
 
@@ -121,14 +125,29 @@ impl CorpusIndexEntry {
         };
         self.lifecycle.cleanup_completed_at = Some(current_timestamp());
         self.lifecycle.cleanup_reason = Some(reason);
+        self.lifecycle.state_note = Some(if successful {
+            "Lifecycle cleanup finished and NullContext recorded the retained corpus cleanup result."
+                .to_string()
+        } else {
+            "Lifecycle cleanup finished with a failed or partial result. Operator follow-up may still be required for this corpus."
+                .to_string()
+        });
         self.lifecycle.updated_at = self.lifecycle.cleanup_completed_at.clone();
         self.source_count = 0;
         self.chunk_count = 0;
     }
 
     pub fn mark_orphaned(&mut self) {
+        self.mark_orphaned_with_note(
+            "Lifecycle reconciliation detected an inconsistency between the corpus registry entry and on-disk corpus artifacts."
+                .to_string(),
+        );
+    }
+
+    pub fn mark_orphaned_with_note(&mut self, note: String) {
         self.lifecycle.state = CorpusLifecycleState::Orphaned;
         self.lifecycle.cleanup_reason = Some(CorpusCleanupReason::StartupOrphanReconciliation);
+        self.lifecycle.state_note = Some(note);
         self.lifecycle.updated_at = Some(current_timestamp());
     }
 
@@ -296,7 +315,10 @@ fn reconcile_corpus_entry(entry: &mut CorpusIndexEntry) -> CorpusReconciliationO
     let report_exists = Path::new(&entry.report_path).exists();
 
     if entry.lifecycle.state == CorpusLifecycleState::CleanupPending {
-        entry.mark_orphaned();
+        entry.mark_orphaned_with_note(
+            "Startup found this corpus still marked cleanup_pending, so the previous cleanup attempt likely ended before completion and needs operator review."
+                .to_string(),
+        );
         return CorpusReconciliationOutcome::Changed(
             "Startup found a corpus still marked cleanup_pending; reclassified as orphaned."
                 .to_string(),
@@ -305,7 +327,10 @@ fn reconcile_corpus_entry(entry: &mut CorpusIndexEntry) -> CorpusReconciliationO
 
     if entry.lifecycle.state == CorpusLifecycleState::CleanupSucceeded && !root_exists {
         if !report_exists {
-            entry.mark_orphaned();
+            entry.mark_orphaned_with_note(
+                "Cleanup had been recorded as successful and the corpus root is gone, but the retained report is also missing. The corpus was marked orphaned for investigation."
+                    .to_string(),
+            );
             return CorpusReconciliationOutcome::Changed(
                 "Cleanup had been recorded as successful and the corpus root is gone, but the retained report is missing; marked orphaned for investigation."
                     .to_string(),
@@ -322,7 +347,10 @@ fn reconcile_corpus_entry(entry: &mut CorpusIndexEntry) -> CorpusReconciliationO
         && entry.lifecycle.state != CorpusLifecycleState::CleanupSucceeded
         && entry.lifecycle.state != CorpusLifecycleState::CleanupFailed
     {
-        entry.mark_orphaned();
+        entry.mark_orphaned_with_note(
+            "The corpus root is missing even though successful lifecycle cleanup was never recorded. The corpus was marked orphaned for investigation."
+                .to_string(),
+        );
         return CorpusReconciliationOutcome::Changed(
             "Corpus root is missing even though lifecycle cleanup was not recorded as successful; marked orphaned."
                 .to_string(),
@@ -330,7 +358,10 @@ fn reconcile_corpus_entry(entry: &mut CorpusIndexEntry) -> CorpusReconciliationO
     }
 
     if root_exists && entry.lifecycle.state == CorpusLifecycleState::CleanupSucceeded {
-        entry.mark_orphaned();
+        entry.mark_orphaned_with_note(
+            "Lifecycle cleanup had been recorded as successful, but the corpus root still exists on disk. The corpus was marked orphaned for investigation."
+                .to_string(),
+        );
         return CorpusReconciliationOutcome::Changed(
             "Corpus root still exists even though cleanup was previously recorded as successful; marked orphaned."
                 .to_string(),
@@ -341,7 +372,10 @@ fn reconcile_corpus_entry(entry: &mut CorpusIndexEntry) -> CorpusReconciliationO
         && entry.lifecycle.state != CorpusLifecycleState::CleanupSucceeded
         && entry.lifecycle.state != CorpusLifecycleState::CleanupFailed
     {
-        entry.mark_orphaned();
+        entry.mark_orphaned_with_note(
+            "The retained corpus report is missing even though successful cleanup was never recorded. The corpus was marked orphaned for investigation."
+                .to_string(),
+        );
         return CorpusReconciliationOutcome::Changed(
             "Corpus report is missing while cleanup was not recorded as successful; marked orphaned."
                 .to_string(),
@@ -349,6 +383,10 @@ fn reconcile_corpus_entry(entry: &mut CorpusIndexEntry) -> CorpusReconciliationO
     }
 
     entry.lifecycle.updated_at = Some(current_timestamp());
+    entry.lifecycle.state_note = Some(
+        "Startup reconciliation confirmed that the corpus registry entry still matches the corpus artifacts on disk."
+            .to_string(),
+    );
     CorpusReconciliationOutcome::Unchanged(
         "Corpus paths are present and no reconciliation changes were needed.".to_string(),
     )

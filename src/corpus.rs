@@ -81,6 +81,7 @@ pub struct CorpusLifecycleReport {
     pub cleanup_requested_at: Option<String>,
     pub cleanup_completed_at: Option<String>,
     pub cleanup_reason: Option<String>,
+    pub state_note: Option<String>,
     pub updated_at: Option<String>,
     pub policy_summary: String,
     pub decision_summary: String,
@@ -101,6 +102,8 @@ pub struct CorpusLifecycleMetadata {
     #[serde(default)]
     pub cleanup_reason: Option<CorpusCleanupReason>,
     #[serde(default)]
+    pub state_note: Option<String>,
+    #[serde(default)]
     pub updated_at: Option<String>,
 }
 
@@ -116,6 +119,7 @@ impl CorpusLifecycleMetadata {
                 .cleanup_reason
                 .as_ref()
                 .map(|reason| reason.as_str().to_string()),
+            state_note: self.state_note.clone(),
             updated_at: self.updated_at.clone(),
             policy_summary: corpus_lifecycle_policy_summary(self),
             decision_summary: corpus_lifecycle_decision_summary(self),
@@ -181,6 +185,10 @@ impl CorpusManifest {
                 cleanup_requested_at: None,
                 cleanup_completed_at: None,
                 cleanup_reason: None,
+                state_note: Some(
+                    "Corpus manifest has been created and is waiting for ingestion to populate retrieval artifacts."
+                        .to_string(),
+                ),
                 updated_at: Some(Utc::now().to_rfc3339()),
             },
         }
@@ -211,6 +219,10 @@ fn corpus_lifecycle_policy_summary(metadata: &CorpusLifecycleMetadata) -> String
 }
 
 fn corpus_lifecycle_decision_summary(metadata: &CorpusLifecycleMetadata) -> String {
+    if let Some(note) = &metadata.state_note {
+        return note.clone();
+    }
+
     match metadata.state {
         CorpusLifecycleState::Draft => {
             "Corpus manifest has been created but ingestion has not completed yet.".to_string()
