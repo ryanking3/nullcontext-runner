@@ -179,6 +179,7 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
     .with_llama_runtime(build_llama_runtime_report(
         &config,
         Some(inference_result.runtime_pid),
+        Some(&inference_result.runtime_endpoint),
         &inference_result.runtime_shutdown,
         &inference_result.runtime_usage,
         &inference_result.post_shutdown_observation,

@@ -15,6 +15,7 @@ use zeroize::Zeroize;
 pub struct InferenceResult {
     pub response: SensitiveBytes,
     pub runtime_pid: u32,
+    pub runtime_endpoint: String,
     pub runtime_shutdown: RuntimeShutdownOutcome,
     pub runtime_usage: RuntimeUsageSnapshot,
     pub post_shutdown_observation: RuntimePostShutdownObservation,
@@ -41,6 +42,7 @@ struct CompletionResponse {
 pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
     let mut runtime = ManagedRuntime::launch(config)?;
     let runtime_pid = runtime.pid();
+    let runtime_endpoint = runtime.endpoint_url().to_string();
 
     stdout_line("Running inference...");
 
@@ -74,6 +76,7 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
     Ok(InferenceResult {
         response: SensitiveBytes::new(response),
         runtime_pid,
+        runtime_endpoint,
         runtime_shutdown,
         runtime_usage,
         post_shutdown_observation,

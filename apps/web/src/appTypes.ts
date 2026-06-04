@@ -183,6 +183,7 @@ export type LlamaResidentRegionDeltaReport = {
 export type LlamaRuntimeReportData = {
   runtime_kind: string;
   runtime_pid?: number | null;
+  runtime_endpoint?: string | null;
   model_id: string;
   model_name: string;
   model_path: string;
@@ -268,6 +269,7 @@ export type StreamPayload = {
 export type ChatStartResponse = {
   session_id: string;
   workspace: string;
+  runtime_endpoint: string;
   security_mode: string;
   persistent: boolean;
   model_id: string;
@@ -286,6 +288,7 @@ export type ChatStartResponse = {
 export type ChatStatusResponse = {
   session_id: string;
   workspace: string;
+  runtime_endpoint: string;
   security_mode: string;
   persistent: boolean;
   model_id?: string;

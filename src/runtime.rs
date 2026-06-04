@@ -110,6 +110,10 @@ impl ManagedRuntime {
         format!("{}/completion", self.base_url)
     }
 
+    pub fn endpoint_url(&self) -> &str {
+        &self.base_url
+    }
+
     pub fn pid(&self) -> u32 {
         self.child.id()
     }

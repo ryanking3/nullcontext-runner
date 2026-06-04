@@ -146,6 +146,7 @@ pub struct ChatMessageRequest {
 pub struct StartChatResponse {
     pub session_id: String,
     pub workspace: String,
+    pub runtime_endpoint: String,
     pub security_mode: String,
     pub persistent: bool,
     pub model_id: String,
@@ -165,6 +166,7 @@ pub struct StartChatResponse {
 pub struct ChatStatusResponse {
     pub session_id: String,
     pub workspace: String,
+    pub runtime_endpoint: String,
     pub security_mode: String,
     pub persistent: bool,
     pub model_id: String,
@@ -274,6 +276,7 @@ impl ChatSessionManager {
         let response = StartChatResponse {
             session_id: session.id.clone(),
             workspace: session.workspace.display().to_string(),
+            runtime_endpoint: runtime.endpoint_url().to_string(),
             security_mode: config.security_mode.as_str().to_string(),
             persistent: !config.ephemeral,
             model_id: config.model_id.clone(),
@@ -323,6 +326,7 @@ impl ChatSessionManager {
         Ok(ChatStatusResponse {
             session_id: active.session.id.clone(),
             workspace: active.session.workspace.display().to_string(),
+            runtime_endpoint: active.runtime.endpoint_url().to_string(),
             security_mode: active.config.security_mode.as_str().to_string(),
             persistent: !active.config.ephemeral,
             model_id: active.config.model_id.clone(),
@@ -645,6 +649,7 @@ impl ChatSessionManager {
         let turn_artifacts = build_turn_artifacts(&active.session, turn_count);
         let grounded_turn_count = active.retrieval_history.len();
         let runtime_pid = active.runtime.pid();
+        let runtime_endpoint = active.runtime.endpoint_url().to_string();
         let runtime_usage = active.runtime.observe_usage();
 
         let runtime_shutdown = active.runtime.shutdown()?;
@@ -741,6 +746,7 @@ impl ChatSessionManager {
         .with_llama_runtime(build_llama_runtime_report(
             &active.config,
             Some(runtime_pid),
+            Some(&runtime_endpoint),
             &runtime_shutdown,
             &runtime_usage,
             &post_shutdown_observation,

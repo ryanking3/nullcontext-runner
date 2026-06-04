@@ -68,6 +68,7 @@ export function useSessionRunner({
   const [auditOperations, setAuditOperations] = useState<AuditOperation[]>([]);
   const [activeChatSessionId, setActiveChatSessionId] = useState("");
   const [activeChatWorkspace, setActiveChatWorkspace] = useState("");
+  const [activeChatRuntimeEndpoint, setActiveChatRuntimeEndpoint] = useState("");
   const [activeChatModelId, setActiveChatModelId] = useState("");
   const [activeChatModelName, setActiveChatModelName] = useState("");
   const [activeChatCorpusId, setActiveChatCorpusId] = useState("");
@@ -143,6 +144,7 @@ export function useSessionRunner({
       }
       setActiveChatRuntimeActive(data.runtime_active);
       setActiveChatWorkspace(data.workspace);
+      setActiveChatRuntimeEndpoint(data.runtime_endpoint);
 
       if (data.model_id) {
         setActiveChatModelId(data.model_id);
@@ -451,6 +453,7 @@ export function useSessionRunner({
       setRuntimeMode("active-chat");
       setActiveChatSessionId(data.session_id);
       setActiveChatWorkspace(data.workspace);
+      setActiveChatRuntimeEndpoint(data.runtime_endpoint);
       setActiveChatModelId(data.model_id);
       setActiveChatModelName(data.model_name);
       setActiveChatCorpusId(data.corpus_id || "");
@@ -525,6 +528,7 @@ export function useSessionRunner({
 
       setActiveChatSessionId("");
       setActiveChatWorkspace("");
+      setActiveChatRuntimeEndpoint("");
       setRunStatus("success");
 
       if (persistent) {
@@ -716,6 +720,7 @@ export function useSessionRunner({
     auditOperations,
     activeChatSessionId,
     activeChatWorkspace,
+    activeChatRuntimeEndpoint,
     activeChatModelId,
     activeChatModelName,
     activeChatCorpusId,

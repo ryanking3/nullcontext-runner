@@ -367,6 +367,10 @@ export function PrivacyReportViewer({
                 value: currentReport.llama_runtime.runtime_pid?.toString() || "none",
               },
               {
+                label: "runtime endpoint",
+                value: currentReport.llama_runtime.runtime_endpoint || "none",
+              },
+              {
                 label: "model",
                 value: `${currentReport.llama_runtime.model_name} (${currentReport.llama_runtime.model_id})`,
               },

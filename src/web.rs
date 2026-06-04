@@ -818,8 +818,10 @@ fn run_direct_streaming_session(
 
     let mut runtime = ManagedRuntime::launch(&config)?;
     let runtime_pid = runtime.pid();
+    let runtime_endpoint = runtime.endpoint_url().to_string();
 
     let _ = send_runtime(&tx, "Runtime healthy.");
+    let _ = send_runtime(&tx, &format!("Runtime endpoint: {runtime_endpoint}"));
     let _ = send_runtime(&tx, "Running streaming inference...");
     let _ = send_runtime(&tx, "--- Model Output ---");
 
@@ -1009,6 +1011,7 @@ fn run_direct_streaming_session(
     .with_llama_runtime(build_llama_runtime_report(
         &config,
         Some(runtime_pid),
+        Some(&runtime_endpoint),
         &runtime_shutdown,
         &runtime_usage,
         &post_shutdown_observation,

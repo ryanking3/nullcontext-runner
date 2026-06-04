@@ -87,6 +87,7 @@ pub struct RetrievalReport {
 pub struct LlamaRuntimeReport {
     pub runtime_kind: String,
     pub runtime_pid: Option<u32>,
+    pub runtime_endpoint: Option<String>,
     pub model_id: String,
     pub model_name: String,
     pub model_path: String,
@@ -246,6 +247,7 @@ pub fn sync_report_lifecycle(
 pub fn build_llama_runtime_report(
     config: &SessionConfig,
     runtime_pid: Option<u32>,
+    runtime_endpoint: Option<&str>,
     shutdown: &RuntimeShutdownOutcome,
     usage: &RuntimeUsageSnapshot,
     post_shutdown: &RuntimePostShutdownObservation,
@@ -400,6 +402,7 @@ pub fn build_llama_runtime_report(
     LlamaRuntimeReport {
         runtime_kind: "llama-server".to_string(),
         runtime_pid,
+        runtime_endpoint: runtime_endpoint.map(str::to_string),
         model_id: config.model_id.clone(),
         model_name: config.model_name.clone(),
         model_path: config.model_path.clone(),

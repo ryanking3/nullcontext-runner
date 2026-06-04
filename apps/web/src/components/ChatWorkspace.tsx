@@ -14,6 +14,7 @@ export function ChatWorkspace({
   activeChatRuntimeActive,
   activeChatRisk,
   activeChatWorkspace,
+  activeChatRuntimeEndpoint,
   activeRuntimeModelName,
   activeRuntimeModelId,
   activeChatCorpusName,
@@ -74,6 +75,7 @@ export function ChatWorkspace({
   activeChatRuntimeActive: boolean;
   activeChatRisk: string;
   activeChatWorkspace: string;
+  activeChatRuntimeEndpoint: string;
   activeRuntimeModelName: string;
   activeRuntimeModelId: string;
   activeChatCorpusName: string;
@@ -171,6 +173,11 @@ export function ChatWorkspace({
           {runtimeMode === "active-chat" && activeChatWorkspace && (
             <div className="runtime-path truncate" title={activeChatWorkspace}>
               workspace: {activeChatWorkspace}
+            </div>
+          )}
+          {runtimeMode === "active-chat" && activeChatRuntimeEndpoint && (
+            <div className="runtime-path truncate" title={activeChatRuntimeEndpoint}>
+              endpoint: {activeChatRuntimeEndpoint}
             </div>
           )}
           <div className="runtime-meta">

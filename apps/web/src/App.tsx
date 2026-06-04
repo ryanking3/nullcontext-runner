@@ -221,6 +221,7 @@ function App() {
     auditOperations,
     activeChatSessionId,
     activeChatWorkspace,
+    activeChatRuntimeEndpoint,
     activeChatModelId,
     activeChatModelName,
     activeChatCorpusId,
@@ -362,6 +363,7 @@ function App() {
         activeChatRuntimeActive={activeChatRuntimeActive}
         activeChatRisk={activeChatRisk}
         activeChatWorkspace={activeChatWorkspace}
+        activeChatRuntimeEndpoint={activeChatRuntimeEndpoint}
         activeRuntimeModelName={activeRuntimeModelName}
         activeRuntimeModelId={activeRuntimeModelId}
         activeChatCorpusName={activeChatCorpusName}
