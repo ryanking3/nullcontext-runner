@@ -130,6 +130,7 @@ function App() {
     setRegistrySortOrder,
     filteredSessions,
     latestSession,
+    latestReportableSession,
     selectedSession,
     selectedLifecycleResult,
     loadSessions,
@@ -305,12 +306,12 @@ function App() {
   }
 
   function handleOpenLatestReport() {
-    if (!latestSession) {
+    if (!latestReportableSession) {
       return;
     }
 
-    setSelectedSessionId(latestSession.session_id);
-    openSessionReport(latestSession.session_id);
+    setSelectedSessionId(latestReportableSession.session_id);
+    openSessionReport(latestReportableSession.session_id);
   }
 
   function handleToggleRawReport() {
@@ -554,6 +555,7 @@ function App() {
         filteredSessions={filteredSessions}
         sessions={sessions}
         latestSession={latestSession}
+        latestReportableSession={latestReportableSession}
         onClearFilters={handleClearRegistryFilters}
         onOpenLatestReport={handleOpenLatestReport}
         selectedSessionId={selectedSessionId}

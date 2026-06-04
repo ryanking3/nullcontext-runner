@@ -83,6 +83,19 @@ export function buildLatestSession(sessions: SessionIndexEntry[]): SessionIndexE
   })[0];
 }
 
+export function buildLatestReportableSession(
+  sessions: SessionIndexEntry[]
+): SessionIndexEntry | undefined {
+  return [...sessions]
+    .filter((session) => session.lifecycle.state !== "active")
+    .sort((left, right) => {
+      const leftTime = new Date(left.started_at).getTime();
+      const rightTime = new Date(right.started_at).getTime();
+
+      return rightTime - leftTime;
+    })[0];
+}
+
 export function buildFilteredCorpora(
   corpora: CorpusIndexEntry[],
   corpusQuery: string

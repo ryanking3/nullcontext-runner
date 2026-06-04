@@ -7,7 +7,11 @@ import type {
   SessionLifecycleActionResponse,
   SessionRegistry,
 } from "../appTypes";
-import { buildFilteredSessions, buildLatestSession } from "../appSelectors";
+import {
+  buildFilteredSessions,
+  buildLatestReportableSession,
+  buildLatestSession,
+} from "../appSelectors";
 import { minutesUntil, parsePositiveInteger, readApiError } from "../appUtils";
 
 export function useSessionRegistry({
@@ -234,6 +238,7 @@ export function useSessionRegistry({
     registrySortOrder
   );
   const latestSession = buildLatestSession(sessions);
+  const latestReportableSession = buildLatestReportableSession(sessions);
   const selectedSession =
     filteredSessions.find((session) => session.session_id === selectedSessionId) ?? null;
   const selectedLifecycleResult =
@@ -266,6 +271,7 @@ export function useSessionRegistry({
     setRegistrySortOrder,
     filteredSessions,
     latestSession,
+    latestReportableSession,
     selectedSession,
     selectedLifecycleResult,
     loadSessions,

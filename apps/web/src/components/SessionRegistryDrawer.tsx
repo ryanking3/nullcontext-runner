@@ -29,6 +29,7 @@ export function SessionRegistryDrawer({
   filteredSessions,
   sessions,
   latestSession,
+  latestReportableSession,
   onClearFilters,
   onOpenLatestReport,
   selectedSessionId,
@@ -61,6 +62,7 @@ export function SessionRegistryDrawer({
   filteredSessions: SessionIndexEntry[];
   sessions: SessionIndexEntry[];
   latestSession?: SessionIndexEntry | null;
+  latestReportableSession?: SessionIndexEntry | null;
   onClearFilters: () => void;
   onOpenLatestReport: () => void;
   selectedSessionId: string;
@@ -78,6 +80,9 @@ export function SessionRegistryDrawer({
   onOpenSessionReport: (sessionId: string) => void;
   onRunLifecycleAction: (sessionId: string, action: "reconcile" | "cleanup") => void;
 }) {
+  const selectedSessionIsActive = selectedSession?.lifecycle.state === "active";
+  const latestSessionIsActive = latestSession?.lifecycle.state === "active";
+
   return (
     <aside className={`registry-drawer${open ? " open" : ""}`}>
       <div className="drawer-header">
@@ -224,7 +229,16 @@ export function SessionRegistryDrawer({
                 <button className="ghost-button" onClick={onClearFilters}>
                   clear filters
                 </button>
-                <button className="ghost-button" disabled={!latestSession} onClick={onOpenLatestReport}>
+                <button
+                  className="ghost-button"
+                  disabled={!latestReportableSession}
+                  onClick={onOpenLatestReport}
+                  title={
+                    !latestReportableSession && latestSessionIsActive
+                      ? "The newest retained session is still active, so its report is not available yet."
+                      : undefined
+                  }
+                >
                   latest report
                 </button>
               </div>
@@ -422,9 +436,9 @@ export function SessionRegistryDrawer({
               <div className="registry-actions">
                 <button
                   onClick={() => onOpenSessionReport(selectedSession.session_id)}
-                  disabled={selectedSession.lifecycle.state === "active"}
+                  disabled={selectedSessionIsActive}
                   title={
-                    selectedSession.lifecycle.state === "active"
+                    selectedSessionIsActive
                       ? "Active chat reports are written when the session ends."
                       : undefined
                   }
@@ -433,14 +447,24 @@ export function SessionRegistryDrawer({
                 </button>
                 <button
                   onClick={() => onRunLifecycleAction(selectedSession.session_id, "reconcile")}
-                  disabled={registryActionPending !== null}
+                  disabled={registryActionPending !== null || selectedSessionIsActive}
+                  title={
+                    selectedSessionIsActive
+                      ? "Active retained chats must end before reconciliation can run."
+                      : undefined
+                  }
                 >
                   {registryActionPending === "reconcile" ? "reconciling..." : "reconcile"}
                 </button>
                 <button
                   className="danger-button"
                   onClick={() => onRunLifecycleAction(selectedSession.session_id, "cleanup")}
-                  disabled={registryActionPending !== null}
+                  disabled={registryActionPending !== null || selectedSessionIsActive}
+                  title={
+                    selectedSessionIsActive
+                      ? "Active retained chats must end before lifecycle cleanup can run."
+                      : undefined
+                  }
                 >
                   {registryActionPending === "cleanup" ? "cleaning up..." : "cleanup now"}
                 </button>
@@ -450,7 +474,7 @@ export function SessionRegistryDrawer({
                 Registry browsing stays separate from the live runtime shell so report inspection and
                 lifecycle actions don&apos;t compete with conversation and runtime controls.
               </p>
-              {selectedSession.lifecycle.state === "active" && (
+              {selectedSessionIsActive && (
                 <p className="microcopy">
                   This retained chat is still active, so its privacy report will appear only after
                   End + Sanitize completes.
