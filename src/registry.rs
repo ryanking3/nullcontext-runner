@@ -190,6 +190,29 @@ impl SessionRegistry {
 }
 
 impl SessionIndexEntry {
+    pub fn from_active_session(session: &Session, config: &SessionConfig) -> Self {
+        let report_path = session.workspace.join("report.json");
+
+        Self {
+            session_id: session.id.clone(),
+            started_at: session.started_at.to_rfc3339(),
+            security_mode: config.security_mode.as_str().to_string(),
+            prompt_source: config.prompt_source.as_str().to_string(),
+            history_stored: !config.ephemeral,
+            backend: "llama-server".to_string(),
+            model_id: config.model_id.clone(),
+            model_name: config.model_name.clone(),
+            model_path: config.model_path.clone(),
+            workspace: session.workspace.display().to_string(),
+            report_path: report_path.display().to_string(),
+            artifacts_detected: 0,
+            cleanup_attempted: false,
+            cleanup_successful: false,
+            workspace_deleted: false,
+            lifecycle: SessionLifecycleMetadata::for_started_session(config),
+        }
+    }
+
     pub fn from_session(
         session: &Session,
         config: &SessionConfig,
@@ -260,6 +283,32 @@ impl SessionIndexEntry {
 }
 
 impl SessionLifecycleMetadata {
+    pub fn for_started_session(config: &SessionConfig) -> Self {
+        let updated_at = Some(current_timestamp());
+
+        if config.ephemeral {
+            return Self {
+                state: SessionLifecycleState::Active,
+                retention_policy: RetentionPolicy::EphemeralImmediate,
+                retention_deadline: None,
+                cleanup_requested_at: None,
+                cleanup_completed_at: None,
+                cleanup_reason: None,
+                updated_at,
+            };
+        }
+
+        Self {
+            state: SessionLifecycleState::Active,
+            retention_policy: RetentionPolicy::RetainUntilManualCleanup,
+            retention_deadline: None,
+            cleanup_requested_at: None,
+            cleanup_completed_at: None,
+            cleanup_reason: None,
+            updated_at,
+        }
+    }
+
     pub fn for_completed_session(config: &SessionConfig, cleanup: &CleanupReport) -> Self {
         let updated_at = Some(current_timestamp());
 
@@ -300,8 +349,31 @@ pub fn register_persistent_session(
     cleanup: &CleanupReport,
 ) -> Result<()> {
     let mut registry = SessionRegistry::load(home)?;
-    let entry = SessionIndexEntry::from_session(session, config, cleanup);
+    let previous = registry.find(&session.id).cloned();
+    let mut entry = SessionIndexEntry::from_session(session, config, cleanup);
 
+    if let Some(previous) = previous {
+        entry.lifecycle.retention_policy = previous.lifecycle.retention_policy;
+        entry.lifecycle.retention_deadline = previous.lifecycle.retention_deadline;
+    }
+
+    registry.register(entry);
+    registry.save(home)?;
+
+    Ok(())
+}
+
+pub fn register_active_persistent_session(
+    home: &str,
+    session: &Session,
+    config: &SessionConfig,
+) -> Result<()> {
+    if config.ephemeral {
+        anyhow::bail!("Ephemeral sessions are not registered in the persistent registry at start");
+    }
+
+    let mut registry = SessionRegistry::load(home)?;
+    let entry = SessionIndexEntry::from_active_session(session, config);
     registry.register(entry);
     registry.save(home)?;
 

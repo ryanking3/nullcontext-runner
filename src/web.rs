@@ -20,7 +20,7 @@ use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::registry::{
     archived_report_path, due_retention_cleanup_session_ids, ensure_registry_dirs,
     reconcile_registry_on_startup, register_persistent_session, CleanupReason, RetentionPolicy,
-    SessionIndexEntry, SessionLifecycleMetadata, SessionRegistry,
+    SessionIndexEntry, SessionLifecycleMetadata, SessionLifecycleState, SessionRegistry,
 };
 use crate::retrieval::{
     build_grounded_prompt, build_retrieval_report, query_corpus, QueryCorpusRequest,
@@ -1284,6 +1284,12 @@ fn cleanup_persistent_session_with_reason(
         .find_mut(session_id)
         .ok_or_else(|| anyhow::anyhow!("Session not found: {session_id}"))?;
 
+    if entry.lifecycle.state == SessionLifecycleState::Active {
+        anyhow::bail!(
+            "Session {session_id} is still marked active. End the active chat session before running lifecycle cleanup."
+        );
+    }
+
     let workspace_path = entry.workspace.clone();
     let current_report_path = entry.report_path.clone();
 
@@ -1442,6 +1448,12 @@ fn reconcile_registry_session(
         let entry = registry
             .find_mut(session_id)
             .ok_or_else(|| anyhow::anyhow!("Session not found: {session_id}"))?;
+
+        if entry.lifecycle.state == SessionLifecycleState::Active {
+            anyhow::bail!(
+                "Session {session_id} is still marked active. End the active chat session or restart NullContext before reconciling it."
+            );
+        }
 
         let workspace_exists = FsPath::new(&entry.workspace).exists();
         let report_exists = FsPath::new(&entry.report_path).exists();

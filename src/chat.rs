@@ -8,7 +8,9 @@ use crate::config::{ChatTemplate, SessionConfig};
 use crate::corpus_registry::CorpusRegistry;
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::logging::stdout_line;
-use crate::registry::{register_persistent_session, SessionLifecycleMetadata};
+use crate::registry::{
+    register_active_persistent_session, register_persistent_session, SessionLifecycleMetadata,
+};
 use crate::retrieval::{
     build_active_chat_retrieval_report, build_grounded_prompt, build_retrieval_report,
     query_corpus, QueryCorpusRequest,
@@ -257,7 +259,17 @@ impl ChatSessionManager {
         ));
         stdout_line(format!("Model path: {}", config.model_path));
 
-        let runtime = ManagedRuntime::launch(&config)?;
+        let mut runtime = ManagedRuntime::launch(&config)?;
+
+        if !config.ephemeral {
+            if let Err(error) = register_active_persistent_session(&config.home, &session, &config)
+            {
+                let _ = runtime.shutdown();
+                return Err(error.context(
+                    "Persistent active chat session started but could not be registered for startup reconciliation",
+                ));
+            }
+        }
 
         let response = StartChatResponse {
             session_id: session.id.clone(),
