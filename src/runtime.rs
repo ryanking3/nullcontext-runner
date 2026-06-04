@@ -96,7 +96,9 @@ impl ManagedRuntime {
 
         let mut runtime = Self { child, base_url };
 
-        runtime.wait_until_ready(Duration::from_secs(60))?;
+        if let Err(error) = runtime.wait_until_ready(Duration::from_secs(60)) {
+            return Err(runtime.build_failed_launch_error(error));
+        }
 
         stdout_line(format!("Runtime endpoint: {}", runtime.base_url));
         stdout_line("Runtime healthy.");
@@ -182,6 +184,42 @@ impl ManagedRuntime {
         }
 
         bail!("llama-server did not become ready within {:?}", timeout)
+    }
+
+    fn build_failed_launch_error(&mut self, startup_error: anyhow::Error) -> anyhow::Error {
+        let pid = self.pid();
+        let cleanup_result = self.shutdown();
+        let stdout = read_child_stdout(&mut self.child);
+        let stderr = read_child_stderr(&mut self.child);
+
+        let cleanup_summary = match cleanup_result {
+            Ok(outcome) => format!(
+                "NullContext cleaned up the failed startup runtime using {} (exit code {}).",
+                outcome.shutdown_method,
+                outcome
+                    .exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            ),
+            Err(error) => format!(
+                "NullContext also failed to clean up the startup runtime automatically: {error}."
+            ),
+        };
+
+        let mut details = format!(
+            "llama-server failed to become ready on {} (pid {}). {} {}",
+            self.base_url, pid, startup_error, cleanup_summary
+        );
+
+        if !stdout.trim().is_empty() {
+            details.push_str(&format!("\nstdout:\n{stdout}"));
+        }
+
+        if !stderr.trim().is_empty() {
+            details.push_str(&format!("\nstderr:\n{stderr}"));
+        }
+
+        anyhow::anyhow!(details)
     }
 }
 
