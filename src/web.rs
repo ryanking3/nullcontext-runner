@@ -38,6 +38,7 @@ use axum::{Json, Router};
 use futures_util::Stream;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
+use std::env;
 use std::fs;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -203,7 +204,7 @@ pub async fn serve() -> Result<()> {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3333));
+    let addr = resolve_bind_addr()?;
 
     println!("NullContext web server listening on http://{addr}");
     println!("Health: http://{addr}/api/health");
@@ -1840,4 +1841,15 @@ fn home_dir() -> Result<String> {
     }
 
     anyhow::bail!("Could not determine home directory. HOME and USERPROFILE are both unset.")
+}
+
+fn resolve_bind_addr() -> Result<SocketAddr> {
+    let port = env::var("NULLCONTEXT_PORT")
+        .ok()
+        .map(|value| value.parse::<u16>())
+        .transpose()
+        .map_err(|error| anyhow::anyhow!("Invalid NULLCONTEXT_PORT value: {error}"))?
+        .unwrap_or(3333);
+
+    Ok(SocketAddr::from(([127, 0, 0, 1], port)))
 }

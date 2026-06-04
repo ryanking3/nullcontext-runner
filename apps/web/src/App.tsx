@@ -15,7 +15,8 @@ import { useSessionRunner } from "./hooks/useSessionRunner";
 import type { ChatTemplateOption, InspectorView, RuntimeMode } from "./appTypes";
 import "./App.css";
 
-const API_BASE = "http://127.0.0.1:3333";
+const API_BASE =
+  import.meta.env.VITE_API_BASE?.trim() || "http://127.0.0.1:3333";
 
 function App() {
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>("one-shot");

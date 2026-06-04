@@ -101,6 +101,7 @@ pub struct LlamaRuntimeReport {
     pub physical_footprint_peak_bytes: Option<u64>,
     pub vmmap_summary_source: Option<String>,
     pub resident_regions: Vec<LlamaResidentRegionReport>,
+    pub observed_gpu_pid: Option<bool>,
     pub observed_gpu_memory_bytes: Option<u64>,
     pub gpu_memory_source: Option<String>,
     pub process_present_after_shutdown: Option<bool>,
@@ -323,7 +324,9 @@ pub fn build_llama_runtime_report(
             exposure_scope: "GPU-offloaded model layers and possible prompt/cache-related buffers".to_string(),
             cleanup_status: if post_shutdown.gpu_entry_present_after_shutdown == Some(true) {
                 "failed".to_string()
-            } else if post_shutdown.gpu_entry_present_after_shutdown == Some(false) {
+            } else if post_shutdown.gpu_entry_present_after_shutdown == Some(false)
+                && !gpu_post_shutdown_visibility_limited(post_shutdown)
+            {
                 "successful".to_string()
             } else {
                 "warning".to_string()
@@ -336,8 +339,13 @@ pub fn build_llama_runtime_report(
                         .map(|value| format!("{value} bytes"))
                         .unwrap_or_else(|| "unknown usage".to_string())
                 )
-            } else if post_shutdown.gpu_entry_present_after_shutdown == Some(false) {
+            } else if post_shutdown.gpu_entry_present_after_shutdown == Some(false)
+                && !gpu_post_shutdown_visibility_limited(post_shutdown)
+            {
                 "No matching GPU-memory entry was observed after shutdown. This is evidence that the runtime PID no longer had an observable nvidia-smi compute-apps allocation, but it is not proof of full VRAM sanitization."
+                    .to_string()
+            } else if post_shutdown.gpu_entry_present_after_shutdown == Some(false) {
+                "No matching GPU PID was observed after shutdown, but the current Windows/NVIDIA visibility path remained limited. Treat post-shutdown VRAM evidence as inconclusive rather than as proof that GPU-resident state was cleared."
                     .to_string()
             } else {
                 "GPU offload was requested, but post-shutdown GPU inspection was unavailable or inconclusive. NullContext does not yet verify or sanitize VRAM contents after shutdown."
@@ -405,6 +413,7 @@ pub fn build_llama_runtime_report(
         physical_footprint_peak_bytes: usage.physical_footprint_peak_bytes,
         vmmap_summary_source: usage.vmmap_summary_source.clone(),
         resident_regions,
+        observed_gpu_pid: usage.gpu_pid_observed,
         observed_gpu_memory_bytes: usage.gpu_memory_bytes,
         gpu_memory_source: usage.gpu_memory_source.clone(),
         process_present_after_shutdown: post_shutdown.process_present_after_shutdown,
@@ -486,8 +495,20 @@ fn vram_inspection_status(
     }
 
     match post_shutdown.gpu_entry_present_after_shutdown {
-        Some(false) => "gpu_entry_not_observed_after_shutdown".to_string(),
-        Some(true) => "gpu_entry_still_observable_after_shutdown".to_string(),
+        Some(false) => {
+            if gpu_post_shutdown_visibility_limited(post_shutdown) {
+                "gpu_entry_not_observed_after_shutdown_but_visibility_limited".to_string()
+            } else {
+                "gpu_entry_not_observed_after_shutdown".to_string()
+            }
+        }
+        Some(true) => {
+            if post_shutdown.gpu_memory_bytes_after_shutdown.is_some() {
+                "gpu_entry_still_observable_after_shutdown".to_string()
+            } else {
+                "gpu_pid_still_observable_after_shutdown_but_memory_bytes_unavailable".to_string()
+            }
+        }
         None => "gpu_inspection_unavailable".to_string(),
     }
 }
@@ -520,6 +541,14 @@ fn runtime_inspection_summary(
             "Within the {} ms verification window, NullContext did not observe the llama-server PID or residual process RSS/VSZ. GPU offload was not requested for this session.",
             post_shutdown.verification_window_ms
         ),
+        (_, _, "gpu_pid_still_observable_after_shutdown_but_memory_bytes_unavailable") => format!(
+            "A matching GPU PID was still observable after the {} ms verification window, but NVIDIA tooling did not expose per-process GPU memory bytes. VRAM exposure therefore remains explicitly visible, even though byte-level usage stayed unavailable.",
+            post_shutdown.verification_window_ms
+        ),
+        (_, _, "gpu_entry_not_observed_after_shutdown_but_visibility_limited") => format!(
+            "Post-shutdown inspection did not observe a matching GPU PID over a {} ms verification window, but the current Windows/NVIDIA visibility path remained limited. Review observation notes before treating VRAM cleanup as successful.",
+            post_shutdown.verification_window_ms
+        ),
         ("process_still_observable_after_shutdown", _, _) => format!(
             "The llama-server PID was still observable after the {} ms verification window, so RAM cleanup evidence remains unfavorable{} and follow-up inspection is recommended.",
             post_shutdown.verification_window_ms
@@ -538,6 +567,17 @@ fn runtime_inspection_summary(
             post_shutdown.verification_window_ms
         ),
     }
+}
+
+fn gpu_post_shutdown_visibility_limited(
+    post_shutdown: &RuntimePostShutdownObservation,
+) -> bool {
+    cfg!(target_os = "windows")
+        && post_shutdown.gpu_entry_present_after_shutdown == Some(false)
+        && matches!(
+            post_shutdown.gpu_check_source.as_deref(),
+            Some("nvidia-smi compute-apps + pmon")
+        )
 }
 
 fn build_resident_region_deltas(

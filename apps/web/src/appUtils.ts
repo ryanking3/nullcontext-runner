@@ -15,6 +15,13 @@ export function statusClass(status: string): string {
 
 export function inspectionStatusClass(status: string): string {
   if (
+    status.includes("visibility_limited") ||
+    status.includes("memory_bytes_unavailable")
+  ) {
+    return "pill warning";
+  }
+
+  if (
     status.includes("not_observed_after_shutdown") ||
     status === "gpu_offload_not_requested"
   ) {

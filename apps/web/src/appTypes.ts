@@ -196,6 +196,7 @@ export type LlamaRuntimeReportData = {
   physical_footprint_peak_bytes?: number | null;
   vmmap_summary_source?: string | null;
   resident_regions: LlamaResidentRegionReport[];
+  observed_gpu_pid?: boolean | null;
   observed_gpu_memory_bytes?: number | null;
   gpu_memory_source?: string | null;
   process_present_after_shutdown?: boolean | null;

@@ -31,6 +31,7 @@ pub struct RuntimeUsageSnapshot {
     pub physical_footprint_peak_bytes: Option<u64>,
     pub vmmap_summary_source: Option<String>,
     pub resident_regions: Vec<RuntimeResidentRegion>,
+    pub gpu_pid_observed: Option<bool>,
     pub gpu_memory_bytes: Option<u64>,
     pub gpu_memory_source: Option<String>,
     pub observation_notes: Vec<String>,
@@ -114,6 +115,7 @@ impl ManagedRuntime {
         let mut snapshot = observe_process_memory(pid);
 
         let gpu = observe_gpu_memory(pid);
+        snapshot.gpu_pid_observed = gpu.pid_observed;
         snapshot.gpu_memory_bytes = gpu.memory_bytes;
         snapshot.gpu_memory_source = gpu.source;
 
@@ -277,6 +279,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                 physical_footprint_peak_bytes: None,
                 vmmap_summary_source: None,
                 resident_regions: vec![],
+                gpu_pid_observed: None,
                 gpu_memory_bytes: None,
                 gpu_memory_source: None,
                 observation_notes: vec![],
@@ -290,6 +293,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
             physical_footprint_peak_bytes: None,
             vmmap_summary_source: None,
             resident_regions: vec![],
+            gpu_pid_observed: None,
             gpu_memory_bytes: None,
             gpu_memory_source: None,
             observation_notes: vec![format!(
@@ -305,6 +309,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
             physical_footprint_peak_bytes: None,
             vmmap_summary_source: None,
             resident_regions: vec![],
+            gpu_pid_observed: None,
             gpu_memory_bytes: None,
             gpu_memory_source: None,
             observation_notes: vec![format!(
@@ -385,6 +390,7 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
                         physical_footprint_peak_bytes: None,
                         vmmap_summary_source: None,
                         resident_regions: vec![],
+                        gpu_pid_observed: None,
                         gpu_memory_bytes: None,
                         gpu_memory_source: None,
                         observation_notes,
@@ -398,6 +404,7 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
                     physical_footprint_peak_bytes: None,
                     vmmap_summary_source: None,
                     resident_regions: vec![],
+                    gpu_pid_observed: None,
                     gpu_memory_bytes: None,
                     gpu_memory_source: None,
                     observation_notes: vec![format!(
@@ -414,6 +421,7 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
             physical_footprint_peak_bytes: None,
             vmmap_summary_source: None,
             resident_regions: vec![],
+            gpu_pid_observed: None,
             gpu_memory_bytes: None,
             gpu_memory_source: None,
             observation_notes: vec![format!(
@@ -429,6 +437,7 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
             physical_footprint_peak_bytes: None,
             vmmap_summary_source: None,
             resident_regions: vec![],
+            gpu_pid_observed: None,
             gpu_memory_bytes: None,
             gpu_memory_source: None,
             observation_notes: vec![format!(
@@ -448,6 +457,7 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
         physical_footprint_peak_bytes: None,
         vmmap_summary_source: None,
         resident_regions: vec![],
+        gpu_pid_observed: None,
         gpu_memory_bytes: None,
         gpu_memory_source: None,
         observation_notes: vec![
@@ -458,10 +468,15 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
 
 fn observe_gpu_memory(pid: u32) -> RuntimeGpuObservation {
     let mut prior_notes = Vec::new();
+    let mut prior_sources = Vec::new();
 
     if let Some(observation) = observe_gpu_memory_compute_apps(pid) {
-        if observation.pid_observed == Some(true) {
+        if observation.pid_observed == Some(true) && observation.memory_bytes.is_some() {
             return observation;
+        }
+
+        if let Some(source) = observation.source {
+            prior_sources.push(source);
         }
 
         if let Some(note) = observation.note {
@@ -470,6 +485,13 @@ fn observe_gpu_memory(pid: u32) -> RuntimeGpuObservation {
     }
 
     if let Some(mut observation) = observe_gpu_memory_pmon(pid) {
+        if !prior_sources.is_empty() {
+            observation.source = Some(merge_gpu_sources(
+                &prior_sources,
+                observation.source.as_deref(),
+            ));
+        }
+
         if !prior_notes.is_empty() {
             observation.note = Some(match observation.note.take() {
                 Some(note) => format!("{} {}", prior_notes.join(" "), note),
@@ -482,7 +504,11 @@ fn observe_gpu_memory(pid: u32) -> RuntimeGpuObservation {
 
     RuntimeGpuObservation {
         memory_bytes: None,
-        source: None,
+        source: if prior_sources.is_empty() {
+            None
+        } else {
+            Some(merge_gpu_sources(&prior_sources, None))
+        },
         pid_observed: None,
         note: Some(if prior_notes.is_empty() {
             "GPU memory observation via nvidia-smi was unavailable or inconclusive.".to_string()
@@ -507,14 +533,21 @@ fn observe_gpu_memory_compute_apps(pid: u32) -> Option<RuntimeGpuObservation> {
             for line in stdout.lines() {
                 let mut parts = line.split(',').map(|part| part.trim());
                 let observed_pid = parts.next().and_then(|value| value.parse::<u32>().ok());
-                let memory_mb = parts.next().and_then(|value| value.parse::<u64>().ok());
+                let memory_raw = parts.next().map(str::trim);
+                let memory_mb = memory_raw.and_then(|value| value.parse::<u64>().ok());
 
                 if observed_pid == Some(pid) {
                     return Some(RuntimeGpuObservation {
                         memory_bytes: memory_mb.map(|value| value * 1024 * 1024),
                         source: Some("nvidia-smi compute-apps".to_string()),
                         pid_observed: Some(true),
-                        note: None,
+                        note: if memory_mb.is_none() {
+                            Some(compute_apps_memory_unavailable_note(
+                                memory_raw.unwrap_or("unknown"),
+                            ))
+                        } else {
+                            None
+                        },
                     });
                 }
             }
@@ -615,6 +648,38 @@ fn no_matching_gpu_pid_note() -> String {
 fn no_matching_gpu_pid_note() -> String {
     "No matching NVIDIA GPU process entry was found for the llama-server PID at observation time."
         .to_string()
+}
+
+#[cfg(target_os = "windows")]
+fn compute_apps_memory_unavailable_note(memory_raw: &str) -> String {
+    format!(
+        "llama-server PID was observed in nvidia-smi compute-apps, but per-process GPU memory bytes were unavailable ({memory_raw}). On Windows WDDM systems, used_gpu_memory may remain hidden even when GPU offload is active."
+    )
+}
+
+#[cfg(not(target_os = "windows"))]
+fn compute_apps_memory_unavailable_note(memory_raw: &str) -> String {
+    format!(
+        "llama-server PID was observed in nvidia-smi compute-apps, but per-process GPU memory bytes were unavailable ({memory_raw})."
+    )
+}
+
+fn merge_gpu_sources(prior_sources: &[String], current_source: Option<&str>) -> String {
+    let mut merged = Vec::new();
+
+    for source in prior_sources {
+        if !merged.iter().any(|existing: &String| existing == source) {
+            merged.push(source.clone());
+        }
+    }
+
+    if let Some(source) = current_source {
+        if !merged.iter().any(|existing| existing == source) {
+            merged.push(source.to_string());
+        }
+    }
+
+    merged.join(" + ")
 }
 
 fn observe_process_presence(pid: u32) -> (Option<bool>, Option<String>, Option<String>) {
@@ -722,6 +787,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                     physical_footprint_peak_bytes: None,
                     vmmap_summary_source: None,
                     resident_regions: vec![],
+                    gpu_pid_observed: None,
                     gpu_memory_bytes: None,
                     gpu_memory_source: None,
                     observation_notes: vec![],
@@ -735,6 +801,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                 physical_footprint_peak_bytes: None,
                 vmmap_summary_source: None,
                 resident_regions: vec![],
+                gpu_pid_observed: None,
                 gpu_memory_bytes: None,
                 gpu_memory_source: None,
                 observation_notes: vec![format!(
@@ -750,6 +817,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                 physical_footprint_peak_bytes: None,
                 vmmap_summary_source: None,
                 resident_regions: vec![],
+                gpu_pid_observed: None,
                 gpu_memory_bytes: None,
                 gpu_memory_source: None,
                 observation_notes: vec![format!(

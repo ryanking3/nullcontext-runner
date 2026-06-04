@@ -20,6 +20,22 @@ function inspectionMetricValue(value?: number | null) {
   return formatBytes(value);
 }
 
+function gpuObservationValue(pidObserved?: boolean | null, bytes?: number | null) {
+  if (pidObserved === undefined || pidObserved === null) {
+    return "unknown";
+  }
+
+  if (!pidObserved) {
+    return "not observed";
+  }
+
+  if (bytes === undefined || bytes === null) {
+    return "pid observed, bytes unavailable";
+  }
+
+  return `pid observed, ${formatBytes(bytes)}`;
+}
+
 function runtimeInspectionTakeaway(
   overallStatus: string,
   ramStatus: string,
@@ -31,6 +47,16 @@ function runtimeInspectionTakeaway(
 
   if (vramStatus === "gpu_entry_still_observable_after_shutdown") {
     return "GPU residency was still visible after shutdown, so VRAM exposure remains explicitly observable.";
+  }
+
+  if (
+    vramStatus === "gpu_pid_still_observable_after_shutdown_but_memory_bytes_unavailable"
+  ) {
+    return "A matching GPU PID remained visible after shutdown, but NVIDIA tooling did not expose per-process VRAM bytes.";
+  }
+
+  if (vramStatus === "gpu_entry_not_observed_after_shutdown_but_visibility_limited") {
+    return "The runtime GPU PID was not observed after shutdown, but Windows/NVIDIA tooling remained visibility-limited, so VRAM cleanup evidence is still inconclusive.";
   }
 
   if (ramStatus === "resident_memory_not_observed_after_shutdown") {
@@ -278,7 +304,10 @@ export function PrivacyReportViewer({
               <div className="runtime-summary-metric">
                 <span className="runtime-summary-label">gpu memory</span>
                 <strong>
-                  {inspectionMetricValue(currentReport.llama_runtime.observed_gpu_memory_bytes)}
+                  {gpuObservationValue(
+                    currentReport.llama_runtime.observed_gpu_pid,
+                    currentReport.llama_runtime.observed_gpu_memory_bytes
+                  )}
                 </strong>
               </div>
               <div className="runtime-summary-metric">
@@ -379,6 +408,14 @@ export function PrivacyReportViewer({
                 value: currentReport.llama_runtime.physical_footprint_peak_bytes
                   ? formatBytes(currentReport.llama_runtime.physical_footprint_peak_bytes)
                   : "none",
+              },
+              {
+                label: "gpu pid observed",
+                value:
+                  currentReport.llama_runtime.observed_gpu_pid === undefined ||
+                  currentReport.llama_runtime.observed_gpu_pid === null
+                    ? "unknown"
+                    : formatBoolean(currentReport.llama_runtime.observed_gpu_pid),
               },
               {
                 label: "observed gpu memory",
