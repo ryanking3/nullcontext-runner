@@ -1,5 +1,6 @@
 use crate::cleanup::CleanupReport;
 use crate::config::SessionConfig;
+use crate::logging::stdout_line;
 use crate::session::Session;
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -311,26 +312,32 @@ pub fn list_sessions(home: &str) -> Result<()> {
     let registry = SessionRegistry::load(home)?;
 
     if registry.sessions.is_empty() {
-        println!("No persistent NullContext sessions found.");
+        stdout_line("No persistent NullContext sessions found.");
         return Ok(());
     }
 
-    println!("Persistent NullContext sessions:\n");
+    stdout_line("Persistent NullContext sessions:\n");
 
     for session in registry.sessions {
-        println!("Session ID: {}", session.session_id);
-        println!("Started: {}", session.started_at);
-        println!("Mode: {}", session.security_mode);
-        println!("Lifecycle state: {}", session.lifecycle.state.as_str());
-        println!(
+        stdout_line(format!("Session ID: {}", session.session_id));
+        stdout_line(format!("Started: {}", session.started_at));
+        stdout_line(format!("Mode: {}", session.security_mode));
+        stdout_line(format!(
+            "Lifecycle state: {}",
+            session.lifecycle.state.as_str()
+        ));
+        stdout_line(format!(
             "Retention policy: {}",
             session.lifecycle.retention_policy.as_str()
-        );
-        println!("Prompt source: {}", session.prompt_source);
-        println!("Workspace: {}", session.workspace);
-        println!("Report: {}", session.report_path);
-        println!("Artifacts detected: {}", session.artifacts_detected);
-        println!("---");
+        ));
+        stdout_line(format!("Prompt source: {}", session.prompt_source));
+        stdout_line(format!("Workspace: {}", session.workspace));
+        stdout_line(format!("Report: {}", session.report_path));
+        stdout_line(format!(
+            "Artifacts detected: {}",
+            session.artifacts_detected
+        ));
+        stdout_line("---");
     }
 
     Ok(())
@@ -355,7 +362,7 @@ pub fn show_report(home: &str, session_id: &str) -> Result<()> {
     let report = fs::read_to_string(&report_path)
         .with_context(|| format!("Failed to read report at {}", report_path.display()))?;
 
-    println!("{}", report);
+    stdout_line(&report);
 
     Ok(())
 }

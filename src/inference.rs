@@ -1,5 +1,6 @@
 use crate::cleanup::SanitizationOperation;
 use crate::config::SessionConfig;
+use crate::logging::stdout_line;
 use crate::runtime::{
     observe_post_shutdown, ManagedRuntime, RuntimePostShutdownObservation, RuntimeShutdownOutcome,
     RuntimeUsageSnapshot,
@@ -41,7 +42,7 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
     let mut runtime = ManagedRuntime::launch(config)?;
     let runtime_pid = runtime.pid();
 
-    println!("Running inference...");
+    stdout_line("Running inference...");
 
     let (response, mut operations) = send_completion_request(
         &runtime.completion_url(),

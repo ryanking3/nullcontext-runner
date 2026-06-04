@@ -8,6 +8,7 @@ mod docs;
 mod embed;
 mod inference;
 mod llama_stream;
+mod logging;
 mod memory_scan;
 mod registry;
 mod retrieval;
@@ -16,6 +17,7 @@ mod sensitive;
 mod session;
 mod web;
 
+use crate::logging::stdout_line;
 use anyhow::Result;
 use audit::{build_llama_runtime_report, PrivacyReport};
 use cleanup::{
@@ -49,13 +51,16 @@ fn main() -> Result<()> {
 fn run_session(mut config: SessionConfig) -> Result<()> {
     let session = Session::create()?;
 
-    println!("Starting NullContext session...");
-    println!("Session ID: {}", session.id);
-    println!("Workspace: {}", session.workspace.display());
-    println!("Security mode: {}", config.security_mode.as_str());
-    println!("Model: {} ({})", config.model_name, config.model_id);
-    println!("Model path: {}", config.model_path);
-    println!("Prompt source: {}", config.prompt_source.as_str());
+    stdout_line("Starting NullContext session...");
+    stdout_line(format!("Session ID: {}", session.id));
+    stdout_line(format!("Workspace: {}", session.workspace.display()));
+    stdout_line(format!("Security mode: {}", config.security_mode.as_str()));
+    stdout_line(format!(
+        "Model: {} ({})",
+        config.model_name, config.model_id
+    ));
+    stdout_line(format!("Model path: {}", config.model_path));
+    stdout_line(format!("Prompt source: {}", config.prompt_source.as_str()));
 
     session.write_prompt(config.prompt.as_bytes())?;
 
@@ -63,8 +68,8 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
 
     session.write_response(inference_result.response.as_bytes())?;
 
-    println!("\n--- Model Output ---\n");
-    println!("{}", inference_result.response.as_str());
+    stdout_line("\n--- Model Output ---\n");
+    stdout_line(inference_result.response.as_str());
 
     let prompt_probe = config.prompt.as_bytes().to_vec();
     let response_probe = inference_result.response.as_bytes().to_vec();
@@ -98,7 +103,7 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
     log_sanitization_operation(&prompt_ingest_operation);
     sanitization_operations.push(prompt_ingest_operation);
 
-    println!("\nSanitizing Rust-owned buffers...");
+    stdout_line("\nSanitizing Rust-owned buffers...");
 
     config.prompt.sanitize();
     inference_result.response.sanitize();
@@ -134,9 +139,12 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
     sanitization_operations.push(explicit_zeroization_operation);
 
     let cleanup_report = if config.ephemeral {
-        println!("\nSession mode: ephemeral");
-        println!("Detected {} workspace artifacts.", artifacts_detected.len());
-        println!("Cleaning up workspace...");
+        stdout_line("\nSession mode: ephemeral");
+        stdout_line(format!(
+            "Detected {} workspace artifacts.",
+            artifacts_detected.len()
+        ));
+        stdout_line("Cleaning up workspace...");
 
         cleanup_ephemeral_workspace(
             &session.workspace,
@@ -144,10 +152,13 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
             sanitization_operations,
         )
     } else {
-        println!("\nSession mode: persistent");
-        println!("Detected {} workspace artifacts.", artifacts_detected.len());
-        println!("Workspace retained at:");
-        println!("{}", session.workspace.display());
+        stdout_line("\nSession mode: persistent");
+        stdout_line(format!(
+            "Detected {} workspace artifacts.",
+            artifacts_detected.len()
+        ));
+        stdout_line("Workspace retained at:");
+        stdout_line(session.workspace.display());
 
         CleanupReport::not_attempted(artifacts_detected, sanitization_operations)
     };
@@ -181,8 +192,8 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
         register_persistent_session(&config.home, &session, &config, &cleanup_report)?;
     }
 
-    println!("\n--- Privacy Report v0 ---");
-    println!("{}", report_json);
+    stdout_line("\n--- Privacy Report v0 ---");
+    stdout_line(&report_json);
 
     Ok(())
 }

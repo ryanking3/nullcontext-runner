@@ -7,6 +7,7 @@ use crate::cleanup::{
 use crate::config::{ChatTemplate, SessionConfig};
 use crate::corpus_registry::CorpusRegistry;
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
+use crate::logging::stdout_line;
 use crate::registry::{register_persistent_session, SessionLifecycleMetadata};
 use crate::retrieval::{
     build_active_chat_retrieval_report, build_grounded_prompt, build_retrieval_report,
@@ -246,12 +247,15 @@ impl ChatSessionManager {
 
         let session = Session::create()?;
 
-        println!("Starting active chat session...");
-        println!("Session ID: {}", session.id);
-        println!("Workspace: {}", session.workspace.display());
-        println!("Security mode: {}", config.security_mode.as_str());
-        println!("Model: {} ({})", config.model_name, config.model_id);
-        println!("Model path: {}", config.model_path);
+        stdout_line("Starting active chat session...");
+        stdout_line(format!("Session ID: {}", session.id));
+        stdout_line(format!("Workspace: {}", session.workspace.display()));
+        stdout_line(format!("Security mode: {}", config.security_mode.as_str()));
+        stdout_line(format!(
+            "Model: {} ({})",
+            config.model_name, config.model_id
+        ));
+        stdout_line(format!("Model path: {}", config.model_path));
 
         let runtime = ManagedRuntime::launch(&config)?;
 
@@ -621,8 +625,8 @@ impl ChatSessionManager {
             .lock()
             .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
 
-        println!("Ending active chat session...");
-        println!("Session ID: {}", active.session.id);
+        stdout_line("Ending active chat session...");
+        stdout_line(format!("Session ID: {}", active.session.id));
 
         let runtime_duration_ms = UtcNow::duration_since(active.session.started_at);
         let turn_count = active.turns.len();

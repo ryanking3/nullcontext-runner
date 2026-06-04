@@ -1,3 +1,4 @@
+use crate::logging::stdout_line;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -18,10 +19,10 @@ pub struct SanitizationOperation {
 }
 
 pub fn log_sanitization_operation(operation: &SanitizationOperation) {
-    println!(
+    stdout_line(format!(
         "[audit] {} | {} | {}",
         operation.operation, operation.status, operation.details
-    );
+    ));
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

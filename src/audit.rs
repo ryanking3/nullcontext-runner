@@ -569,9 +569,7 @@ fn runtime_inspection_summary(
     }
 }
 
-fn gpu_post_shutdown_visibility_limited(
-    post_shutdown: &RuntimePostShutdownObservation,
-) -> bool {
+fn gpu_post_shutdown_visibility_limited(post_shutdown: &RuntimePostShutdownObservation) -> bool {
     cfg!(target_os = "windows")
         && post_shutdown.gpu_entry_present_after_shutdown == Some(false)
         && matches!(

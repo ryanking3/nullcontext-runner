@@ -15,6 +15,7 @@ use crate::docs::{
     IngestUploadedCorpusRequest, UploadedCorpusFile,
 };
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
+use crate::logging::{stderr_line, stdout_line};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::registry::{
     archived_report_path, due_retention_cleanup_session_ids, ensure_registry_dirs,
@@ -205,11 +206,10 @@ pub async fn serve() -> Result<()> {
         .with_state(state);
 
     let addr = resolve_bind_addr()?;
+    let listener = bind_listener(addr).await?;
 
-    println!("NullContext web server listening on http://{addr}");
-    println!("Health: http://{addr}/api/health");
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    stdout_line(format!("NullContext web server listening on http://{addr}"));
+    stdout_line(format!("Health: http://{addr}/api/health"));
 
     axum::serve(listener, app).await?;
 
@@ -236,26 +236,26 @@ fn spawn_retention_scheduler(home: Arc<String>) {
             match result {
                 Ok(Ok((swept, corpus_swept))) if !swept.is_empty() || !corpus_swept.is_empty() => {
                     if !swept.is_empty() {
-                        println!(
+                        stdout_line(format!(
                             "Retention sweep cleaned {} session(s): {}",
                             swept.len(),
                             swept.join(", ")
-                        );
+                        ));
                     }
                     if !corpus_swept.is_empty() {
-                        println!(
+                        stdout_line(format!(
                             "Retention sweep cleaned {} corpora: {}",
                             corpus_swept.len(),
                             corpus_swept.join(", ")
-                        );
+                        ));
                     }
                 }
                 Ok(Ok(_)) => {}
                 Ok(Err(error)) => {
-                    println!("Retention sweep error: {error}");
+                    stderr_line(format!("Retention sweep error: {error}"));
                 }
                 Err(error) => {
-                    println!("Retention sweep task failed: {error}");
+                    stderr_line(format!("Retention sweep task failed: {error}"));
                 }
             }
         }
@@ -266,24 +266,24 @@ fn emit_startup_reconciliation(home: &str) -> Result<()> {
     let summary = reconcile_registry_on_startup(home)?;
     sync_registry_report_lifecycle(home)?;
 
-    println!(
+    stdout_line(format!(
         "Lifecycle reconciliation: scanned {} session(s), changed {}, orphaned {}, cleanup-consistent {}, unchanged {}.",
         summary.scanned_sessions,
         summary.changed_sessions,
         summary.orphaned_sessions,
         summary.cleanup_succeeded_consistent,
         summary.unchanged_sessions
-    );
+    ));
 
     for note in summary.notes.iter().take(8) {
-        println!("  [lifecycle] {note}");
+        stdout_line(format!("  [lifecycle] {note}"));
     }
 
     if summary.notes.len() > 8 {
-        println!(
+        stdout_line(format!(
             "  [lifecycle] ... and {} more session note(s)",
             summary.notes.len() - 8
-        );
+        ));
     }
 
     Ok(())
@@ -292,24 +292,24 @@ fn emit_startup_reconciliation(home: &str) -> Result<()> {
 fn emit_startup_corpus_reconciliation(home: &str) -> Result<()> {
     let summary = reconcile_corpora_on_startup(home)?;
 
-    println!(
+    stdout_line(format!(
         "Corpus lifecycle reconciliation: scanned {} corpora, changed {}, orphaned {}, cleanup-consistent {}, unchanged {}.",
         summary.scanned_corpora,
         summary.changed_corpora,
         summary.orphaned_corpora,
         summary.cleanup_succeeded_consistent,
         summary.unchanged_corpora
-    );
+    ));
 
     for note in summary.notes.iter().take(8) {
-        println!("  [corpus-lifecycle] {note}");
+        stdout_line(format!("  [corpus-lifecycle] {note}"));
     }
 
     if summary.notes.len() > 8 {
-        println!(
+        stdout_line(format!(
             "  [corpus-lifecycle] ... and {} more corpus note(s)",
             summary.notes.len() - 8
-        );
+        ));
     }
 
     Ok(())
@@ -1852,4 +1852,16 @@ fn resolve_bind_addr() -> Result<SocketAddr> {
         .unwrap_or(3333);
 
     Ok(SocketAddr::from(([127, 0, 0, 1], port)))
+}
+
+async fn bind_listener(addr: SocketAddr) -> Result<tokio::net::TcpListener> {
+    match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => Ok(listener),
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+            anyhow::bail!(
+                "Failed to bind NullContext web server to http://{addr}: address already in use. Stop the existing listener or set NULLCONTEXT_PORT to a different localhost port and retry."
+            )
+        }
+        Err(error) => Err(error.into()),
+    }
 }

@@ -1,4 +1,5 @@
 use crate::config::SessionConfig;
+use crate::logging::stdout_line;
 use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
 #[cfg(target_os = "windows")]
@@ -74,7 +75,7 @@ const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
 
 impl ManagedRuntime {
     pub fn launch(config: &SessionConfig) -> Result<Self> {
-        println!("Launching llama-server...");
+        stdout_line("Launching llama-server...");
 
         let child = Command::new(&config.llama_path)
             .arg("-m")
@@ -97,7 +98,7 @@ impl ManagedRuntime {
 
         runtime.wait_until_ready(Duration::from_secs(60))?;
 
-        println!("Runtime healthy.");
+        stdout_line("Runtime healthy.");
 
         Ok(runtime)
     }
@@ -127,7 +128,7 @@ impl ManagedRuntime {
     }
 
     pub fn shutdown(&mut self) -> Result<RuntimeShutdownOutcome> {
-        println!("Shutting down runtime...");
+        stdout_line("Shutting down runtime...");
 
         match self.child.try_wait()? {
             Some(status) => Ok(RuntimeShutdownOutcome {
@@ -150,7 +151,7 @@ impl ManagedRuntime {
     }
 
     fn wait_until_ready(&mut self, timeout: Duration) -> Result<()> {
-        println!("Waiting for runtime readiness...");
+        stdout_line("Waiting for runtime readiness...");
 
         let client = Client::new();
         let health_url = format!("{}/health", self.base_url);
