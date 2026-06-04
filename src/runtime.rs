@@ -159,6 +159,7 @@ impl ManagedRuntime {
         let client = Client::new();
         let health_url = format!("{}/health", self.base_url);
         let started_at = Instant::now();
+        let mut last_probe_result = "no readiness probe completed".to_string();
 
         while started_at.elapsed() < timeout {
             if let Some(status) = self.child.try_wait()? {
@@ -177,13 +178,23 @@ impl ManagedRuntime {
                 Ok(response) if response.status().is_success() => {
                     return Ok(());
                 }
-                _ => {
+                Ok(response) => {
+                    last_probe_result =
+                        format!("received HTTP {} from {}", response.status(), health_url);
+                    thread::sleep(Duration::from_millis(250));
+                }
+                Err(error) => {
+                    last_probe_result = format!("request to {} failed: {}", health_url, error);
                     thread::sleep(Duration::from_millis(250));
                 }
             }
         }
 
-        bail!("llama-server did not become ready within {:?}", timeout)
+        bail!(
+            "llama-server did not become ready within {:?}. Last readiness probe: {}.",
+            timeout,
+            last_probe_result
+        )
     }
 
     fn build_failed_launch_error(&mut self, startup_error: anyhow::Error) -> anyhow::Error {
