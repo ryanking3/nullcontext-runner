@@ -179,6 +179,32 @@ pub fn list_corpora(home: &str) -> Result<CorpusRegistry> {
     CorpusRegistry::load(home)
 }
 
+pub fn validate_corpus_ready(entry: &CorpusIndexEntry) -> Result<()> {
+    if entry.lifecycle.state != CorpusLifecycleState::Ready {
+        anyhow::bail!(
+            "Corpus {} is not ready for retrieval. Current lifecycle state: {}.",
+            entry.corpus_id,
+            entry.lifecycle.state.as_str()
+        );
+    }
+
+    if !Path::new(&entry.root_path).exists() {
+        anyhow::bail!(
+            "Corpus root is missing for registry entry: {}. Reconcile the corpus registry before using this corpus.",
+            entry.corpus_id
+        );
+    }
+
+    if !Path::new(&entry.manifest_path).exists() {
+        anyhow::bail!(
+            "Corpus manifest is missing for registry entry: {}. Reconcile the corpus registry before using this corpus.",
+            entry.corpus_id
+        );
+    }
+
+    Ok(())
+}
+
 pub fn corpus_registry_path(home: &str) -> PathBuf {
     corpus_registry_root(home).join("index.json")
 }

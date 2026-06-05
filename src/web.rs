@@ -511,11 +511,7 @@ async fn query_corpus_route(
         Ok(Ok(response)) => Json::<QueryCorpusResponse>(response).into_response(),
         Ok(Err(error)) => {
             let message = error.to_string();
-            let status = if message.contains("Corpus not found in registry") {
-                StatusCode::NOT_FOUND
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
+            let status = corpus_request_status(&message);
             json_error(status, message)
         }
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
@@ -605,7 +601,10 @@ async fn start_chat_session(
 
     match tokio::task::spawn_blocking(move || manager.start_session(home, request)).await {
         Ok(Ok(response)) => Json(response).into_response(),
-        Ok(Err(error)) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        Ok(Err(error)) => {
+            let message = error.to_string();
+            json_error(corpus_request_status(&message), message)
+        }
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
@@ -1322,6 +1321,18 @@ async fn show_report(State(state): State<WebState>, Path(session_id): Path<Strin
 
 fn json_error(status: StatusCode, message: String) -> Response {
     (status, Json(ErrorResponse { error: message })).into_response()
+}
+
+fn corpus_request_status(message: &str) -> StatusCode {
+    if message.contains("Corpus not found in registry") {
+        StatusCode::NOT_FOUND
+    } else if message.contains("not ready for retrieval")
+        || message.contains("Reconcile the corpus registry before using this corpus")
+    {
+        StatusCode::CONFLICT
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
 }
 
 fn cleanup_persistent_session(

@@ -110,6 +110,12 @@ export function CorpusDrawer({
   corpusUploadProgressLabel: string;
   lastIngestedCorpusReport: CorpusIngestionReport | null;
 }) {
+  const selectedCorpusUsableForRetrieval =
+    !!selectedCorpus &&
+    selectedCorpus.lifecycle.state === "ready" &&
+    selectedCorpus.root_exists &&
+    selectedCorpus.manifest_exists;
+
   return (
     <aside className={`corpus-drawer${open ? " open" : ""}`}>
       <div className="drawer-header">
@@ -339,7 +345,15 @@ export function CorpusDrawer({
                   </section>
 
                   <div className="registry-actions">
-                    <button onClick={() => onUseCorpusForOneShot(selectedCorpus.corpus_id)}>
+                    <button
+                      onClick={() => onUseCorpusForOneShot(selectedCorpus.corpus_id)}
+                      disabled={!selectedCorpusUsableForRetrieval}
+                      title={
+                        !selectedCorpusUsableForRetrieval
+                          ? "Only ready corpora with intact root and manifest artifacts can be bound for retrieval."
+                          : undefined
+                      }
+                    >
                       use for one-shot
                     </button>
                     <button

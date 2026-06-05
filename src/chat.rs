@@ -5,7 +5,7 @@ use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
 };
 use crate::config::{ChatTemplate, SessionConfig};
-use crate::corpus_registry::CorpusRegistry;
+use crate::corpus_registry::{validate_corpus_ready, CorpusRegistry};
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::logging::stdout_line;
 use crate::registry::{
@@ -925,6 +925,7 @@ fn resolve_bound_corpus(home: &str, corpus_id: Option<&str>) -> Result<Option<(S
     let corpus = registry
         .find(corpus_id)
         .ok_or_else(|| anyhow::anyhow!("Corpus not found in registry: {corpus_id}"))?;
+    validate_corpus_ready(corpus)?;
 
     Ok(Some((corpus.corpus_id.clone(), corpus.name.clone())))
 }

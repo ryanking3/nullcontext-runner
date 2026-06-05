@@ -2,7 +2,7 @@
 
 use crate::audit::RetrievalReport;
 use crate::corpus::CorpusManifest;
-use crate::corpus_registry::CorpusRegistry;
+use crate::corpus_registry::{validate_corpus_ready, CorpusRegistry};
 use crate::docs::ChunkRecord;
 use crate::embed::{
     cosine_similarity, embed_text, EmbeddingRecord, EMBEDDING_BACKEND, EMBEDDING_MODEL,
@@ -148,6 +148,7 @@ pub fn query_corpus(
     let entry = registry
         .find(corpus_id)
         .ok_or_else(|| anyhow!("Corpus not found in registry: {corpus_id}"))?;
+    validate_corpus_ready(entry)?;
 
     let manifest = load_json::<CorpusManifest>(&entry.manifest_path)?;
     let chunks = load_json::<Vec<ChunkRecord>>(&manifest.artifact_paths.chunks_path)?;
