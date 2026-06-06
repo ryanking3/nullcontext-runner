@@ -74,6 +74,12 @@ export function SessionConfigDrawer({
   effectiveContextTurnLimit: number | null;
   modelsLoadedAt: string;
 }) {
+  const selectedCorpusUsableForRetrieval =
+    !!selectedCorpus &&
+    selectedCorpus.lifecycle.state === "ready" &&
+    selectedCorpus.root_exists &&
+    selectedCorpus.manifest_exists;
+
   return (
     <aside className={`config-drawer${open ? " open" : ""}`}>
       <div className="drawer-header">
@@ -165,6 +171,7 @@ export function SessionConfigDrawer({
                 <span>name: {selectedCorpus.name}</span>
                 <span>id: {selectedCorpus.corpus_id}</span>
                 <span>lifecycle: {humanizeSnakeCase(selectedCorpus.lifecycle.state)}</span>
+                <span>retrieval: {selectedCorpusUsableForRetrieval ? "ready" : "not ready"}</span>
                 <span>
                   chunks: {selectedCorpus.chunk_count} | sources: {selectedCorpus.source_count}
                 </span>
@@ -178,10 +185,19 @@ export function SessionConfigDrawer({
             )}
 
             {selectedCorpus && (
-              <p className="microcopy">
-                Selected corpus will be used for one-shot grounded runs immediately and will bind
-                to any new active chat session you start after changing it here.
-              </p>
+              <>
+                <p className="microcopy">
+                  Selected corpus will be used for one-shot grounded runs immediately and will bind
+                  to any new active chat session you start after changing it here.
+                </p>
+                {!selectedCorpusUsableForRetrieval && (
+                  <p className="microcopy">
+                    This corpus is currently not retrieval-ready. Reconcile it or choose a corpus
+                    whose lifecycle state is ready and whose root and manifest artifacts still
+                    exist.
+                  </p>
+                )}
+              </>
             )}
           </section>
 

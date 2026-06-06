@@ -250,6 +250,7 @@ function App() {
     persistent,
     selectedModelId,
     selectedCorpusId,
+    selectedCorpus,
     selectedModel,
     useModelTemplateDefault,
     useModelContextDefaults,

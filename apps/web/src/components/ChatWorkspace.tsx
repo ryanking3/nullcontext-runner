@@ -131,6 +131,12 @@ export function ChatWorkspace({
   corpusUploadProgressPercent: number | null;
   corpusUploadProgressLabel: string;
 }) {
+  const selectedCorpusUsableForRetrieval =
+    !!selectedCorpus &&
+    selectedCorpus.lifecycle.state === "ready" &&
+    selectedCorpus.root_exists &&
+    selectedCorpus.manifest_exists;
+
   return (
     <section className="main-column">
       <header className="topbar">
@@ -194,7 +200,8 @@ export function ChatWorkspace({
             {runtimeMode === "one-shot" && selectedCorpus && (
               <div className="truncate" title={selectedCorpus.root_path}>
                 corpus: {selectedCorpus.name} (
-                {selectedCorpus.persistent ? "persistent" : "ephemeral"})
+                {selectedCorpus.persistent ? "persistent" : "ephemeral"},{" "}
+                {selectedCorpusUsableForRetrieval ? "ready" : "not ready"})
               </div>
             )}
             {!activeChatRuntimeActive && selectedModel && (

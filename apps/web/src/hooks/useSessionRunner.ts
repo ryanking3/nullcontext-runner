@@ -7,6 +7,7 @@ import type {
   ChatStartResponse,
   ChatStatusResponse,
   ChatTemplateOption,
+  CorpusIndexEntry,
   RegisteredModel,
   RunStatus,
   RuntimeMode,
@@ -29,6 +30,7 @@ export function useSessionRunner({
   persistent,
   selectedModelId,
   selectedCorpusId,
+  selectedCorpus,
   selectedModel,
   useModelTemplateDefault,
   useModelContextDefaults,
@@ -48,6 +50,7 @@ export function useSessionRunner({
   persistent: boolean;
   selectedModelId: string;
   selectedCorpusId: string;
+  selectedCorpus: CorpusIndexEntry | null;
   selectedModel: RegisteredModel | null;
   useModelTemplateDefault: boolean;
   useModelContextDefaults: boolean;
@@ -366,7 +369,34 @@ export function useSessionRunner({
     return overrides;
   }
 
+  function selectedCorpusReadinessError() {
+    if (!selectedCorpusId) {
+      return null;
+    }
+
+    if (!selectedCorpus || selectedCorpus.corpus_id !== selectedCorpusId) {
+      return "The selected corpus is not currently available in the loaded registry snapshot. Refresh the corpus drawer and choose a ready corpus before running retrieval.";
+    }
+
+    if (selectedCorpus.lifecycle.state !== "ready") {
+      return `The selected corpus is not ready for retrieval. Current lifecycle state: ${selectedCorpus.lifecycle.state}.`;
+    }
+
+    if (!selectedCorpus.root_exists || !selectedCorpus.manifest_exists) {
+      return "The selected corpus is missing required retrieval artifacts. Reconcile the corpus registry or choose a different ready corpus before running retrieval.";
+    }
+
+    return null;
+  }
+
   async function runOneShot() {
+    const corpusReadinessError = selectedCorpusReadinessError();
+    if (corpusReadinessError) {
+      setStderr(corpusReadinessError);
+      setRunStatus("failed");
+      return;
+    }
+
     resetOneShotConversation();
     setRunStatus("running");
 
@@ -420,6 +450,13 @@ export function useSessionRunner({
   }
 
   async function startActiveChat() {
+    const corpusReadinessError = selectedCorpusReadinessError();
+    if (corpusReadinessError) {
+      setStderr(corpusReadinessError);
+      setRunStatus("failed");
+      return;
+    }
+
     resetRunPanels();
     setActiveChatStopNotice("");
     setActiveChatCancelPending(false);

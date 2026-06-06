@@ -57,6 +57,12 @@ export function AppSidebar({
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
 }) {
+  const selectedCorpusUsableForRetrieval =
+    !!selectedCorpus &&
+    selectedCorpus.lifecycle.state === "ready" &&
+    selectedCorpus.root_exists &&
+    selectedCorpus.manifest_exists;
+
   return (
     <aside className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
       <div className="brand">
@@ -166,7 +172,7 @@ export function AppSidebar({
               <span>
                 corpus:{" "}
                 {selectedCorpus
-                  ? `${selectedCorpus.name} | ${selectedCorpus.persistent ? "persistent" : "ephemeral"}`
+                  ? `${selectedCorpus.name} | ${selectedCorpus.persistent ? "persistent" : "ephemeral"} | ${selectedCorpusUsableForRetrieval ? "ready" : "not ready"}`
                   : "none"}
               </span>
               <span>
