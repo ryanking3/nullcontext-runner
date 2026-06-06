@@ -87,7 +87,7 @@ export function buildLatestReportableSession(
   sessions: SessionIndexEntry[]
 ): SessionIndexEntry | undefined {
   return [...sessions]
-    .filter((session) => session.lifecycle.state !== "active" && session.report_exists)
+    .filter((session) => session.lifecycle.state !== "active" && session.report_available)
     .sort((left, right) => {
       const leftTime = new Date(left.started_at).getTime();
       const rightTime = new Date(right.started_at).getTime();

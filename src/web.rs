@@ -116,6 +116,9 @@ struct SessionRegistryEntryResponse {
     workspace_deleted: bool,
     workspace_exists: bool,
     report_exists: bool,
+    report_available: bool,
+    report_storage: String,
+    loadable_report_path: Option<String>,
     lifecycle: SessionLifecycleMetadata,
 }
 
@@ -141,6 +144,9 @@ struct CorpusRegistryEntryResponse {
     root_exists: bool,
     manifest_exists: bool,
     report_exists: bool,
+    report_available: bool,
+    report_storage: String,
+    loadable_report_path: Option<String>,
     lifecycle: crate::corpus::CorpusLifecycleMetadata,
 }
 
@@ -160,6 +166,9 @@ struct SessionLifecycleActionResponse {
     workspace_deleted: bool,
     workspace_exists: bool,
     report_exists: bool,
+    report_available: bool,
+    report_storage: String,
+    loadable_report_path: Option<String>,
     workspace: String,
     report_path: String,
     message: String,
@@ -179,6 +188,9 @@ struct CorpusLifecycleActionResponse {
     root_exists: bool,
     manifest_exists: bool,
     report_exists: bool,
+    report_available: bool,
+    report_storage: String,
+    loadable_report_path: Option<String>,
     root_path: String,
     manifest_path: String,
     report_path: String,
@@ -464,7 +476,7 @@ async fn list_models(State(state): State<WebState>) -> Response {
 
 async fn list_corpora_route(State(state): State<WebState>) -> Response {
     match list_corpora(&state.home) {
-        Ok(registry) => Json(build_corpus_registry_snapshot(registry)).into_response(),
+        Ok(registry) => Json(build_corpus_registry_snapshot(&state.home, registry)).into_response(),
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
@@ -1449,7 +1461,7 @@ fn send_payload(tx: &mpsc::Sender<StreamPayload>, payload: StreamPayload) -> boo
 
 async fn list_sessions(State(state): State<WebState>) -> Response {
     match SessionRegistry::load(&state.home) {
-        Ok(registry) => Json(build_session_registry_snapshot(registry)).into_response(),
+        Ok(registry) => Json(build_session_registry_snapshot(&state.home, registry)).into_response(),
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
@@ -1643,7 +1655,7 @@ fn cleanup_persistent_session_with_reason(
 
     sync_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
 
-    Ok(build_lifecycle_action_response(entry, completion_message))
+    Ok(build_lifecycle_action_response(home, entry, completion_message))
 }
 
 fn update_registry_retention_policy(
@@ -1704,7 +1716,7 @@ fn update_registry_retention_policy(
         RetentionPolicy::EphemeralImmediate => unreachable!(),
     };
 
-    Ok(build_lifecycle_action_response(entry, &message))
+    Ok(build_lifecycle_action_response(home, entry, &message))
 }
 
 fn run_retention_sweep(home: &str) -> Result<Vec<String>> {
@@ -1811,7 +1823,7 @@ fn reconcile_registry_session(
 
     sync_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
 
-    Ok(build_lifecycle_action_response(entry, &message))
+    Ok(build_lifecycle_action_response(home, entry, &message))
 }
 
 fn archive_report_if_present(
@@ -1859,9 +1871,13 @@ fn maybe_archived_report_path(
 }
 
 fn build_lifecycle_action_response(
+    home: &str,
     entry: &SessionIndexEntry,
     message: &str,
 ) -> SessionLifecycleActionResponse {
+    let (report_available, report_storage, loadable_report_path) =
+        session_report_availability(home, entry);
+
     SessionLifecycleActionResponse {
         session_id: entry.session_id.clone(),
         lifecycle_state: entry.lifecycle.state.as_str().to_string(),
@@ -1881,26 +1897,41 @@ fn build_lifecycle_action_response(
         workspace_deleted: entry.workspace_deleted,
         workspace_exists: FsPath::new(&entry.workspace).exists(),
         report_exists: FsPath::new(&entry.report_path).exists(),
+        report_available,
+        report_storage,
+        loadable_report_path,
         workspace: entry.workspace.clone(),
         report_path: entry.report_path.clone(),
         message: message.to_string(),
     }
 }
 
-fn build_session_registry_snapshot(registry: SessionRegistry) -> SessionRegistrySnapshotResponse {
+fn build_session_registry_snapshot(
+    home: &str,
+    registry: SessionRegistry,
+) -> SessionRegistrySnapshotResponse {
     SessionRegistrySnapshotResponse {
         sessions: registry
             .sessions
             .into_iter()
-            .map(build_session_registry_entry_response)
+            .map(|entry| build_session_registry_entry_response(home, entry))
             .collect(),
     }
 }
 
-fn build_session_registry_entry_response(entry: SessionIndexEntry) -> SessionRegistryEntryResponse {
+fn build_session_registry_entry_response(
+    home: &str,
+    entry: SessionIndexEntry,
+) -> SessionRegistryEntryResponse {
+    let (report_available, report_storage, loadable_report_path) =
+        session_report_availability(home, &entry);
+
     SessionRegistryEntryResponse {
         workspace_exists: FsPath::new(&entry.workspace).exists(),
         report_exists: FsPath::new(&entry.report_path).exists(),
+        report_available,
+        report_storage,
+        loadable_report_path,
         session_id: entry.session_id,
         started_at: entry.started_at,
         security_mode: entry.security_mode,
@@ -1920,21 +1951,33 @@ fn build_session_registry_entry_response(entry: SessionIndexEntry) -> SessionReg
     }
 }
 
-fn build_corpus_registry_snapshot(registry: CorpusRegistry) -> CorpusRegistrySnapshotResponse {
+fn build_corpus_registry_snapshot(
+    home: &str,
+    registry: CorpusRegistry,
+) -> CorpusRegistrySnapshotResponse {
     CorpusRegistrySnapshotResponse {
         corpora: registry
             .corpora
             .into_iter()
-            .map(build_corpus_registry_entry_response)
+            .map(|entry| build_corpus_registry_entry_response(home, entry))
             .collect(),
     }
 }
 
-fn build_corpus_registry_entry_response(entry: CorpusIndexEntry) -> CorpusRegistryEntryResponse {
+fn build_corpus_registry_entry_response(
+    home: &str,
+    entry: CorpusIndexEntry,
+) -> CorpusRegistryEntryResponse {
+    let (report_available, report_storage, loadable_report_path) =
+        corpus_report_availability(home, &entry);
+
     CorpusRegistryEntryResponse {
         root_exists: FsPath::new(&entry.root_path).exists(),
         manifest_exists: FsPath::new(&entry.manifest_path).exists(),
         report_exists: FsPath::new(&entry.report_path).exists(),
+        report_available,
+        report_storage,
+        loadable_report_path,
         corpus_id: entry.corpus_id,
         name: entry.name,
         created_at: entry.created_at,
@@ -2024,6 +2067,7 @@ fn cleanup_registered_corpus_with_reason(
     sync_corpus_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
 
     Ok(build_corpus_lifecycle_action_response(
+        home,
         entry,
         completion_message,
     ))
@@ -2089,7 +2133,7 @@ fn update_registry_corpus_retention_policy(
         }
     };
 
-    Ok(build_corpus_lifecycle_action_response(entry, &message))
+    Ok(build_corpus_lifecycle_action_response(home, entry, &message))
 }
 
 fn reconcile_registry_corpus(home: &str, corpus_id: &str) -> Result<CorpusLifecycleActionResponse> {
@@ -2163,7 +2207,7 @@ fn reconcile_registry_corpus(home: &str, corpus_id: &str) -> Result<CorpusLifecy
 
     sync_corpus_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
 
-    Ok(build_corpus_lifecycle_action_response(entry, &message))
+    Ok(build_corpus_lifecycle_action_response(home, entry, &message))
 }
 
 fn archive_corpus_report_if_present(
@@ -2210,6 +2254,50 @@ fn maybe_archived_corpus_report_path(
     Ok(None)
 }
 
+fn session_report_availability(
+    home: &str,
+    entry: &SessionIndexEntry,
+) -> (bool, String, Option<String>) {
+    let current_exists = FsPath::new(&entry.report_path).exists();
+    let archived_path = archived_report_path(home, &entry.session_id);
+    let archived_path_str = archived_path.display().to_string();
+    let archived_exists = archived_path.exists();
+    let stored_is_archived = entry.report_path == archived_path_str;
+
+    if current_exists {
+        let storage = if stored_is_archived { "archived" } else { "current" };
+        return (true, storage.to_string(), Some(entry.report_path.clone()));
+    }
+
+    if archived_exists {
+        return (true, "archived_fallback".to_string(), Some(archived_path_str));
+    }
+
+    (false, "missing".to_string(), None)
+}
+
+fn corpus_report_availability(
+    home: &str,
+    entry: &CorpusIndexEntry,
+) -> (bool, String, Option<String>) {
+    let current_exists = FsPath::new(&entry.report_path).exists();
+    let archived_path = archived_corpus_report_path(home, &entry.corpus_id);
+    let archived_path_str = archived_path.display().to_string();
+    let archived_exists = archived_path.exists();
+    let stored_is_archived = entry.report_path == archived_path_str;
+
+    if current_exists {
+        let storage = if stored_is_archived { "archived" } else { "current" };
+        return (true, storage.to_string(), Some(entry.report_path.clone()));
+    }
+
+    if archived_exists {
+        return (true, "archived_fallback".to_string(), Some(archived_path_str));
+    }
+
+    (false, "missing".to_string(), None)
+}
+
 fn sync_manifest_lifecycle_if_present(
     manifest_path: &str,
     lifecycle: &crate::corpus::CorpusLifecycleMetadata,
@@ -2229,9 +2317,13 @@ fn sync_manifest_lifecycle_if_present(
 }
 
 fn build_corpus_lifecycle_action_response(
+    home: &str,
     entry: &CorpusIndexEntry,
     message: &str,
 ) -> CorpusLifecycleActionResponse {
+    let (report_available, report_storage, loadable_report_path) =
+        corpus_report_availability(home, entry);
+
     CorpusLifecycleActionResponse {
         corpus_id: entry.corpus_id.clone(),
         lifecycle_state: entry.lifecycle.state.as_str().to_string(),
@@ -2249,6 +2341,9 @@ fn build_corpus_lifecycle_action_response(
         root_exists: FsPath::new(&entry.root_path).exists(),
         manifest_exists: FsPath::new(&entry.manifest_path).exists(),
         report_exists: FsPath::new(&entry.report_path).exists(),
+        report_available,
+        report_storage,
+        loadable_report_path,
         root_path: entry.root_path.clone(),
         manifest_path: entry.manifest_path.clone(),
         report_path: entry.report_path.clone(),

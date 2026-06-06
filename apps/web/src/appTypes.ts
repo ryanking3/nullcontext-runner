@@ -74,6 +74,9 @@ export type CorpusIndexEntry = {
   root_exists: boolean;
   manifest_exists: boolean;
   report_exists: boolean;
+  report_available: boolean;
+  report_storage: string;
+  loadable_report_path?: string | null;
   lifecycle: CorpusLifecycleMetadata;
 };
 
@@ -106,6 +109,9 @@ export type SessionIndexEntry = {
   workspace_deleted: boolean;
   workspace_exists: boolean;
   report_exists: boolean;
+  report_available: boolean;
+  report_storage: string;
+  loadable_report_path?: string | null;
   lifecycle: SessionLifecycleMetadata;
 };
 
@@ -354,6 +360,9 @@ export type SessionLifecycleActionResponse = {
   workspace_deleted: boolean;
   workspace_exists: boolean;
   report_exists: boolean;
+  report_available: boolean;
+  report_storage: string;
+  loadable_report_path?: string | null;
   workspace: string;
   report_path: string;
   message: string;
@@ -417,6 +426,9 @@ export type CorpusLifecycleActionResponse = {
   root_exists: boolean;
   manifest_exists?: boolean;
   report_exists: boolean;
+  report_available: boolean;
+  report_storage: string;
+  loadable_report_path?: string | null;
   root_path: string;
   manifest_path: string;
   report_path: string;

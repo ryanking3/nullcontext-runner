@@ -319,7 +319,10 @@ export function SessionRegistryDrawer({
                     {humanizeSnakeCase(selectedLifecycleResult.lifecycle_state)}
                   </span>
                   <span>
-                    report exists: {formatBoolean(selectedLifecycleResult.report_exists)}
+                    report available: {formatBoolean(selectedLifecycleResult.report_available)}
+                  </span>
+                  <span>
+                    report source: {humanizeSnakeCase(selectedLifecycleResult.report_storage)}
                   </span>
                   <span>
                     workspace exists: {formatBoolean(selectedLifecycleResult.workspace_exists)}
@@ -407,11 +410,29 @@ export function SessionRegistryDrawer({
                     selectedLifecycleResult?.workspace_exists ?? selectedSession.workspace_exists
                   )}
                 </dd>
-                <dt>report exists</dt>
+                <dt>report exists at recorded path</dt>
                 <dd>
                   {formatBoolean(
                     selectedLifecycleResult?.report_exists ?? selectedSession.report_exists
                   )}
+                </dd>
+                <dt>report available</dt>
+                <dd>
+                  {formatBoolean(
+                    selectedLifecycleResult?.report_available ?? selectedSession.report_available
+                  )}
+                </dd>
+                <dt>report source</dt>
+                <dd>
+                  {humanizeSnakeCase(
+                    selectedLifecycleResult?.report_storage ?? selectedSession.report_storage
+                  )}
+                </dd>
+                <dt>loadable report path</dt>
+                <dd className="registry-path">
+                  {selectedLifecycleResult?.loadable_report_path ??
+                    selectedSession.loadable_report_path ??
+                    "none"}
                 </dd>
               </dl>
 
@@ -464,12 +485,12 @@ export function SessionRegistryDrawer({
               <div className="registry-actions">
                 <button
                   onClick={() => onOpenSessionReport(selectedSession.session_id)}
-                  disabled={selectedSessionIsActive || !selectedSession.report_exists}
+                  disabled={selectedSessionIsActive || !selectedSession.report_available}
                   title={
                     selectedSessionIsActive
                       ? "End + Sanitize first. Active chat reports are written when the session ends."
-                      : !selectedSession.report_exists
-                        ? "No saved report is currently available for this retained session."
+                      : !selectedSession.report_available
+                        ? "No loadable report is currently available for this retained session."
                       : undefined
                   }
                 >

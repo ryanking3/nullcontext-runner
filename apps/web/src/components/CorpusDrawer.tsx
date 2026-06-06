@@ -235,7 +235,12 @@ export function CorpusDrawer({
                         {formatBoolean(selectedCorpusLifecycleResult.manifest_exists ?? false)}
                       </span>
                       <span>
-                        report exists: {formatBoolean(selectedCorpusLifecycleResult.report_exists)}
+                        report available:{" "}
+                        {formatBoolean(selectedCorpusLifecycleResult.report_available)}
+                      </span>
+                      <span>
+                        report source:{" "}
+                        {humanizeSnakeCase(selectedCorpusLifecycleResult.report_storage)}
                       </span>
                       <span>
                         updated:{" "}
@@ -317,11 +322,31 @@ export function CorpusDrawer({
                           selectedCorpus.manifest_exists
                       )}
                     </dd>
-                    <dt>report exists</dt>
+                    <dt>report exists at recorded path</dt>
                     <dd>
                       {formatBoolean(
                         selectedCorpusLifecycleResult?.report_exists ?? selectedCorpus.report_exists
                       )}
+                    </dd>
+                    <dt>report available</dt>
+                    <dd>
+                      {formatBoolean(
+                        selectedCorpusLifecycleResult?.report_available ??
+                          selectedCorpus.report_available
+                      )}
+                    </dd>
+                    <dt>report source</dt>
+                    <dd>
+                      {humanizeSnakeCase(
+                        selectedCorpusLifecycleResult?.report_storage ??
+                          selectedCorpus.report_storage
+                      )}
+                    </dd>
+                    <dt>loadable report path</dt>
+                    <dd className="registry-path">
+                      {selectedCorpusLifecycleResult?.loadable_report_path ??
+                        selectedCorpus.loadable_report_path ??
+                        "none"}
                     </dd>
                   </dl>
 
@@ -386,10 +411,10 @@ export function CorpusDrawer({
                     </button>
                     <button
                       onClick={() => onOpenCorpusReport(selectedCorpus.corpus_id)}
-                      disabled={corpusActionPending !== null || !selectedCorpus.report_exists}
+                      disabled={corpusActionPending !== null || !selectedCorpus.report_available}
                       title={
-                        !selectedCorpus.report_exists
-                          ? "No saved corpus report is currently available for this corpus."
+                        !selectedCorpus.report_available
+                          ? "No loadable corpus report is currently available for this corpus."
                           : undefined
                       }
                     >
