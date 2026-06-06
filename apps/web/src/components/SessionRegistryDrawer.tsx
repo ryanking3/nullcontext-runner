@@ -312,6 +312,30 @@ export function SessionRegistryDrawer({
                 </div>
               )}
 
+              {selectedLifecycleResult && !registryActionFailed && (
+                <div className="config-summary">
+                  <span>
+                    latest action state:{" "}
+                    {humanizeSnakeCase(selectedLifecycleResult.lifecycle_state)}
+                  </span>
+                  <span>
+                    report exists: {formatBoolean(selectedLifecycleResult.report_exists)}
+                  </span>
+                  <span>
+                    workspace exists: {formatBoolean(selectedLifecycleResult.workspace_exists)}
+                  </span>
+                  <span>
+                    updated:{" "}
+                    {selectedLifecycleResult.updated_at
+                      ? formatTimestamp(selectedLifecycleResult.updated_at)
+                      : "unknown"}
+                  </span>
+                  {selectedLifecycleResult.state_note && (
+                    <span>note: {selectedLifecycleResult.state_note}</span>
+                  )}
+                </div>
+              )}
+
               <dl className="registry-detail-grid">
                 <dt>started</dt>
                 <dd>{new Date(selectedSession.started_at).toLocaleString()}</dd>

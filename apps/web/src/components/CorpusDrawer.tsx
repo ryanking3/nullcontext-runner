@@ -221,6 +221,34 @@ export function CorpusDrawer({
                     </div>
                   )}
 
+                  {selectedCorpusLifecycleResult && !corpusActionFailed && (
+                    <div className="config-summary">
+                      <span>
+                        latest action state:{" "}
+                        {humanizeSnakeCase(selectedCorpusLifecycleResult.lifecycle_state)}
+                      </span>
+                      <span>
+                        root exists: {formatBoolean(selectedCorpusLifecycleResult.root_exists)}
+                      </span>
+                      <span>
+                        manifest exists:{" "}
+                        {formatBoolean(selectedCorpusLifecycleResult.manifest_exists ?? false)}
+                      </span>
+                      <span>
+                        report exists: {formatBoolean(selectedCorpusLifecycleResult.report_exists)}
+                      </span>
+                      <span>
+                        updated:{" "}
+                        {selectedCorpusLifecycleResult.updated_at
+                          ? formatTimestamp(selectedCorpusLifecycleResult.updated_at)
+                          : "unknown"}
+                      </span>
+                      {selectedCorpusLifecycleResult.state_note && (
+                        <span>note: {selectedCorpusLifecycleResult.state_note}</span>
+                      )}
+                    </div>
+                  )}
+
                   <dl className="registry-detail-grid">
                     <dt>name</dt>
                     <dd>{selectedCorpus.name}</dd>

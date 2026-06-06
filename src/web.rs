@@ -130,6 +130,10 @@ struct SessionLifecycleActionResponse {
     retention_policy: String,
     retention_deadline: Option<String>,
     cleanup_reason: Option<String>,
+    cleanup_requested_at: Option<String>,
+    cleanup_completed_at: Option<String>,
+    state_note: Option<String>,
+    updated_at: Option<String>,
     cleanup_attempted: bool,
     cleanup_successful: bool,
     workspace_deleted: bool,
@@ -147,6 +151,10 @@ struct CorpusLifecycleActionResponse {
     retention_policy: String,
     retention_deadline: Option<String>,
     cleanup_reason: Option<String>,
+    cleanup_requested_at: Option<String>,
+    cleanup_completed_at: Option<String>,
+    state_note: Option<String>,
+    updated_at: Option<String>,
     root_exists: bool,
     manifest_exists: bool,
     report_exists: bool,
@@ -1662,6 +1670,10 @@ fn build_lifecycle_action_response(
             .cleanup_reason
             .as_ref()
             .map(|reason| reason.as_str().to_string()),
+        cleanup_requested_at: entry.lifecycle.cleanup_requested_at.clone(),
+        cleanup_completed_at: entry.lifecycle.cleanup_completed_at.clone(),
+        state_note: entry.lifecycle.state_note.clone(),
+        updated_at: entry.lifecycle.updated_at.clone(),
         cleanup_attempted: entry.cleanup_attempted,
         cleanup_successful: entry.cleanup_successful,
         workspace_deleted: entry.workspace_deleted,
@@ -2028,6 +2040,10 @@ fn build_corpus_lifecycle_action_response(
             .cleanup_reason
             .as_ref()
             .map(|reason| reason.as_str().to_string()),
+        cleanup_requested_at: entry.lifecycle.cleanup_requested_at.clone(),
+        cleanup_completed_at: entry.lifecycle.cleanup_completed_at.clone(),
+        state_note: entry.lifecycle.state_note.clone(),
+        updated_at: entry.lifecycle.updated_at.clone(),
         root_exists: FsPath::new(&entry.root_path).exists(),
         manifest_exists: FsPath::new(&entry.manifest_path).exists(),
         report_exists: FsPath::new(&entry.report_path).exists(),

@@ -331,6 +331,10 @@ export type SessionLifecycleActionResponse = {
   retention_policy: string;
   retention_deadline?: string | null;
   cleanup_reason?: string | null;
+  cleanup_requested_at?: string | null;
+  cleanup_completed_at?: string | null;
+  state_note?: string | null;
+  updated_at?: string | null;
   cleanup_attempted: boolean;
   cleanup_successful: boolean;
   workspace_deleted: boolean;
@@ -392,6 +396,10 @@ export type CorpusLifecycleActionResponse = {
   retention_policy: string;
   retention_deadline?: string | null;
   cleanup_reason?: string | null;
+  cleanup_requested_at?: string | null;
+  cleanup_completed_at?: string | null;
+  state_note?: string | null;
+  updated_at?: string | null;
   root_exists: boolean;
   manifest_exists?: boolean;
   report_exists: boolean;
