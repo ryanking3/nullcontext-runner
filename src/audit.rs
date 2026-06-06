@@ -4,8 +4,8 @@ use crate::registry::{
     CleanupReason, RetentionPolicy, SessionLifecycleMetadata, SessionLifecycleState,
 };
 use crate::runtime::{
-    RuntimePostShutdownObservation, RuntimeResidentRegion, RuntimeShutdownOutcome,
-    RuntimeUsageSnapshot,
+    RuntimeLaunchFailure, RuntimePostShutdownObservation, RuntimeResidentRegion,
+    RuntimeShutdownOutcome, RuntimeUsageSnapshot,
 };
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -462,6 +462,138 @@ pub fn build_llama_runtime_report(
                 .to_string()
         },
         memory_domains,
+    }
+}
+
+pub fn build_failed_launch_llama_runtime_report(
+    config: &SessionConfig,
+    failure: &RuntimeLaunchFailure,
+) -> LlamaRuntimeReport {
+    let gpu_layers_requested = config.gpu_layers.parse::<u32>().unwrap_or(0);
+    let gpu_offload_requested = gpu_layers_requested > 0;
+    let cleanup_status = if failure.cleanup_succeeded {
+        "warning"
+    } else {
+        "failed"
+    };
+
+    LlamaRuntimeReport {
+        runtime_kind: "llama-server".to_string(),
+        runtime_pid: Some(failure.runtime_pid),
+        runtime_endpoint: Some(failure.runtime_endpoint.clone()),
+        model_id: config.model_id.clone(),
+        model_name: config.model_name.clone(),
+        model_path: config.model_path.clone(),
+        gpu_layers_requested,
+        gpu_offload_requested,
+        shutdown_method: failure
+            .cleanup_shutdown_method
+            .clone()
+            .unwrap_or_else(|| "startup_failed_before_ready".to_string()),
+        process_exit_code: failure.cleanup_exit_code,
+        graceful_shutdown_supported: false,
+        observed_resident_bytes: None,
+        observed_virtual_bytes: None,
+        process_memory_source: None,
+        physical_footprint_bytes: None,
+        physical_footprint_peak_bytes: None,
+        vmmap_summary_source: None,
+        resident_regions: vec![],
+        observed_gpu_pid: None,
+        observed_gpu_memory_bytes: None,
+        gpu_memory_source: None,
+        process_present_after_shutdown: None,
+        process_check_source: None,
+        process_resident_bytes_after_shutdown: None,
+        process_virtual_bytes_after_shutdown: None,
+        physical_footprint_bytes_after_shutdown: None,
+        physical_footprint_peak_bytes_after_shutdown: None,
+        vmmap_summary_source_after_shutdown: None,
+        resident_regions_after_shutdown: vec![],
+        physical_footprint_delta_bytes: None,
+        resident_region_deltas: vec![],
+        verification_window_ms: 0,
+        gpu_entry_present_after_shutdown: None,
+        gpu_memory_bytes_after_shutdown: None,
+        gpu_check_source: None,
+        inspection_status: "runtime_startup_failed_before_ready".to_string(),
+        ram_inspection_status: "ram_inspection_unavailable_due_to_startup_failure".to_string(),
+        vram_inspection_status: if gpu_offload_requested {
+            "gpu_inspection_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
+        inspection_summary: format!(
+            "llama-server never reached a healthy runtime state on {} (pid {}), so NullContext could not run normal post-shutdown RAM/VRAM inspection. Startup failure: {}",
+            failure.runtime_endpoint, failure.runtime_pid, failure.startup_error
+        ),
+        observation_notes: {
+            let mut notes = vec![
+                format!("Startup failure: {}", failure.startup_error),
+                format!(
+                    "Failed launch targeted runtime endpoint {} with child pid {}.",
+                    failure.runtime_endpoint, failure.runtime_pid
+                ),
+            ];
+
+            if let Some(error) = &failure.cleanup_error {
+                notes.push(format!(
+                    "Automatic cleanup of the failed startup runtime also failed: {error}"
+                ));
+            }
+
+            if !failure.stdout.trim().is_empty() {
+                notes.push("llama-server stdout was captured during failed startup.".to_string());
+            }
+
+            if !failure.stderr.trim().is_empty() {
+                notes.push("llama-server stderr was captured during failed startup.".to_string());
+            }
+
+            notes
+        },
+        cleanup_summary: if failure.cleanup_succeeded {
+            format!(
+                "NullContext terminated the failed startup process using {} before inference began, but no normal post-shutdown observation window was completed.",
+                failure
+                    .cleanup_shutdown_method
+                    .as_deref()
+                    .unwrap_or("unknown shutdown method")
+            )
+        } else {
+            "NullContext could not confirm automatic cleanup of the failed startup runtime, so process-owned memory boundaries remain weakly bounded.".to_string()
+        },
+        residual_risk_summary: if gpu_offload_requested {
+            "Because runtime startup failed before readiness, allocator state, RAM residency, and any possible GPU-offloaded setup state were not inspected through the normal shutdown path.".to_string()
+        } else {
+            "Because runtime startup failed before readiness, allocator state and RAM residency were not inspected through the normal shutdown path.".to_string()
+        },
+        memory_domains: vec![
+            LlamaMemoryDomainReport {
+                domain: "llama_process_runtime".to_string(),
+                exposure_scope: "external child process memory and runtime state".to_string(),
+                cleanup_status: cleanup_status.to_string(),
+                notes: if failure.cleanup_succeeded {
+                    "NullContext forced the failed startup process to exit, but no normal post-shutdown process observation was completed.".to_string()
+                } else {
+                    "NullContext could not confirm automatic cleanup of the failed startup process.".to_string()
+                },
+            },
+            LlamaMemoryDomainReport {
+                domain: "gpu_vram".to_string(),
+                exposure_scope: "GPU-offloaded model layers and possible prompt/cache-related buffers".to_string(),
+                cleanup_status: if gpu_offload_requested {
+                    cleanup_status.to_string()
+                } else {
+                    "not_attempted".to_string()
+                },
+                notes: if gpu_offload_requested {
+                    "GPU offload was requested, but startup failed before readiness and no normal post-shutdown GPU inspection ran.".to_string()
+                } else {
+                    "GPU offload was not requested for this session.".to_string()
+                },
+            },
+        ],
     }
 }
 

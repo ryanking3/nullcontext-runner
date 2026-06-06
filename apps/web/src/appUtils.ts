@@ -14,6 +14,10 @@ export function statusClass(status: string): string {
 }
 
 export function inspectionStatusClass(status: string): string {
+  if (status.includes("startup_failed")) {
+    return "pill failed";
+  }
+
   if (
     status.includes("visibility_limited") ||
     status.includes("memory_bytes_unavailable")

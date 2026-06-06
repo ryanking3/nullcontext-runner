@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
 #[cfg(target_os = "windows")]
 use serde_json::Value;
+use std::fmt;
 use std::io::Read;
 use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
@@ -69,6 +70,19 @@ struct RuntimeGpuObservation {
     source: Option<String>,
     pid_observed: Option<bool>,
     note: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeLaunchFailure {
+    pub runtime_pid: u32,
+    pub runtime_endpoint: String,
+    pub startup_error: String,
+    pub cleanup_succeeded: bool,
+    pub cleanup_shutdown_method: Option<String>,
+    pub cleanup_exit_code: Option<i32>,
+    pub cleanup_error: Option<String>,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
@@ -207,36 +221,75 @@ impl ManagedRuntime {
         let stdout = read_child_stdout(&mut self.child);
         let stderr = read_child_stderr(&mut self.child);
 
-        let cleanup_summary = match cleanup_result {
-            Ok(outcome) => format!(
-                "NullContext cleaned up the failed startup runtime using {} (exit code {}).",
-                outcome.shutdown_method,
-                outcome
-                    .exit_code
-                    .map(|code| code.to_string())
-                    .unwrap_or_else(|| "unknown".to_string())
-            ),
-            Err(error) => format!(
-                "NullContext also failed to clean up the startup runtime automatically: {error}."
-            ),
+        let failure = match cleanup_result {
+            Ok(outcome) => RuntimeLaunchFailure {
+                runtime_pid: pid,
+                runtime_endpoint: self.base_url.clone(),
+                startup_error: startup_error.to_string(),
+                cleanup_succeeded: true,
+                cleanup_shutdown_method: Some(outcome.shutdown_method),
+                cleanup_exit_code: outcome.exit_code,
+                cleanup_error: None,
+                stdout,
+                stderr,
+            },
+            Err(error) => RuntimeLaunchFailure {
+                runtime_pid: pid,
+                runtime_endpoint: self.base_url.clone(),
+                startup_error: startup_error.to_string(),
+                cleanup_succeeded: false,
+                cleanup_shutdown_method: None,
+                cleanup_exit_code: None,
+                cleanup_error: Some(error.to_string()),
+                stdout,
+                stderr,
+            },
         };
 
-        let mut details = format!(
-            "llama-server failed to become ready on {} (pid {}). {} {}",
-            self.base_url, pid, startup_error, cleanup_summary
-        );
-
-        if !stdout.trim().is_empty() {
-            details.push_str(&format!("\nstdout:\n{stdout}"));
-        }
-
-        if !stderr.trim().is_empty() {
-            details.push_str(&format!("\nstderr:\n{stderr}"));
-        }
-
-        anyhow::anyhow!(details)
+        anyhow::Error::new(failure)
     }
 }
+
+impl fmt::Display for RuntimeLaunchFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "llama-server failed to become ready on {} (pid {}). {} ",
+            self.runtime_endpoint, self.runtime_pid, self.startup_error
+        )?;
+
+        if self.cleanup_succeeded {
+            write!(
+                f,
+                "NullContext cleaned up the failed startup runtime using {} (exit code {}).",
+                self.cleanup_shutdown_method.as_deref().unwrap_or("unknown"),
+                self.cleanup_exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            )?;
+        } else {
+            write!(
+                f,
+                "NullContext also failed to clean up the startup runtime automatically: {}.",
+                self.cleanup_error
+                    .as_deref()
+                    .unwrap_or("unknown cleanup failure")
+            )?;
+        }
+
+        if !self.stdout.trim().is_empty() {
+            write!(f, "\nstdout:\n{}", self.stdout)?;
+        }
+
+        if !self.stderr.trim().is_empty() {
+            write!(f, "\nstderr:\n{}", self.stderr)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl std::error::Error for RuntimeLaunchFailure {}
 
 fn reserve_local_runtime_port() -> Result<u16> {
     let listener = TcpListener::bind(("127.0.0.1", 0))

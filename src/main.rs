@@ -19,7 +19,7 @@ mod web;
 
 use crate::logging::stdout_line;
 use anyhow::Result;
-use audit::{build_llama_runtime_report, PrivacyReport};
+use audit::{build_failed_launch_llama_runtime_report, build_llama_runtime_report, PrivacyReport};
 use cleanup::{
     cleanup_ephemeral_workspace, log_sanitization_operation, scan_artifacts, CleanupReport,
     SanitizationOperation,
@@ -28,6 +28,7 @@ use config::{AppCommand, SessionConfig};
 use inference::run_inference;
 use memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use registry::{list_sessions, register_persistent_session, show_report, SessionLifecycleMetadata};
+use runtime::RuntimeLaunchFailure;
 use session::Session;
 
 fn main() -> Result<()> {
@@ -64,17 +65,32 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
 
     session.write_prompt(config.prompt.as_bytes())?;
 
-    let mut inference_result = run_inference(&config)?;
+    let prompt_probe = config.prompt.as_bytes().to_vec();
+    let prompt_found_before = buffer_contains_pattern(config.prompt.as_bytes(), &prompt_probe);
+
+    let mut inference_result = match run_inference(&config) {
+        Ok(result) => result,
+        Err(error) => {
+            if let Some(failure) = error.downcast_ref::<RuntimeLaunchFailure>() {
+                finalize_failed_startup_session(
+                    &session,
+                    &mut config,
+                    &prompt_probe,
+                    prompt_found_before,
+                    failure,
+                )?;
+            }
+
+            return Err(error);
+        }
+    };
 
     session.write_response(inference_result.response.as_bytes())?;
 
     stdout_line("\n--- Model Output ---\n");
     stdout_line(inference_result.response.as_str());
 
-    let prompt_probe = config.prompt.as_bytes().to_vec();
     let response_probe = inference_result.response.as_bytes().to_vec();
-
-    let prompt_found_before = buffer_contains_pattern(config.prompt.as_bytes(), &prompt_probe);
 
     let response_found_before =
         buffer_contains_pattern(inference_result.response.as_bytes(), &response_probe);
@@ -191,6 +207,98 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
         session.write_report(&report_json)?;
 
         register_persistent_session(&config.home, &session, &config, &cleanup_report)?;
+    }
+
+    stdout_line("\n--- Privacy Report v0 ---");
+    stdout_line(&report_json);
+
+    Ok(())
+}
+
+fn finalize_failed_startup_session(
+    session: &Session,
+    config: &mut SessionConfig,
+    prompt_probe: &[u8],
+    prompt_found_before: bool,
+    failure: &RuntimeLaunchFailure,
+) -> Result<()> {
+    stdout_line("\nRuntime failed before becoming healthy.");
+
+    let (artifacts_detected, scan_operation) = scan_artifacts(&session.workspace)?;
+    log_sanitization_operation(&scan_operation);
+
+    let mut sanitization_operations = vec![scan_operation];
+
+    let startup_failure_operation = SanitizationOperation {
+        operation: "managed_runtime_startup".to_string(),
+        status: "failed".to_string(),
+        details: failure.to_string(),
+    };
+    log_sanitization_operation(&startup_failure_operation);
+    sanitization_operations.push(startup_failure_operation);
+
+    stdout_line("\nSanitizing Rust-owned prompt buffer...");
+    config.prompt.sanitize();
+
+    let prompt_found_after = buffer_contains_pattern(config.prompt.as_bytes(), prompt_probe);
+    let prompt_verification_operation =
+        verify_buffer_zeroization("prompt_buffer", prompt_found_before, prompt_found_after);
+    log_sanitization_operation(&prompt_verification_operation);
+    sanitization_operations.push(prompt_verification_operation);
+
+    let explicit_zeroization_operation = SanitizationOperation {
+        operation: "explicit_sensitive_byte_buffer_zeroization".to_string(),
+        status: "successful".to_string(),
+        details: "Explicitly overwrote the Rust-owned prompt byte buffer before drop after startup failure."
+            .to_string(),
+    };
+    log_sanitization_operation(&explicit_zeroization_operation);
+    sanitization_operations.push(explicit_zeroization_operation);
+
+    let cleanup_report = if config.ephemeral {
+        stdout_line("\nSession mode: ephemeral");
+        stdout_line(format!(
+            "Detected {} workspace artifacts after startup failure.",
+            artifacts_detected.len()
+        ));
+        stdout_line("Cleaning up workspace...");
+
+        cleanup_ephemeral_workspace(
+            &session.workspace,
+            artifacts_detected,
+            sanitization_operations,
+        )
+    } else {
+        stdout_line("\nSession mode: persistent");
+        stdout_line(format!(
+            "Detected {} workspace artifacts after startup failure.",
+            artifacts_detected.len()
+        ));
+        stdout_line("Workspace retained at:");
+        stdout_line(session.workspace.display());
+
+        CleanupReport::not_attempted(artifacts_detected, sanitization_operations)
+    };
+
+    let lifecycle = SessionLifecycleMetadata::for_failed_startup(config, &cleanup_report);
+    let report = PrivacyReport::new(
+        session.id.clone(),
+        session.started_at,
+        !config.ephemeral,
+        "llama-server".to_string(),
+        config.security_mode.as_str().to_string(),
+        config.gpu_layers.clone(),
+        failure.cleanup_succeeded,
+        cleanup_report.clone(),
+    )
+    .with_lifecycle(&lifecycle)
+    .with_llama_runtime(build_failed_launch_llama_runtime_report(config, failure));
+
+    let report_json = report.to_pretty_json()?;
+
+    if !config.ephemeral {
+        session.write_report(&report_json)?;
+        register_persistent_session(&config.home, session, config, &cleanup_report)?;
     }
 
     stdout_line("\n--- Privacy Report v0 ---");

@@ -1,4 +1,7 @@
-use crate::audit::{build_llama_runtime_report, sync_report_lifecycle, PrivacyReport};
+use crate::audit::{
+    build_failed_launch_llama_runtime_report, build_llama_runtime_report, sync_report_lifecycle,
+    PrivacyReport, RetrievalReport,
+};
 use crate::chat::{CancelChatResponse, ChatMessageRequest, ChatSessionManager, StartChatRequest};
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
@@ -27,7 +30,7 @@ use crate::retrieval::{
     build_grounded_prompt, build_retrieval_report, query_corpus, QueryCorpusRequest,
     QueryCorpusResponse,
 };
-use crate::runtime::{observe_post_shutdown, ManagedRuntime};
+use crate::runtime::{observe_post_shutdown, ManagedRuntime, RuntimeLaunchFailure};
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
 use anyhow::Result;
@@ -939,7 +942,25 @@ fn run_direct_streaming_session(
 
     let _ = send_runtime(&tx, "Launching llama-server...");
 
-    let mut runtime = ManagedRuntime::launch(&config)?;
+    let mut runtime = match ManagedRuntime::launch(&config) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            if let Some(failure) = error.downcast_ref::<RuntimeLaunchFailure>() {
+                handle_failed_streaming_startup(
+                    &tx,
+                    &session,
+                    &mut config,
+                    &prompt_probe,
+                    prompt_found_before,
+                    retrieval_report,
+                    failure,
+                )?;
+                return Ok(());
+            }
+
+            return Err(error);
+        }
+    };
     let runtime_pid = runtime.pid();
     let runtime_endpoint = runtime.endpoint_url().to_string();
 
@@ -1156,6 +1177,134 @@ fn run_direct_streaming_session(
     let _ = send_report_text(&tx, &report_json);
 
     let _ = send_complete(&tx, generation_completed);
+
+    Ok(())
+}
+
+fn handle_failed_streaming_startup(
+    tx: &mpsc::Sender<StreamPayload>,
+    session: &Session,
+    config: &mut SessionConfig,
+    prompt_probe: &[u8],
+    prompt_found_before: bool,
+    retrieval_report: Option<RetrievalReport>,
+    failure: &RuntimeLaunchFailure,
+) -> Result<()> {
+    let _ = send_runtime(tx, "Runtime failed before becoming healthy.");
+
+    let (artifacts_detected, scan_operation) = scan_artifacts(&session.workspace)?;
+    let mut sanitization_operations = Vec::new();
+    emit_and_push(tx, &mut sanitization_operations, scan_operation);
+
+    emit_and_push(
+        tx,
+        &mut sanitization_operations,
+        SanitizationOperation {
+            operation: "managed_runtime_startup".to_string(),
+            status: "failed".to_string(),
+            details: failure.to_string(),
+        },
+    );
+
+    let _ = send_runtime(tx, "Sanitizing Rust-owned prompt buffer...");
+    config.prompt.sanitize();
+
+    let prompt_found_after = buffer_contains_pattern(config.prompt.as_bytes(), prompt_probe);
+    emit_and_push(
+        tx,
+        &mut sanitization_operations,
+        verify_buffer_zeroization("prompt_buffer", prompt_found_before, prompt_found_after),
+    );
+    emit_and_push(
+        tx,
+        &mut sanitization_operations,
+        SanitizationOperation {
+            operation: "explicit_sensitive_byte_buffer_zeroization".to_string(),
+            status: "successful".to_string(),
+            details: "Explicitly overwrote the Rust-owned prompt byte buffer before drop after startup failure."
+                .to_string(),
+        },
+    );
+
+    let cleanup_report = if config.ephemeral {
+        let _ = send_runtime(tx, "Session mode: ephemeral");
+        let _ = send_runtime(
+            tx,
+            &format!(
+                "Detected {} workspace artifacts after startup failure.",
+                artifacts_detected.len()
+            ),
+        );
+        let _ = send_runtime(tx, "Cleaning up workspace...");
+        cleanup_ephemeral_workspace(
+            &session.workspace,
+            artifacts_detected,
+            sanitization_operations,
+        )
+    } else {
+        let _ = send_runtime(tx, "Session mode: persistent");
+        let _ = send_runtime(
+            tx,
+            &format!(
+                "Detected {} workspace artifacts after startup failure.",
+                artifacts_detected.len()
+            ),
+        );
+        let _ = send_runtime(tx, "Workspace retained at:");
+        let _ = send_runtime(tx, &session.workspace.display().to_string());
+        CleanupReport::not_attempted(artifacts_detected, sanitization_operations)
+    };
+
+    for operation in &cleanup_report.sanitization_operations {
+        if operation.operation == "workspace_recursive_delete"
+            || operation.operation == "post_cleanup_workspace_verification"
+            || operation.operation == "workspace_retention_policy"
+        {
+            let _ = send_audit(tx, operation);
+        }
+    }
+
+    let lifecycle = SessionLifecycleMetadata::for_failed_startup(config, &cleanup_report);
+    let report = PrivacyReport::new(
+        session.id.clone(),
+        session.started_at,
+        !config.ephemeral,
+        "llama-server".to_string(),
+        config.security_mode.as_str().to_string(),
+        config.gpu_layers.clone(),
+        failure.cleanup_succeeded,
+        cleanup_report.clone(),
+    )
+    .with_lifecycle(&lifecycle)
+    .with_llama_runtime(build_failed_launch_llama_runtime_report(config, failure));
+    let report = if let Some(retrieval_report) = retrieval_report {
+        report.with_retrieval(retrieval_report)
+    } else {
+        report
+    };
+
+    let report_json = report.to_pretty_json()?;
+
+    if !config.ephemeral {
+        session.write_report(&report_json)?;
+        register_persistent_session(&config.home, session, config, &cleanup_report)?;
+    }
+
+    let _ = send_runtime(tx, "--- Privacy Report v0 ---");
+    let _ = send_report_text(tx, &report_json);
+    let _ = send_payload(
+        tx,
+        StreamPayload {
+            event_type: "error".to_string(),
+            message: Some(failure.to_string()),
+            text: None,
+            operation: None,
+            status: None,
+            details: None,
+            success: None,
+        },
+    );
+    let _ = send_complete(tx, false);
 
     Ok(())
 }

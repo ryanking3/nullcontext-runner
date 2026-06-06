@@ -377,6 +377,46 @@ impl SessionLifecycleMetadata {
             updated_at,
         }
     }
+
+    pub fn for_failed_startup(config: &SessionConfig, cleanup: &CleanupReport) -> Self {
+        let updated_at = Some(current_timestamp());
+
+        if config.ephemeral {
+            let state = if cleanup.successful {
+                SessionLifecycleState::CleanupSucceeded
+            } else {
+                SessionLifecycleState::CleanupFailed
+            };
+
+            return Self {
+                state,
+                retention_policy: RetentionPolicy::EphemeralImmediate,
+                retention_deadline: None,
+                cleanup_requested_at: None,
+                cleanup_completed_at: updated_at.clone(),
+                cleanup_reason: Some(CleanupReason::EphemeralPolicy),
+                state_note: Some(
+                    "Session failed before llama-server became ready, and NullContext recorded the resulting ephemeral cleanup outcome."
+                        .to_string(),
+                ),
+                updated_at,
+            };
+        }
+
+        Self {
+            state: SessionLifecycleState::CompletedRetained,
+            retention_policy: RetentionPolicy::RetainUntilManualCleanup,
+            retention_deadline: None,
+            cleanup_requested_at: None,
+            cleanup_completed_at: None,
+            cleanup_reason: None,
+            state_note: Some(
+                "Session failed before llama-server became ready. Retained prompt and report artifacts remain available for operator review under the current lifecycle policy."
+                    .to_string(),
+            ),
+            updated_at,
+        }
+    }
 }
 
 pub fn register_persistent_session(
