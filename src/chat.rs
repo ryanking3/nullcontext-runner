@@ -259,7 +259,15 @@ impl ChatSessionManager {
 
         let mut runtime = ManagedRuntime::launch(&config)
             .context("Active chat startup failed before a live session could be created")?;
-        let session = Session::create()?;
+        let session = match Session::create() {
+            Ok(session) => session,
+            Err(error) => {
+                let cleanup_summary = cleanup_failed_active_chat_start(&mut runtime, None);
+                return Err(error.context(format!(
+                    "Active chat startup failed while creating the session workspace. {cleanup_summary}"
+                )));
+            }
+        };
 
         stdout_line(format!("Session ID: {}", session.id));
         stdout_line(format!("Workspace: {}", session.workspace.display()));
@@ -267,10 +275,11 @@ impl ChatSessionManager {
         if !config.ephemeral {
             if let Err(error) = register_active_persistent_session(&config.home, &session, &config)
             {
-                let _ = runtime.shutdown();
-                return Err(error.context(
-                    "Persistent active chat session started but could not be registered for startup reconciliation",
-                ));
+                let cleanup_summary =
+                    cleanup_failed_active_chat_start(&mut runtime, Some(&session));
+                return Err(error.context(format!(
+                    "Persistent active chat session started but could not be registered for startup reconciliation. {cleanup_summary}"
+                )));
             }
         }
 
@@ -293,7 +302,7 @@ impl ChatSessionManager {
             history_policy: active_history_policy(&config),
         };
 
-        let active = ActiveChatSession {
+        let mut active = ActiveChatSession {
             session,
             config,
             runtime,
@@ -306,10 +315,16 @@ impl ChatSessionManager {
             ending: false,
         };
 
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Chat session lock poisoned"))?;
+        let mut sessions = match self.sessions.lock() {
+            Ok(sessions) => sessions,
+            Err(_) => {
+                let cleanup_summary =
+                    cleanup_failed_active_chat_start(&mut active.runtime, Some(&active.session));
+                return Err(anyhow::anyhow!(
+                    "Chat session lock poisoned before the active session could be published. {cleanup_summary}"
+                ));
+            }
+        };
 
         sessions.insert(response.session_id.clone(), Arc::new(Mutex::new(active)));
 
@@ -994,6 +1009,74 @@ fn build_turn_artifacts(session: &Session, turn_count: usize) -> Vec<TurnArtifac
                 .to_string(),
         })
         .collect()
+}
+
+fn cleanup_failed_active_chat_start(
+    runtime: &mut ManagedRuntime,
+    session: Option<&Session>,
+) -> String {
+    let runtime_summary = match runtime.shutdown() {
+        Ok(outcome) => format!(
+            "NullContext shut down the startup runtime using {} (exit code {}).",
+            outcome.shutdown_method,
+            outcome
+                .exit_code
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        ),
+        Err(error) => format!(
+            "NullContext also failed to shut down the startup runtime automatically: {error}."
+        ),
+    };
+
+    let workspace_summary = match session {
+        Some(session) => match scan_artifacts(&session.workspace) {
+            Ok((artifacts_detected, scan_operation)) => {
+                let cleanup = cleanup_ephemeral_workspace(
+                    &session.workspace,
+                    artifacts_detected,
+                    vec![
+                        scan_operation,
+                        SanitizationOperation {
+                            operation: "active_chat_startup_failure_cleanup".to_string(),
+                            status: "successful".to_string(),
+                            details:
+                                "NullContext cleaned the workspace created for an active chat session that never became live."
+                                    .to_string(),
+                        },
+                    ],
+                );
+
+                if cleanup.workspace_deleted {
+                    format!(
+                        "Temporary startup workspace {} was removed.",
+                        session.workspace.display()
+                    )
+                } else if let Some(error) = cleanup.error {
+                    format!(
+                        "Temporary startup workspace {} could not be fully removed: {}",
+                        session.workspace.display(),
+                        error
+                    )
+                } else {
+                    format!(
+                        "Temporary startup workspace {} could not be confirmed deleted.",
+                        session.workspace.display()
+                    )
+                }
+            }
+            Err(error) => format!(
+                "NullContext could not inspect or clean the temporary startup workspace {}: {}",
+                session.workspace.display(),
+                error
+            ),
+        },
+        None => "No active-chat workspace had been created yet.".to_string(),
+    };
+
+    let summary = format!("{runtime_summary} {workspace_summary}");
+    stdout_line(&summary);
+    summary
 }
 
 fn active_history_policy(config: &SessionConfig) -> String {
