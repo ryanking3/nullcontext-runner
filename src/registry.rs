@@ -189,6 +189,12 @@ impl SessionRegistry {
             .iter_mut()
             .find(|s| s.session_id == session_id)
     }
+
+    pub fn remove(&mut self, session_id: &str) -> bool {
+        let before = self.sessions.len();
+        self.sessions.retain(|s| s.session_id != session_id);
+        self.sessions.len() != before
+    }
 }
 
 impl SessionIndexEntry {
@@ -455,6 +461,17 @@ pub fn register_active_persistent_session(
     registry.save(home)?;
 
     Ok(())
+}
+
+pub fn unregister_persistent_session(home: &str, session_id: &str) -> Result<bool> {
+    let mut registry = SessionRegistry::load(home)?;
+    let removed = registry.remove(session_id);
+
+    if removed {
+        registry.save(home)?;
+    }
+
+    Ok(removed)
 }
 
 pub fn list_sessions(home: &str) -> Result<()> {

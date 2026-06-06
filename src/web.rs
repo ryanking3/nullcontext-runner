@@ -1461,7 +1461,9 @@ fn send_payload(tx: &mpsc::Sender<StreamPayload>, payload: StreamPayload) -> boo
 
 async fn list_sessions(State(state): State<WebState>) -> Response {
     match SessionRegistry::load(&state.home) {
-        Ok(registry) => Json(build_session_registry_snapshot(&state.home, registry)).into_response(),
+        Ok(registry) => {
+            Json(build_session_registry_snapshot(&state.home, registry)).into_response()
+        }
         Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
 }
@@ -1655,7 +1657,11 @@ fn cleanup_persistent_session_with_reason(
 
     sync_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
 
-    Ok(build_lifecycle_action_response(home, entry, completion_message))
+    Ok(build_lifecycle_action_response(
+        home,
+        entry,
+        completion_message,
+    ))
 }
 
 fn update_registry_retention_policy(
@@ -2133,7 +2139,9 @@ fn update_registry_corpus_retention_policy(
         }
     };
 
-    Ok(build_corpus_lifecycle_action_response(home, entry, &message))
+    Ok(build_corpus_lifecycle_action_response(
+        home, entry, &message,
+    ))
 }
 
 fn reconcile_registry_corpus(home: &str, corpus_id: &str) -> Result<CorpusLifecycleActionResponse> {
@@ -2207,7 +2215,9 @@ fn reconcile_registry_corpus(home: &str, corpus_id: &str) -> Result<CorpusLifecy
 
     sync_corpus_report_lifecycle(FsPath::new(&entry.report_path), &entry.lifecycle)?;
 
-    Ok(build_corpus_lifecycle_action_response(home, entry, &message))
+    Ok(build_corpus_lifecycle_action_response(
+        home, entry, &message,
+    ))
 }
 
 fn archive_corpus_report_if_present(
@@ -2265,12 +2275,20 @@ fn session_report_availability(
     let stored_is_archived = entry.report_path == archived_path_str;
 
     if current_exists {
-        let storage = if stored_is_archived { "archived" } else { "current" };
+        let storage = if stored_is_archived {
+            "archived"
+        } else {
+            "current"
+        };
         return (true, storage.to_string(), Some(entry.report_path.clone()));
     }
 
     if archived_exists {
-        return (true, "archived_fallback".to_string(), Some(archived_path_str));
+        return (
+            true,
+            "archived_fallback".to_string(),
+            Some(archived_path_str),
+        );
     }
 
     (false, "missing".to_string(), None)
@@ -2287,12 +2305,20 @@ fn corpus_report_availability(
     let stored_is_archived = entry.report_path == archived_path_str;
 
     if current_exists {
-        let storage = if stored_is_archived { "archived" } else { "current" };
+        let storage = if stored_is_archived {
+            "archived"
+        } else {
+            "current"
+        };
         return (true, storage.to_string(), Some(entry.report_path.clone()));
     }
 
     if archived_exists {
-        return (true, "archived_fallback".to_string(), Some(archived_path_str));
+        return (
+            true,
+            "archived_fallback".to_string(),
+            Some(archived_path_str),
+        );
     }
 
     (false, "missing".to_string(), None)

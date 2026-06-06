@@ -9,7 +9,8 @@ use crate::corpus_registry::{validate_corpus_ready, CorpusRegistry};
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::logging::stdout_line;
 use crate::registry::{
-    register_active_persistent_session, register_persistent_session, SessionLifecycleMetadata,
+    register_active_persistent_session, register_persistent_session, unregister_persistent_session,
+    SessionLifecycleMetadata,
 };
 use crate::retrieval::{
     build_active_chat_retrieval_report, build_grounded_prompt, build_retrieval_report,
@@ -320,8 +321,23 @@ impl ChatSessionManager {
             Err(_) => {
                 let cleanup_summary =
                     cleanup_failed_active_chat_start(&mut active.runtime, Some(&active.session));
+                let registry_summary = if !active.config.ephemeral {
+                    match unregister_persistent_session(&active.config.home, &active.session.id) {
+                        Ok(true) => {
+                            "Rolled back the provisional persistent registry entry.".to_string()
+                        }
+                        Ok(false) => {
+                            "No provisional persistent registry entry needed rollback.".to_string()
+                        }
+                        Err(error) => format!(
+                            "NullContext also failed to roll back the provisional persistent registry entry: {error}."
+                        ),
+                    }
+                } else {
+                    "No persistent registry entry had been created.".to_string()
+                };
                 return Err(anyhow::anyhow!(
-                    "Chat session lock poisoned before the active session could be published. {cleanup_summary}"
+                    "Chat session lock poisoned before the active session could be published. {cleanup_summary} {registry_summary}"
                 ));
             }
         };
