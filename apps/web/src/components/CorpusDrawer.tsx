@@ -389,6 +389,9 @@ export function CorpusDrawer({
                       rawJson={selectedCorpusReport}
                     />
                   )}
+                  {selectedCorpusReport && !currentCorpusReport && (
+                    <div className="registry-action-banner failed">{selectedCorpusReport}</div>
+                  )}
                 </>
               )}
             </section>

@@ -536,19 +536,29 @@ async fn show_corpus_report(
         );
     };
 
-    match fs::read_to_string(&entry.report_path) {
-        Ok(report) => match serde_json::from_str::<serde_json::Value>(&report) {
-            Ok(json) => Json(json).into_response(),
-            Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => json_error(
-            StatusCode::NOT_FOUND,
-            format!(
-                "Corpus report file not found for {corpus_id}. It may have been archived, removed during lifecycle cleanup, or the registry may need reconciliation."
-            ),
-        ),
-        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    let archived_path = archived_corpus_report_path(&state.home, &corpus_id);
+
+    for candidate in [&entry.report_path, archived_path.to_string_lossy().as_ref()] {
+        match fs::read_to_string(candidate) {
+            Ok(report) => {
+                return match serde_json::from_str::<serde_json::Value>(&report) {
+                    Ok(json) => Json(json).into_response(),
+                    Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+                };
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
+            }
+        }
     }
+
+    json_error(
+        StatusCode::NOT_FOUND,
+        format!(
+            "Corpus report file not found for {corpus_id}. NullContext could not find either the current report path or the archived lifecycle report. The report may have been removed during cleanup or the registry may need reconciliation."
+        ),
+    )
 }
 
 async fn update_corpus_retention_policy(
