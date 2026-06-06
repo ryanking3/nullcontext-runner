@@ -1314,19 +1314,29 @@ async fn show_report(State(state): State<WebState>, Path(session_id): Path<Strin
         );
     }
 
-    match fs::read_to_string(&entry.report_path) {
-        Ok(report) => match serde_json::from_str::<serde_json::Value>(&report) {
-            Ok(json) => Json(json).into_response(),
-            Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => json_error(
-            StatusCode::NOT_FOUND,
-            format!(
-                "Report file not found for session {session_id}. It may have been archived, removed during lifecycle cleanup, or the registry may need reconciliation."
-            ),
-        ),
-        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    let archived_path = archived_report_path(&state.home, &session_id);
+
+    for candidate in [&entry.report_path, archived_path.to_string_lossy().as_ref()] {
+        match fs::read_to_string(candidate) {
+            Ok(report) => {
+                return match serde_json::from_str::<serde_json::Value>(&report) {
+                    Ok(json) => Json(json).into_response(),
+                    Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+                };
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
+            }
+        }
     }
+
+    json_error(
+        StatusCode::NOT_FOUND,
+        format!(
+            "Report file not found for session {session_id}. NullContext could not find either the current report path or the archived lifecycle report. The report may have been removed during cleanup or the registry may need reconciliation."
+        ),
+    )
 }
 
 fn json_error(status: StatusCode, message: String) -> Response {
