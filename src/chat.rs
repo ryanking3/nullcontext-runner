@@ -18,7 +18,7 @@ use crate::retrieval::{
 use crate::runtime::{observe_post_shutdown, ManagedRuntime};
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -249,11 +249,7 @@ impl ChatSessionManager {
             request.chat_context_turn_limit,
         )?;
 
-        let session = Session::create()?;
-
         stdout_line("Starting active chat session...");
-        stdout_line(format!("Session ID: {}", session.id));
-        stdout_line(format!("Workspace: {}", session.workspace.display()));
         stdout_line(format!("Security mode: {}", config.security_mode.as_str()));
         stdout_line(format!(
             "Model: {} ({})",
@@ -261,7 +257,12 @@ impl ChatSessionManager {
         ));
         stdout_line(format!("Model path: {}", config.model_path));
 
-        let mut runtime = ManagedRuntime::launch(&config)?;
+        let mut runtime = ManagedRuntime::launch(&config)
+            .context("Active chat startup failed before a live session could be created")?;
+        let session = Session::create()?;
+
+        stdout_line(format!("Session ID: {}", session.id));
+        stdout_line(format!("Workspace: {}", session.workspace.display()));
 
         if !config.ephemeral {
             if let Err(error) = register_active_persistent_session(&config.home, &session, &config)

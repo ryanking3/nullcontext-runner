@@ -162,6 +162,13 @@ export function formatActiveChatApiError(
   action: "start" | "message" | "cancel" | "end",
   message: string
 ): string {
+  if (
+    action === "start" &&
+    message.includes("Active chat startup failed before a live session could be created")
+  ) {
+    return `${message} NullContext did not leave an active chat session running. Review the startup diagnostics and retry after correcting the runtime issue.`;
+  }
+
   if (message.includes("generation is still in progress")) {
     return "The active chat runtime is still finishing the current generation. Wait for streaming to settle, or use Stop and then retry End + Sanitize once the session is idle.";
   }
