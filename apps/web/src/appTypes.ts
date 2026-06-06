@@ -358,6 +358,18 @@ export type CorpusIngestionReport = {
   chunk_count: number;
   ocr_enabled: boolean;
   warnings: string[];
+  lifecycle?: {
+    state: string;
+    retention_policy: string;
+    retention_deadline?: string | null;
+    cleanup_requested_at?: string | null;
+    cleanup_completed_at?: string | null;
+    cleanup_reason?: string | null;
+    state_note?: string | null;
+    updated_at?: string | null;
+    policy_summary: string;
+    decision_summary: string;
+  } | null;
   upload_staging?: {
     staging_root: string;
     staged_files: number;

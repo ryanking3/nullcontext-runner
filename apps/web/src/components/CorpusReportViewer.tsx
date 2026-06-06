@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CorpusIngestionReport } from "../appTypes";
-import { formatBytes, formatTimestamp } from "../appUtils";
+import { formatBytes, formatTimestamp, humanizeSnakeCase, lifecycleStateClass } from "../appUtils";
 import { ReportGrid } from "./ReportGrid";
 
 export function CorpusReportViewer({
@@ -71,6 +71,69 @@ export function CorpusReportViewer({
           },
         ]}
       />
+
+      {report.lifecycle && (
+        <section className="report-section compact-report-section">
+          <div className="panel-header">
+            <div className="panel-title">lifecycle context</div>
+            <span className={lifecycleStateClass(report.lifecycle.state)}>
+              {humanizeSnakeCase(report.lifecycle.state)}
+            </span>
+          </div>
+
+          <ReportGrid
+            entries={[
+              {
+                label: "retention policy",
+                value: humanizeSnakeCase(report.lifecycle.retention_policy),
+              },
+              {
+                label: "retention deadline",
+                value: report.lifecycle.retention_deadline
+                  ? formatTimestamp(report.lifecycle.retention_deadline)
+                  : "none",
+              },
+              {
+                label: "cleanup requested",
+                value: report.lifecycle.cleanup_requested_at
+                  ? formatTimestamp(report.lifecycle.cleanup_requested_at)
+                  : "none",
+              },
+              {
+                label: "cleanup completed",
+                value: report.lifecycle.cleanup_completed_at
+                  ? formatTimestamp(report.lifecycle.cleanup_completed_at)
+                  : "none",
+              },
+              {
+                label: "cleanup reason",
+                value: report.lifecycle.cleanup_reason
+                  ? humanizeSnakeCase(report.lifecycle.cleanup_reason)
+                  : "none",
+              },
+              {
+                label: "state note",
+                value: report.lifecycle.state_note || "none",
+              },
+              {
+                label: "updated",
+                value: report.lifecycle.updated_at
+                  ? formatTimestamp(report.lifecycle.updated_at)
+                  : "none",
+              },
+            ]}
+          />
+
+          <div className="report-risk-block">
+            <p>
+              <strong>policy summary:</strong> {report.lifecycle.policy_summary}
+            </p>
+            <p>
+              <strong>decision summary:</strong> {report.lifecycle.decision_summary}
+            </p>
+          </div>
+        </section>
+      )}
 
       {report.source_paths_requested.length > 0 && (
         <details className="report-detail" open={!compact}>
