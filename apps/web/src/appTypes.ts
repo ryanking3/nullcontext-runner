@@ -33,6 +33,20 @@ export type CorpusRegistrySnapshot = {
   corpora: CorpusIndexEntry[];
 };
 
+export type StartupReconciliationSnapshot = {
+  scanned: number;
+  changed: number;
+  orphaned: number;
+  cleanup_consistent: number;
+  unchanged: number;
+  notes: string[];
+};
+
+export type StartupStatusResponse = {
+  sessions: StartupReconciliationSnapshot;
+  corpora: StartupReconciliationSnapshot;
+};
+
 export type CorpusLifecycleMetadata = {
   state: string;
   retention_policy: string;

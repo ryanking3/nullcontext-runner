@@ -169,6 +169,8 @@ function App() {
     setTheme,
     serverStatus,
     healthCheckedAt,
+    startupStatus,
+    startupStatusLoadedAt,
     sidebarCollapsed,
     setSidebarCollapsed,
     configDrawerOpen,
@@ -338,6 +340,8 @@ function App() {
         checkHealth={checkHealth}
         serverStatus={serverStatus}
         healthCheckedAt={healthCheckedAt}
+        startupStatus={startupStatus}
+        startupStatusLoadedAt={startupStatusLoadedAt}
         runtimeMode={runtimeMode}
         onRuntimeModeChange={setRuntimeMode}
         activeChatRuntimeActive={activeChatRuntimeActive}

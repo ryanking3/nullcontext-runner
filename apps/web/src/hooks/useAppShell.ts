@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Theme } from "../appTypes";
+import type { StartupStatusResponse, Theme } from "../appTypes";
 
 export function useAppShell({
   apiBase,
@@ -25,6 +25,8 @@ export function useAppShell({
   const [theme, setTheme] = useState<Theme>("dark");
   const [serverStatus, setServerStatus] = useState<"checking" | "online" | "offline">("checking");
   const [healthCheckedAt, setHealthCheckedAt] = useState<string>("never");
+  const [startupStatus, setStartupStatus] = useState<StartupStatusResponse | null>(null);
+  const [startupStatusLoadedAt, setStartupStatusLoadedAt] = useState<string>("never");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
@@ -46,6 +48,23 @@ export function useAppShell({
       setServerStatus("offline");
     } finally {
       setHealthCheckedAt(new Date().toLocaleTimeString());
+    }
+  }
+
+  async function loadStartupStatus() {
+    try {
+      const response = await fetch(`${apiBase}/api/startup-status`);
+
+      if (!response.ok) {
+        throw new Error("Failed to load startup recovery status.");
+      }
+
+      const data = (await response.json()) as StartupStatusResponse;
+      setStartupStatus(data);
+    } catch {
+      setStartupStatus(null);
+    } finally {
+      setStartupStatusLoadedAt(new Date().toLocaleTimeString());
     }
   }
 
@@ -103,6 +122,7 @@ export function useAppShell({
 
   useEffect(() => {
     void checkHealth();
+    void loadStartupStatus();
     onLoadSessions();
     onLoadModels();
     onLoadCorpora();
@@ -154,6 +174,8 @@ export function useAppShell({
     setTheme,
     serverStatus,
     healthCheckedAt,
+    startupStatus,
+    startupStatusLoadedAt,
     sidebarCollapsed,
     setSidebarCollapsed,
     configDrawerOpen,

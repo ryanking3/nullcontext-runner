@@ -1,4 +1,10 @@
-import type { CorpusIndexEntry, RegisteredModel, RuntimeMode, Theme } from "../appTypes";
+import type {
+  CorpusIndexEntry,
+  RegisteredModel,
+  RuntimeMode,
+  StartupStatusResponse,
+  Theme,
+} from "../appTypes";
 
 export function AppSidebar({
   sidebarCollapsed,
@@ -10,6 +16,8 @@ export function AppSidebar({
   checkHealth,
   serverStatus,
   healthCheckedAt,
+  startupStatus,
+  startupStatusLoadedAt,
   runtimeMode,
   onRuntimeModeChange,
   activeChatRuntimeActive,
@@ -38,6 +46,8 @@ export function AppSidebar({
   checkHealth: () => void;
   serverStatus: "checking" | "online" | "offline";
   healthCheckedAt: string;
+  startupStatus: StartupStatusResponse | null;
+  startupStatusLoadedAt: string;
   runtimeMode: RuntimeMode;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   activeChatRuntimeActive: boolean;
@@ -62,6 +72,11 @@ export function AppSidebar({
     selectedCorpus.lifecycle.state === "ready" &&
     selectedCorpus.root_exists &&
     selectedCorpus.manifest_exists;
+  const startupNeedsAttention =
+    (startupStatus?.sessions.changed ?? 0) > 0 ||
+    (startupStatus?.sessions.orphaned ?? 0) > 0 ||
+    (startupStatus?.corpora.changed ?? 0) > 0 ||
+    (startupStatus?.corpora.orphaned ?? 0) > 0;
 
   return (
     <aside className={`sidebar${sidebarCollapsed ? " collapsed" : ""}`}>
@@ -123,6 +138,62 @@ export function AppSidebar({
             </button>
           </section>
           <p className="microcopy">last check: {healthCheckedAt}</p>
+
+          <section className="panel">
+            <div className="panel-header">
+              <div className="panel-title">startup recovery</div>
+              <span className={startupNeedsAttention ? "pill warning" : "pill success"}>
+                {startupNeedsAttention ? "attention" : "clean"}
+              </span>
+            </div>
+
+            <div className="config-summary">
+              <span>
+                sessions:{" "}
+                {startupStatus
+                  ? `${startupStatus.sessions.changed} changed | ${startupStatus.sessions.orphaned} orphaned`
+                  : "unavailable"}
+              </span>
+              <span>
+                corpora:{" "}
+                {startupStatus
+                  ? `${startupStatus.corpora.changed} changed | ${startupStatus.corpora.orphaned} orphaned`
+                  : "unavailable"}
+              </span>
+              <span>loaded: {startupStatusLoadedAt}</span>
+            </div>
+
+            {startupStatus &&
+              (startupStatus.sessions.notes.length > 0 || startupStatus.corpora.notes.length > 0) && (
+                <details className="report-detail" open={startupNeedsAttention}>
+                  <summary>
+                    <span>startup notes</span>
+                    <span className="pill neutral">
+                      {startupStatus.sessions.notes.length + startupStatus.corpora.notes.length}
+                    </span>
+                  </summary>
+                  <div className="report-list">
+                    {startupStatus.sessions.notes.map((note) => (
+                      <div className="report-item" key={`session-${note}`}>
+                        <strong>session</strong>
+                        <div>{note}</div>
+                      </div>
+                    ))}
+                    {startupStatus.corpora.notes.map((note) => (
+                      <div className="report-item" key={`corpus-${note}`}>
+                        <strong>corpus</strong>
+                        <div>{note}</div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+
+            <p className="microcopy">
+              NullContext records what startup reconciliation changed so abandoned retained chats or
+              corpora do not stay invisible after a restart.
+            </p>
+          </section>
 
           <section className="panel">
             <div className="panel-title">runtime mode</div>

@@ -8,7 +8,7 @@ use crate::corpus::{CorpusCleanupReason, CorpusRetentionPolicy};
 use crate::corpus_registry::{
     archived_corpus_report_path, due_retention_cleanup_corpus_ids, ensure_corpus_registry_dirs,
     list_corpora, reconcile_corpora_on_startup, sync_corpus_report_lifecycle, CorpusIndexEntry,
-    CorpusRegistry,
+    CorpusRegistry, CorpusStartupReconciliationSummary,
 };
 use crate::docs::{
     ingest_corpus, ingest_uploaded_corpus, IngestCorpusRequest, IngestCorpusResponse,
@@ -21,6 +21,7 @@ use crate::registry::{
     archived_report_path, due_retention_cleanup_session_ids, ensure_registry_dirs,
     reconcile_registry_on_startup, register_persistent_session, CleanupReason, RetentionPolicy,
     SessionIndexEntry, SessionLifecycleMetadata, SessionLifecycleState, SessionRegistry,
+    StartupReconciliationSummary,
 };
 use crate::retrieval::{
     build_grounded_prompt, build_retrieval_report, query_corpus, QueryCorpusRequest,
@@ -58,12 +59,29 @@ const RETENTION_SWEEP_INTERVAL_SECONDS: u64 = 60;
 struct WebState {
     home: Arc<String>,
     chat_manager: ChatSessionManager,
+    startup_status: Arc<StartupStatusResponse>,
 }
 
 #[derive(Debug, Serialize)]
 struct HealthResponse {
     status: String,
     service: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct StartupStatusResponse {
+    sessions: StartupReconciliationResponse,
+    corpora: StartupReconciliationResponse,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct StartupReconciliationResponse {
+    scanned: usize,
+    changed: usize,
+    orphaned: usize,
+    cleanup_consistent: usize,
+    unchanged: usize,
+    notes: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -215,19 +233,24 @@ struct StreamPayload {
 
 pub async fn serve() -> Result<()> {
     let home = home_dir()?;
-    emit_startup_reconciliation(&home)?;
-    emit_startup_corpus_reconciliation(&home)?;
+    let startup_session_summary = emit_startup_reconciliation(&home)?;
+    let startup_corpus_summary = emit_startup_corpus_reconciliation(&home)?;
     ensure_corpus_registry_dirs(&home)?;
 
     let state = WebState {
         home: Arc::new(home),
         chat_manager: ChatSessionManager::new(),
+        startup_status: Arc::new(StartupStatusResponse {
+            sessions: build_session_startup_reconciliation_response(&startup_session_summary),
+            corpora: build_corpus_startup_reconciliation_response(&startup_corpus_summary),
+        }),
     };
 
     spawn_retention_scheduler(state.home.clone());
 
     let app = Router::new()
         .route("/api/health", get(health))
+        .route("/api/startup-status", get(startup_status))
         .route(
             "/api/corpora",
             get(list_corpora_route).post(ingest_corpus_route),
@@ -323,7 +346,7 @@ fn spawn_retention_scheduler(home: Arc<String>) {
     });
 }
 
-fn emit_startup_reconciliation(home: &str) -> Result<()> {
+fn emit_startup_reconciliation(home: &str) -> Result<StartupReconciliationSummary> {
     let summary = reconcile_registry_on_startup(home)?;
     sync_registry_report_lifecycle(home)?;
 
@@ -347,10 +370,10 @@ fn emit_startup_reconciliation(home: &str) -> Result<()> {
         ));
     }
 
-    Ok(())
+    Ok(summary)
 }
 
-fn emit_startup_corpus_reconciliation(home: &str) -> Result<()> {
+fn emit_startup_corpus_reconciliation(home: &str) -> Result<CorpusStartupReconciliationSummary> {
     let summary = reconcile_corpora_on_startup(home)?;
 
     stdout_line(format!(
@@ -373,7 +396,7 @@ fn emit_startup_corpus_reconciliation(home: &str) -> Result<()> {
         ));
     }
 
-    Ok(())
+    Ok(summary)
 }
 
 fn sync_registry_report_lifecycle(home: &str) -> Result<()> {
@@ -386,11 +409,41 @@ fn sync_registry_report_lifecycle(home: &str) -> Result<()> {
     Ok(())
 }
 
+fn build_session_startup_reconciliation_response(
+    summary: &StartupReconciliationSummary,
+) -> StartupReconciliationResponse {
+    StartupReconciliationResponse {
+        scanned: summary.scanned_sessions,
+        changed: summary.changed_sessions,
+        orphaned: summary.orphaned_sessions,
+        cleanup_consistent: summary.cleanup_succeeded_consistent,
+        unchanged: summary.unchanged_sessions,
+        notes: summary.notes.clone(),
+    }
+}
+
+fn build_corpus_startup_reconciliation_response(
+    summary: &CorpusStartupReconciliationSummary,
+) -> StartupReconciliationResponse {
+    StartupReconciliationResponse {
+        scanned: summary.scanned_corpora,
+        changed: summary.changed_corpora,
+        orphaned: summary.orphaned_corpora,
+        cleanup_consistent: summary.cleanup_succeeded_consistent,
+        unchanged: summary.unchanged_corpora,
+        notes: summary.notes.clone(),
+    }
+}
+
 async fn health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".to_string(),
         service: "nullcontext".to_string(),
     })
+}
+
+async fn startup_status(State(state): State<WebState>) -> Json<StartupStatusResponse> {
+    Json(state.startup_status.as_ref().clone())
 }
 
 async fn list_models(State(state): State<WebState>) -> Response {
