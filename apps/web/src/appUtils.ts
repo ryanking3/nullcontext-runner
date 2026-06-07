@@ -14,6 +14,14 @@ export function statusClass(status: string): string {
 }
 
 export function inspectionStatusClass(status: string): string {
+  if (status === "markers_detected_in_scanned_memory") {
+    return "pill failed";
+  }
+
+  if (status === "no_markers_detected_in_scanned_regions") {
+    return "pill success";
+  }
+
   if (status.includes("startup_failed")) {
     return "pill failed";
   }
@@ -36,8 +44,19 @@ export function inspectionStatusClass(status: string): string {
     return "pill failed";
   }
 
-  if (status.includes("inconclusive") || status.includes("unavailable")) {
+  if (
+    status.includes("inconclusive") ||
+    status.includes("unavailable") ||
+    status.includes("unsupported") ||
+    status.includes("not_observable") ||
+    status.includes("not_completed") ||
+    status.includes("not_implemented")
+  ) {
     return "pill warning";
+  }
+
+  if (status.includes("failed")) {
+    return "pill failed";
   }
 
   return "pill neutral";

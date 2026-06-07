@@ -1,7 +1,7 @@
 use crate::audit::{
     build_failed_launch_llama_runtime_report, build_llama_runtime_report,
-    build_unimplemented_failed_start_process_scan_report, build_unimplemented_process_scan_report,
-    sync_report_lifecycle, PrivacyReport, RetrievalReport,
+    build_unimplemented_failed_start_process_scan_report, sync_report_lifecycle, PrivacyReport,
+    RetrievalReport,
 };
 use crate::chat::{CancelChatResponse, ChatMessageRequest, ChatSessionManager, StartChatRequest};
 use crate::cleanup::{
@@ -22,6 +22,10 @@ use crate::docs::{
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::logging::{stderr_line, stdout_line};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
+use crate::process_scan::{
+    build_process_scan_report, scan_live_process_phase, scan_post_shutdown_process_phase,
+    ProcessScanMarker,
+};
 use crate::registry::{
     archived_report_path, due_retention_cleanup_session_ids, ensure_registry_dirs,
     reconcile_registry_on_startup, register_persistent_session,
@@ -992,9 +996,36 @@ fn run_direct_streaming_session(
 
     let generation_completed = termination == StreamTermination::Completed;
 
+    let live_process_scan = scan_live_process_phase(
+        runtime_pid,
+        &[
+            ProcessScanMarker {
+                kind: "prompt_marker",
+                bytes: config.prompt.as_bytes(),
+            },
+            ProcessScanMarker {
+                kind: "response_marker",
+                bytes: response_text.as_bytes(),
+            },
+        ],
+    );
     let runtime_usage = runtime.observe_usage();
     let runtime_shutdown = runtime.shutdown()?;
     let post_shutdown_observation = observe_post_shutdown(runtime_pid);
+    let post_shutdown_process_scan = scan_post_shutdown_process_phase(
+        runtime_pid,
+        &post_shutdown_observation,
+        &[
+            ProcessScanMarker {
+                kind: "prompt_marker",
+                bytes: config.prompt.as_bytes(),
+            },
+            ProcessScanMarker {
+                kind: "response_marker",
+                bytes: response_text.as_bytes(),
+            },
+        ],
+    );
 
     if !generation_completed {
         let _ = send_audit(
@@ -1165,7 +1196,10 @@ fn run_direct_streaming_session(
         cleanup_report.clone(),
     )
     .with_lifecycle(&lifecycle)
-    .with_process_scan(build_unimplemented_process_scan_report(Some(runtime_pid)))
+    .with_process_scan(build_process_scan_report(
+        Some(runtime_pid),
+        vec![live_process_scan, post_shutdown_process_scan],
+    ))
     .with_llama_runtime(build_llama_runtime_report(
         &config,
         Some(runtime_pid),

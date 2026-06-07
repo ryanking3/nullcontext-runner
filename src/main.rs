@@ -10,6 +10,7 @@ mod inference;
 mod llama_stream;
 mod logging;
 mod memory_scan;
+mod process_scan;
 mod registry;
 mod retrieval;
 mod runtime;
@@ -21,8 +22,7 @@ use crate::logging::stdout_line;
 use anyhow::Result;
 use audit::{
     build_failed_launch_llama_runtime_report, build_llama_runtime_report,
-    build_unimplemented_failed_start_process_scan_report, build_unimplemented_process_scan_report,
-    PrivacyReport,
+    build_unimplemented_failed_start_process_scan_report, PrivacyReport,
 };
 use cleanup::{
     cleanup_ephemeral_workspace, log_sanitization_operation, scan_artifacts, CleanupReport,
@@ -196,9 +196,7 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
         cleanup_report.clone(),
     )
     .with_lifecycle(&lifecycle)
-    .with_process_scan(build_unimplemented_process_scan_report(Some(
-        inference_result.runtime_pid,
-    )))
+    .with_process_scan(inference_result.process_scan.clone())
     .with_llama_runtime(build_llama_runtime_report(
         &config,
         Some(inference_result.runtime_pid),

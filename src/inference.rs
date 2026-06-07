@@ -1,6 +1,11 @@
+use crate::audit::ProcessScanReport;
 use crate::cleanup::SanitizationOperation;
 use crate::config::SessionConfig;
 use crate::logging::stdout_line;
+use crate::process_scan::{
+    build_process_scan_report, scan_live_process_phase, scan_post_shutdown_process_phase,
+    ProcessScanMarker,
+};
 use crate::runtime::{
     observe_post_shutdown, ManagedRuntime, RuntimePostShutdownObservation, RuntimeShutdownOutcome,
     RuntimeUsageSnapshot,
@@ -19,6 +24,7 @@ pub struct InferenceResult {
     pub runtime_shutdown: RuntimeShutdownOutcome,
     pub runtime_usage: RuntimeUsageSnapshot,
     pub post_shutdown_observation: RuntimePostShutdownObservation,
+    pub process_scan: ProcessScanReport,
     pub sanitization_operations: Vec<SanitizationOperation>,
 }
 
@@ -53,8 +59,35 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
     )?;
 
     let runtime_usage = runtime.observe_usage();
+    let live_process_scan = scan_live_process_phase(
+        runtime_pid,
+        &[
+            ProcessScanMarker {
+                kind: "prompt_marker",
+                bytes: config.prompt.as_bytes(),
+            },
+            ProcessScanMarker {
+                kind: "response_marker",
+                bytes: response.as_bytes(),
+            },
+        ],
+    );
     let runtime_shutdown = runtime.shutdown()?;
     let post_shutdown_observation = observe_post_shutdown(runtime_pid);
+    let post_shutdown_process_scan = scan_post_shutdown_process_phase(
+        runtime_pid,
+        &post_shutdown_observation,
+        &[
+            ProcessScanMarker {
+                kind: "prompt_marker",
+                bytes: config.prompt.as_bytes(),
+            },
+            ProcessScanMarker {
+                kind: "response_marker",
+                bytes: response.as_bytes(),
+            },
+        ],
+    );
 
     operations.push(SanitizationOperation {
         operation: "managed_runtime_shutdown".to_string(),
@@ -80,6 +113,10 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
         runtime_shutdown,
         runtime_usage,
         post_shutdown_observation,
+        process_scan: build_process_scan_report(
+            Some(runtime_pid),
+            vec![live_process_scan, post_shutdown_process_scan],
+        ),
         sanitization_operations: operations,
     })
 }
