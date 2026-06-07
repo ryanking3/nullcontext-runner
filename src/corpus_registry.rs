@@ -276,7 +276,7 @@ pub fn reconcile_corpora_on_startup(home: &str) -> Result<CorpusStartupReconcili
     };
 
     for entry in &mut registry.corpora {
-        let message = reconcile_corpus_entry(entry);
+        let message = reconcile_corpus_entry(home, entry);
 
         match message {
             CorpusReconciliationOutcome::Changed(note) => {
@@ -336,9 +336,17 @@ enum CorpusReconciliationOutcome {
     Unchanged(String),
 }
 
-fn reconcile_corpus_entry(entry: &mut CorpusIndexEntry) -> CorpusReconciliationOutcome {
+fn reconcile_corpus_entry(home: &str, entry: &mut CorpusIndexEntry) -> CorpusReconciliationOutcome {
     let root_exists = Path::new(&entry.root_path).exists();
-    let report_exists = Path::new(&entry.report_path).exists();
+    let mut report_exists = Path::new(&entry.report_path).exists();
+    let archived_report_path = archived_corpus_report_path(home, &entry.corpus_id);
+    let recovered_archived_report = !report_exists && archived_report_path.exists();
+
+    if recovered_archived_report {
+        entry.report_path = archived_report_path.display().to_string();
+        report_exists = true;
+        entry.lifecycle.updated_at = Some(current_timestamp());
+    }
 
     if entry.lifecycle.state == CorpusLifecycleState::CleanupPending {
         entry.mark_orphaned_with_note(
@@ -359,6 +367,17 @@ fn reconcile_corpus_entry(entry: &mut CorpusIndexEntry) -> CorpusReconciliationO
             );
             return CorpusReconciliationOutcome::Changed(
                 "Cleanup had been recorded as successful and the corpus root is gone, but the retained report is missing; marked orphaned for investigation."
+                    .to_string(),
+            );
+        }
+
+        if recovered_archived_report {
+            entry.lifecycle.state_note = Some(
+                "Startup reconciliation confirmed that lifecycle cleanup had already succeeded, the corpus root is gone, and the registry was relinked to the archived corpus report."
+                    .to_string(),
+            );
+            return CorpusReconciliationOutcome::Changed(
+                "Cleanup had already succeeded and the corpus root is gone; startup relinked the registry to the archived report."
                     .to_string(),
             );
         }
@@ -405,6 +424,16 @@ fn reconcile_corpus_entry(entry: &mut CorpusIndexEntry) -> CorpusReconciliationO
         return CorpusReconciliationOutcome::Changed(
             "Corpus report is missing while cleanup was not recorded as successful; marked orphaned."
                 .to_string(),
+        );
+    }
+
+    if recovered_archived_report {
+        entry.lifecycle.state_note = Some(
+            "Startup reconciliation found that the retained corpus report had moved to the archived report path and relinked the registry entry."
+                .to_string(),
+        );
+        return CorpusReconciliationOutcome::Changed(
+            "Startup relinked the retained corpus to the archived report path.".to_string(),
         );
     }
 

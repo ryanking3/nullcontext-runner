@@ -1780,16 +1780,33 @@ fn reconcile_registry_session(
         }
 
         let workspace_exists = FsPath::new(&entry.workspace).exists();
-        let report_exists = FsPath::new(&entry.report_path).exists();
+        let mut report_exists = FsPath::new(&entry.report_path).exists();
+        let archived_report_path = archived_report_path(home, session_id);
+        let recovered_archived_report = !report_exists && archived_report_path.exists();
+
+        if recovered_archived_report {
+            entry.report_path = archived_report_path.display().to_string();
+            report_exists = true;
+        }
 
         if entry.cleanup_successful && !workspace_exists {
-            entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
-            entry.lifecycle.state_note = Some(
-                "Manual reconciliation confirmed that lifecycle cleanup had already succeeded and the retained workspace is gone."
-                    .to_string(),
-            );
-            "Registry matches a cleaned-up session. Workspace is gone and lifecycle cleanup succeeded."
-                .to_string()
+            if recovered_archived_report {
+                entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+                entry.lifecycle.state_note = Some(
+                    "Manual reconciliation confirmed that lifecycle cleanup had already succeeded, the retained workspace is gone, and the registry was relinked to the archived session report."
+                        .to_string(),
+                );
+                "Registry matched a cleaned-up session and manual reconciliation relinked the archived report."
+                    .to_string()
+            } else {
+                entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+                entry.lifecycle.state_note = Some(
+                    "Manual reconciliation confirmed that lifecycle cleanup had already succeeded and the retained workspace is gone."
+                        .to_string(),
+                );
+                "Registry matches a cleaned-up session. Workspace is gone and lifecycle cleanup succeeded."
+                    .to_string()
+            }
         } else if !workspace_exists && !entry.cleanup_successful {
             entry.mark_orphaned_with_note(
                 "Manual reconciliation found that the retained workspace is missing even though successful lifecycle cleanup was never recorded. The session was marked orphaned for review."
@@ -1810,6 +1827,14 @@ fn reconcile_registry_session(
                     .to_string(),
             );
             "Report file is missing while lifecycle cleanup was not recorded as successful. Marked session as orphaned."
+                .to_string()
+        } else if recovered_archived_report {
+            entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            entry.lifecycle.state_note = Some(
+                "Manual reconciliation found that the retained session report had moved to the archived report path and relinked the registry entry."
+                    .to_string(),
+            );
+            "Manual reconciliation relinked the retained session to the archived report path."
                 .to_string()
         } else {
             entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
@@ -2152,18 +2177,35 @@ fn reconcile_registry_corpus(home: &str, corpus_id: &str) -> Result<CorpusLifecy
             .ok_or_else(|| anyhow::anyhow!("Corpus not found: {corpus_id}"))?;
 
         let root_exists = FsPath::new(&entry.root_path).exists();
-        let report_exists = FsPath::new(&entry.report_path).exists();
+        let mut report_exists = FsPath::new(&entry.report_path).exists();
+        let archived_report_path = archived_corpus_report_path(home, corpus_id);
+        let recovered_archived_report = !report_exists && archived_report_path.exists();
+
+        if recovered_archived_report {
+            entry.report_path = archived_report_path.display().to_string();
+            report_exists = true;
+        }
 
         if entry.lifecycle.state == crate::corpus::CorpusLifecycleState::CleanupSucceeded
             && !root_exists
         {
-            entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
-            entry.lifecycle.state_note = Some(
-                "Manual reconciliation confirmed that lifecycle cleanup had already succeeded and the corpus root is gone."
-                    .to_string(),
-            );
-            "Registry matches a cleaned-up corpus. Root directory is gone and lifecycle cleanup succeeded."
-                .to_string()
+            if recovered_archived_report {
+                entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+                entry.lifecycle.state_note = Some(
+                    "Manual reconciliation confirmed that lifecycle cleanup had already succeeded, the corpus root is gone, and the registry was relinked to the archived corpus report."
+                        .to_string(),
+                );
+                "Registry matched a cleaned-up corpus and manual reconciliation relinked the archived report."
+                    .to_string()
+            } else {
+                entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+                entry.lifecycle.state_note = Some(
+                    "Manual reconciliation confirmed that lifecycle cleanup had already succeeded and the corpus root is gone."
+                        .to_string(),
+                );
+                "Registry matches a cleaned-up corpus. Root directory is gone and lifecycle cleanup succeeded."
+                    .to_string()
+            }
         } else if !root_exists
             && entry.lifecycle.state != crate::corpus::CorpusLifecycleState::CleanupSucceeded
             && entry.lifecycle.state != crate::corpus::CorpusLifecycleState::CleanupFailed
@@ -2192,6 +2234,14 @@ fn reconcile_registry_corpus(home: &str, corpus_id: &str) -> Result<CorpusLifecy
                     .to_string(),
             );
             "Corpus report is missing while cleanup was not recorded as successful. Marked corpus as orphaned."
+                .to_string()
+        } else if recovered_archived_report {
+            entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            entry.lifecycle.state_note = Some(
+                "Manual reconciliation found that the retained corpus report had moved to the archived report path and relinked the registry entry."
+                    .to_string(),
+            );
+            "Manual reconciliation relinked the retained corpus to the archived report path."
                 .to_string()
         } else {
             entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());

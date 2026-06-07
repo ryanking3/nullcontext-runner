@@ -545,7 +545,7 @@ pub fn reconcile_registry_on_startup(home: &str) -> Result<StartupReconciliation
     };
 
     for entry in &mut registry.sessions {
-        let message = reconcile_entry(entry);
+        let message = reconcile_entry(home, entry);
 
         match message {
             ReconciliationOutcome::Changed(note) => {
@@ -640,9 +640,17 @@ enum ReconciliationOutcome {
     Unchanged(String),
 }
 
-fn reconcile_entry(entry: &mut SessionIndexEntry) -> ReconciliationOutcome {
+fn reconcile_entry(home: &str, entry: &mut SessionIndexEntry) -> ReconciliationOutcome {
     let workspace_exists = Path::new(&entry.workspace).exists();
-    let report_exists = Path::new(&entry.report_path).exists();
+    let mut report_exists = Path::new(&entry.report_path).exists();
+    let archived_report_path = archived_report_path(home, &entry.session_id);
+    let recovered_archived_report = !report_exists && archived_report_path.exists();
+
+    if recovered_archived_report {
+        entry.report_path = archived_report_path.display().to_string();
+        report_exists = true;
+        entry.lifecycle.updated_at = Some(current_timestamp());
+    }
 
     if entry.lifecycle.state == SessionLifecycleState::CleanupPending {
         entry.mark_orphaned_with_note(
@@ -674,6 +682,17 @@ fn reconcile_entry(entry: &mut SessionIndexEntry) -> ReconciliationOutcome {
             );
             return ReconciliationOutcome::Changed(
                 "Cleanup had been recorded as successful and the workspace is gone, but the report path is missing; marked orphaned for investigation."
+                    .to_string(),
+            );
+        }
+
+        if recovered_archived_report {
+            entry.lifecycle.state_note = Some(
+                "Startup reconciliation confirmed that cleanup had already succeeded, the retained workspace is gone, and the registry was relinked to the archived session report."
+                    .to_string(),
+            );
+            return ReconciliationOutcome::Changed(
+                "Cleanup had already succeeded and the workspace is gone; startup relinked the registry to the archived report."
                     .to_string(),
             );
         }
@@ -714,6 +733,16 @@ fn reconcile_entry(entry: &mut SessionIndexEntry) -> ReconciliationOutcome {
         return ReconciliationOutcome::Changed(
             "Report path is missing while cleanup was not recorded as successful; marked orphaned."
                 .to_string(),
+        );
+    }
+
+    if recovered_archived_report {
+        entry.lifecycle.state_note = Some(
+            "Startup reconciliation found that the retained session report had moved to the archived report path and relinked the registry entry."
+                .to_string(),
+        );
+        return ReconciliationOutcome::Changed(
+            "Startup relinked the retained session to the archived report path.".to_string(),
         );
     }
 
