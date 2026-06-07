@@ -159,6 +159,15 @@ impl CorpusIndexEntry {
         self.lifecycle.updated_at = Some(current_timestamp());
     }
 
+    pub fn mark_ready_with_note(&mut self, note: String) {
+        self.lifecycle.state = CorpusLifecycleState::Ready;
+        self.lifecycle.cleanup_requested_at = None;
+        self.lifecycle.cleanup_completed_at = None;
+        self.lifecycle.cleanup_reason = None;
+        self.lifecycle.state_note = Some(note);
+        self.lifecycle.updated_at = Some(current_timestamp());
+    }
+
     pub fn apply_retention_policy(
         &mut self,
         retention_policy: CorpusRetentionPolicy,

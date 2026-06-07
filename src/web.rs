@@ -1784,6 +1784,13 @@ fn reconcile_registry_session(
             report_exists = true;
         }
 
+        let can_restore_retained_state = matches!(
+            entry.lifecycle.state,
+            SessionLifecycleState::Orphaned | SessionLifecycleState::AbandonedActive
+        ) && workspace_exists
+            && report_exists
+            && !entry.cleanup_successful;
+
         if entry.cleanup_successful && !workspace_exists {
             if recovered_archived_report {
                 entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
@@ -1822,6 +1829,20 @@ fn reconcile_registry_session(
                     .to_string(),
             );
             "Report file is missing while lifecycle cleanup was not recorded as successful. Marked session as orphaned."
+                .to_string()
+        } else if recovered_archived_report && can_restore_retained_state {
+            entry.mark_completed_retained_with_note(
+                "Manual reconciliation confirmed that the retained session artifacts are present again, relinked the registry entry to the archived report path, and restored the lifecycle state to completed_retained."
+                    .to_string(),
+            );
+            "Manual reconciliation relinked the retained session to the archived report path and restored a healthy completed_retained lifecycle state."
+                .to_string()
+        } else if can_restore_retained_state {
+            entry.mark_completed_retained_with_note(
+                "Manual reconciliation confirmed that the retained session artifacts are present and restored the lifecycle state to completed_retained."
+                    .to_string(),
+            );
+            "Manual reconciliation restored a healthy completed_retained lifecycle state for this retained session."
                 .to_string()
         } else if recovered_archived_report {
             entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
@@ -2181,6 +2202,13 @@ fn reconcile_registry_corpus(home: &str, corpus_id: &str) -> Result<CorpusLifecy
             report_exists = true;
         }
 
+        let manifest_exists = FsPath::new(&entry.manifest_path).exists();
+        let can_restore_ready_state = entry.lifecycle.state
+            == crate::corpus::CorpusLifecycleState::Orphaned
+            && root_exists
+            && manifest_exists
+            && report_exists;
+
         if entry.lifecycle.state == crate::corpus::CorpusLifecycleState::CleanupSucceeded
             && !root_exists
         {
@@ -2229,6 +2257,20 @@ fn reconcile_registry_corpus(home: &str, corpus_id: &str) -> Result<CorpusLifecy
                     .to_string(),
             );
             "Corpus report is missing while cleanup was not recorded as successful. Marked corpus as orphaned."
+                .to_string()
+        } else if recovered_archived_report && can_restore_ready_state {
+            entry.mark_ready_with_note(
+                "Manual reconciliation confirmed that the retained corpus artifacts are present again, relinked the registry entry to the archived report path, and restored the lifecycle state to ready."
+                    .to_string(),
+            );
+            "Manual reconciliation relinked the retained corpus to the archived report path and restored a healthy ready lifecycle state."
+                .to_string()
+        } else if can_restore_ready_state {
+            entry.mark_ready_with_note(
+                "Manual reconciliation confirmed that the retained corpus artifacts are present and restored the lifecycle state to ready."
+                    .to_string(),
+            );
+            "Manual reconciliation restored a healthy ready lifecycle state for this retained corpus."
                 .to_string()
         } else if recovered_archived_report {
             entry.lifecycle.updated_at = Some(chrono::Utc::now().to_rfc3339());
