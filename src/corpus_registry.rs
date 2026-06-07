@@ -16,6 +16,14 @@ pub struct CorpusRegistry {
     pub corpora: Vec<CorpusIndexEntry>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CorpusReportAvailability {
+    pub current_exists: bool,
+    pub available: bool,
+    pub storage: &'static str,
+    pub loadable_path: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CorpusIndexEntry {
     pub corpus_id: String,
@@ -253,6 +261,46 @@ pub fn archived_corpus_report_path(home: &str, corpus_id: &str) -> PathBuf {
     corpus_registry_root(home)
         .join("reports")
         .join(format!("{corpus_id}.json"))
+}
+
+pub fn resolve_corpus_report_availability(
+    home: &str,
+    entry: &CorpusIndexEntry,
+) -> CorpusReportAvailability {
+    let current_path = PathBuf::from(&entry.report_path);
+    let current_exists = current_path.exists();
+    let archived_path = archived_corpus_report_path(home, &entry.corpus_id);
+    let archived_exists = archived_path.exists();
+    let stored_is_archived = current_path == archived_path;
+
+    if current_exists {
+        return CorpusReportAvailability {
+            current_exists: true,
+            available: true,
+            storage: if stored_is_archived {
+                "archived"
+            } else {
+                "current"
+            },
+            loadable_path: Some(current_path),
+        };
+    }
+
+    if archived_exists {
+        return CorpusReportAvailability {
+            current_exists: false,
+            available: true,
+            storage: "archived_fallback",
+            loadable_path: Some(archived_path),
+        };
+    }
+
+    CorpusReportAvailability {
+        current_exists: false,
+        available: false,
+        storage: "missing",
+        loadable_path: None,
+    }
 }
 
 pub struct CorpusStartupReconciliationSummary {

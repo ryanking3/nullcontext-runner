@@ -18,9 +18,18 @@ pub struct StartupReconciliationSummary {
     pub scanned_sessions: usize,
     pub changed_sessions: usize,
     pub orphaned_sessions: usize,
+    pub abandoned_active_sessions: usize,
     pub cleanup_succeeded_consistent: usize,
     pub unchanged_sessions: usize,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionReportAvailability {
+    pub current_exists: bool,
+    pub available: bool,
+    pub storage: &'static str,
+    pub loadable_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +59,7 @@ pub struct SessionIndexEntry {
 #[serde(rename_all = "snake_case")]
 pub enum SessionLifecycleState {
     Active,
+    AbandonedActive,
     #[default]
     CompletedRetained,
     CleanupPending,
@@ -62,6 +72,7 @@ impl SessionLifecycleState {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Active => "active",
+            Self::AbandonedActive => "abandoned_active",
             Self::CompletedRetained => "completed_retained",
             Self::CleanupPending => "cleanup_pending",
             Self::CleanupSucceeded => "cleanup_succeeded",
@@ -298,6 +309,13 @@ impl SessionIndexEntry {
         self.lifecycle.updated_at = Some(current_timestamp());
     }
 
+    pub fn mark_abandoned_active_with_note(&mut self, note: String) {
+        self.lifecycle.state = SessionLifecycleState::AbandonedActive;
+        self.lifecycle.cleanup_reason = Some(CleanupReason::StartupOrphanReconciliation);
+        self.lifecycle.state_note = Some(note);
+        self.lifecycle.updated_at = Some(current_timestamp());
+    }
+
     pub fn apply_retention_policy(
         &mut self,
         retention_policy: RetentionPolicy,
@@ -485,6 +503,7 @@ pub fn list_sessions(home: &str) -> Result<()> {
     stdout_line("Persistent NullContext sessions:\n");
 
     for session in registry.sessions {
+        let report = resolve_session_report_availability(home, &session);
         stdout_line(format!("Session ID: {}", session.session_id));
         stdout_line(format!("Started: {}", session.started_at));
         stdout_line(format!("Mode: {}", session.security_mode));
@@ -499,6 +518,14 @@ pub fn list_sessions(home: &str) -> Result<()> {
         stdout_line(format!("Prompt source: {}", session.prompt_source));
         stdout_line(format!("Workspace: {}", session.workspace));
         stdout_line(format!("Report: {}", session.report_path));
+        stdout_line(format!(
+            "Report available: {} ({})",
+            if report.available { "yes" } else { "no" },
+            report.storage
+        ));
+        if let Some(loadable_path) = report.loadable_path {
+            stdout_line(format!("Loadable report path: {}", loadable_path.display()));
+        }
         stdout_line(format!(
             "Artifacts detected: {}",
             session.artifacts_detected
@@ -516,14 +543,12 @@ pub fn show_report(home: &str, session_id: &str) -> Result<()> {
         .find(session_id)
         .with_context(|| format!("Session not found in registry: {session_id}"))?;
 
-    let report_path = PathBuf::from(&entry.report_path);
-
-    if !report_path.exists() {
+    let availability = resolve_session_report_availability(home, entry);
+    let Some(report_path) = availability.loadable_path else {
         anyhow::bail!(
-            "Report path exists in registry but file was not found: {}",
-            report_path.display()
+            "No loadable report was found for session {session_id}. NullContext checked the current report path and any archived lifecycle report."
         );
-    }
+    };
 
     let report = fs::read_to_string(&report_path)
         .with_context(|| format!("Failed to read report at {}", report_path.display()))?;
@@ -539,6 +564,7 @@ pub fn reconcile_registry_on_startup(home: &str) -> Result<StartupReconciliation
         scanned_sessions: registry.sessions.len(),
         changed_sessions: 0,
         orphaned_sessions: 0,
+        abandoned_active_sessions: 0,
         cleanup_succeeded_consistent: 0,
         unchanged_sessions: 0,
         notes: Vec::new(),
@@ -553,6 +579,10 @@ pub fn reconcile_registry_on_startup(home: &str) -> Result<StartupReconciliation
 
                 if entry.lifecycle.state == SessionLifecycleState::Orphaned {
                     summary.orphaned_sessions += 1;
+                }
+
+                if entry.lifecycle.state == SessionLifecycleState::AbandonedActive {
+                    summary.abandoned_active_sessions += 1;
                 }
 
                 summary
@@ -616,6 +646,46 @@ pub fn archived_report_path(home: &str, session_id: &str) -> PathBuf {
         .join(format!("{session_id}.json"))
 }
 
+pub fn resolve_session_report_availability(
+    home: &str,
+    entry: &SessionIndexEntry,
+) -> SessionReportAvailability {
+    let current_path = PathBuf::from(&entry.report_path);
+    let current_exists = current_path.exists();
+    let archived_path = archived_report_path(home, &entry.session_id);
+    let archived_exists = archived_path.exists();
+    let stored_is_archived = current_path == archived_path;
+
+    if current_exists {
+        return SessionReportAvailability {
+            current_exists: true,
+            available: true,
+            storage: if stored_is_archived {
+                "archived"
+            } else {
+                "current"
+            },
+            loadable_path: Some(current_path),
+        };
+    }
+
+    if archived_exists {
+        return SessionReportAvailability {
+            current_exists: false,
+            available: true,
+            storage: "archived_fallback",
+            loadable_path: Some(archived_path),
+        };
+    }
+
+    SessionReportAvailability {
+        current_exists: false,
+        available: false,
+        storage: "missing",
+        loadable_path: None,
+    }
+}
+
 fn registry_root(home: &str) -> PathBuf {
     Path::new(home).join(".nullcontext")
 }
@@ -664,12 +734,12 @@ fn reconcile_entry(home: &str, entry: &mut SessionIndexEntry) -> ReconciliationO
     }
 
     if entry.lifecycle.state == SessionLifecycleState::Active {
-        entry.mark_orphaned_with_note(
-            "Startup found this retained session still marked active. The in-memory runtime could not be recovered after restart, so the session was marked orphaned for review."
+        entry.mark_abandoned_active_with_note(
+            "Startup found this retained session still marked active. The in-memory runtime could not be recovered after restart, so the session was marked abandoned_active for review."
                 .to_string(),
         );
         return ReconciliationOutcome::Changed(
-            "Startup found a registry entry still marked active; reclassified as orphaned because active in-memory state cannot be recovered after restart."
+            "Startup found a registry entry still marked active; reclassified as abandoned_active because active in-memory state cannot be recovered after restart."
                 .to_string(),
         );
     }

@@ -822,6 +822,10 @@ fn lifecycle_decision_summary(metadata: &SessionLifecycleMetadata) -> String {
 
             format!("{reason} Cleanup failed or requires operator follow-up.")
         }
+        SessionLifecycleState::AbandonedActive => {
+            "Startup recovery found a retained chat that had still been marked active before the previous process exited. The live in-memory runtime could not be recovered, so operator review is recommended."
+                .to_string()
+        }
         SessionLifecycleState::Orphaned => {
             "Lifecycle reconciliation detected an inconsistency between registry state and on-disk artifacts. Operator review is recommended."
                 .to_string()

@@ -10,8 +10,9 @@ use crate::config::{load_model_registry, SessionConfig};
 use crate::corpus::{CorpusCleanupReason, CorpusRetentionPolicy};
 use crate::corpus_registry::{
     archived_corpus_report_path, due_retention_cleanup_corpus_ids, ensure_corpus_registry_dirs,
-    list_corpora, reconcile_corpora_on_startup, sync_corpus_report_lifecycle, CorpusIndexEntry,
-    CorpusRegistry, CorpusStartupReconciliationSummary,
+    list_corpora, reconcile_corpora_on_startup, resolve_corpus_report_availability,
+    sync_corpus_report_lifecycle, CorpusIndexEntry, CorpusRegistry,
+    CorpusStartupReconciliationSummary,
 };
 use crate::docs::{
     ingest_corpus, ingest_uploaded_corpus, IngestCorpusRequest, IngestCorpusResponse,
@@ -22,9 +23,9 @@ use crate::logging::{stderr_line, stdout_line};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::registry::{
     archived_report_path, due_retention_cleanup_session_ids, ensure_registry_dirs,
-    reconcile_registry_on_startup, register_persistent_session, CleanupReason, RetentionPolicy,
-    SessionIndexEntry, SessionLifecycleMetadata, SessionLifecycleState, SessionRegistry,
-    StartupReconciliationSummary,
+    reconcile_registry_on_startup, register_persistent_session,
+    resolve_session_report_availability, CleanupReason, RetentionPolicy, SessionIndexEntry,
+    SessionLifecycleMetadata, SessionLifecycleState, SessionRegistry, StartupReconciliationSummary,
 };
 use crate::retrieval::{
     build_grounded_prompt, build_retrieval_report, query_corpus, QueryCorpusRequest,
@@ -82,6 +83,7 @@ struct StartupReconciliationResponse {
     scanned: usize,
     changed: usize,
     orphaned: usize,
+    abandoned_active: usize,
     cleanup_consistent: usize,
     unchanged: usize,
     notes: Vec<String>,
@@ -366,10 +368,11 @@ fn emit_startup_reconciliation(home: &str) -> Result<StartupReconciliationSummar
     sync_registry_report_lifecycle(home)?;
 
     stdout_line(format!(
-        "Lifecycle reconciliation: scanned {} session(s), changed {}, orphaned {}, cleanup-consistent {}, unchanged {}.",
+        "Lifecycle reconciliation: scanned {} session(s), changed {}, orphaned {}, abandoned-active {}, cleanup-consistent {}, unchanged {}.",
         summary.scanned_sessions,
         summary.changed_sessions,
         summary.orphaned_sessions,
+        summary.abandoned_active_sessions,
         summary.cleanup_succeeded_consistent,
         summary.unchanged_sessions
     ));
@@ -431,6 +434,7 @@ fn build_session_startup_reconciliation_response(
         scanned: summary.scanned_sessions,
         changed: summary.changed_sessions,
         orphaned: summary.orphaned_sessions,
+        abandoned_active: summary.abandoned_active_sessions,
         cleanup_consistent: summary.cleanup_succeeded_consistent,
         unchanged: summary.unchanged_sessions,
         notes: summary.notes.clone(),
@@ -444,6 +448,7 @@ fn build_corpus_startup_reconciliation_response(
         scanned: summary.scanned_corpora,
         changed: summary.changed_corpora,
         orphaned: summary.orphaned_corpora,
+        abandoned_active: 0,
         cleanup_consistent: summary.cleanup_succeeded_consistent,
         unchanged: summary.unchanged_corpora,
         notes: summary.notes.clone(),
@@ -612,29 +617,24 @@ async fn show_corpus_report(
         );
     };
 
-    let archived_path = archived_corpus_report_path(&state.home, &corpus_id);
+    let availability = resolve_corpus_report_availability(&state.home, entry);
 
-    for candidate in [&entry.report_path, archived_path.to_string_lossy().as_ref()] {
-        match fs::read_to_string(candidate) {
-            Ok(report) => {
-                return match serde_json::from_str::<serde_json::Value>(&report) {
-                    Ok(json) => Json(json).into_response(),
-                    Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
-                };
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
-            }
-        }
+    let Some(report_path) = availability.loadable_path else {
+        return json_error(
+            StatusCode::NOT_FOUND,
+            format!(
+                "Corpus report file not found for {corpus_id}. NullContext could not find either the current report path or the archived lifecycle report. The report may have been removed during cleanup or the registry may need reconciliation."
+            ),
+        );
+    };
+
+    match fs::read_to_string(report_path) {
+        Ok(report) => match serde_json::from_str::<serde_json::Value>(&report) {
+            Ok(json) => Json(json).into_response(),
+            Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        },
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
-
-    json_error(
-        StatusCode::NOT_FOUND,
-        format!(
-            "Corpus report file not found for {corpus_id}. NullContext could not find either the current report path or the archived lifecycle report. The report may have been removed during cleanup or the registry may need reconciliation."
-        ),
-    )
 }
 
 async fn update_corpus_retention_policy(
@@ -1538,29 +1538,24 @@ async fn show_report(State(state): State<WebState>, Path(session_id): Path<Strin
         );
     }
 
-    let archived_path = archived_report_path(&state.home, &session_id);
+    let availability = resolve_session_report_availability(&state.home, entry);
 
-    for candidate in [&entry.report_path, archived_path.to_string_lossy().as_ref()] {
-        match fs::read_to_string(candidate) {
-            Ok(report) => {
-                return match serde_json::from_str::<serde_json::Value>(&report) {
-                    Ok(json) => Json(json).into_response(),
-                    Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
-                };
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
-            }
-        }
+    let Some(report_path) = availability.loadable_path else {
+        return json_error(
+            StatusCode::NOT_FOUND,
+            format!(
+                "Report file not found for session {session_id}. NullContext could not find either the current report path or the archived lifecycle report. The report may have been removed during cleanup or the registry may need reconciliation."
+            ),
+        );
+    };
+
+    match fs::read_to_string(report_path) {
+        Ok(report) => match serde_json::from_str::<serde_json::Value>(&report) {
+            Ok(json) => Json(json).into_response(),
+            Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+        },
+        Err(error) => json_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
     }
-
-    json_error(
-        StatusCode::NOT_FOUND,
-        format!(
-            "Report file not found for session {session_id}. NullContext could not find either the current report path or the archived lifecycle report. The report may have been removed during cleanup or the registry may need reconciliation."
-        ),
-    )
 }
 
 fn json_error(status: StatusCode, message: String) -> Response {
@@ -1906,7 +1901,7 @@ fn build_lifecycle_action_response(
     entry: &SessionIndexEntry,
     message: &str,
 ) -> SessionLifecycleActionResponse {
-    let (report_available, report_storage, loadable_report_path) =
+    let (report_exists, report_available, report_storage, loadable_report_path) =
         session_report_availability(home, entry);
 
     SessionLifecycleActionResponse {
@@ -1927,7 +1922,7 @@ fn build_lifecycle_action_response(
         cleanup_successful: entry.cleanup_successful,
         workspace_deleted: entry.workspace_deleted,
         workspace_exists: FsPath::new(&entry.workspace).exists(),
-        report_exists: FsPath::new(&entry.report_path).exists(),
+        report_exists,
         report_available,
         report_storage,
         loadable_report_path,
@@ -1954,12 +1949,12 @@ fn build_session_registry_entry_response(
     home: &str,
     entry: SessionIndexEntry,
 ) -> SessionRegistryEntryResponse {
-    let (report_available, report_storage, loadable_report_path) =
+    let (report_exists, report_available, report_storage, loadable_report_path) =
         session_report_availability(home, &entry);
 
     SessionRegistryEntryResponse {
         workspace_exists: FsPath::new(&entry.workspace).exists(),
-        report_exists: FsPath::new(&entry.report_path).exists(),
+        report_exists,
         report_available,
         report_storage,
         loadable_report_path,
@@ -1999,13 +1994,13 @@ fn build_corpus_registry_entry_response(
     home: &str,
     entry: CorpusIndexEntry,
 ) -> CorpusRegistryEntryResponse {
-    let (report_available, report_storage, loadable_report_path) =
+    let (report_exists, report_available, report_storage, loadable_report_path) =
         corpus_report_availability(home, &entry);
 
     CorpusRegistryEntryResponse {
         root_exists: FsPath::new(&entry.root_path).exists(),
         manifest_exists: FsPath::new(&entry.manifest_path).exists(),
-        report_exists: FsPath::new(&entry.report_path).exists(),
+        report_exists,
         report_available,
         report_storage,
         loadable_report_path,
@@ -2317,61 +2312,31 @@ fn maybe_archived_corpus_report_path(
 fn session_report_availability(
     home: &str,
     entry: &SessionIndexEntry,
-) -> (bool, String, Option<String>) {
-    let current_exists = FsPath::new(&entry.report_path).exists();
-    let archived_path = archived_report_path(home, &entry.session_id);
-    let archived_path_str = archived_path.display().to_string();
-    let archived_exists = archived_path.exists();
-    let stored_is_archived = entry.report_path == archived_path_str;
-
-    if current_exists {
-        let storage = if stored_is_archived {
-            "archived"
-        } else {
-            "current"
-        };
-        return (true, storage.to_string(), Some(entry.report_path.clone()));
-    }
-
-    if archived_exists {
-        return (
-            true,
-            "archived_fallback".to_string(),
-            Some(archived_path_str),
-        );
-    }
-
-    (false, "missing".to_string(), None)
+) -> (bool, bool, String, Option<String>) {
+    let availability = resolve_session_report_availability(home, entry);
+    (
+        availability.current_exists,
+        availability.available,
+        availability.storage.to_string(),
+        availability
+            .loadable_path
+            .map(|path| path.display().to_string()),
+    )
 }
 
 fn corpus_report_availability(
     home: &str,
     entry: &CorpusIndexEntry,
-) -> (bool, String, Option<String>) {
-    let current_exists = FsPath::new(&entry.report_path).exists();
-    let archived_path = archived_corpus_report_path(home, &entry.corpus_id);
-    let archived_path_str = archived_path.display().to_string();
-    let archived_exists = archived_path.exists();
-    let stored_is_archived = entry.report_path == archived_path_str;
-
-    if current_exists {
-        let storage = if stored_is_archived {
-            "archived"
-        } else {
-            "current"
-        };
-        return (true, storage.to_string(), Some(entry.report_path.clone()));
-    }
-
-    if archived_exists {
-        return (
-            true,
-            "archived_fallback".to_string(),
-            Some(archived_path_str),
-        );
-    }
-
-    (false, "missing".to_string(), None)
+) -> (bool, bool, String, Option<String>) {
+    let availability = resolve_corpus_report_availability(home, entry);
+    (
+        availability.current_exists,
+        availability.available,
+        availability.storage.to_string(),
+        availability
+            .loadable_path
+            .map(|path| path.display().to_string()),
+    )
 }
 
 fn sync_manifest_lifecycle_if_present(
@@ -2397,7 +2362,7 @@ fn build_corpus_lifecycle_action_response(
     entry: &CorpusIndexEntry,
     message: &str,
 ) -> CorpusLifecycleActionResponse {
-    let (report_available, report_storage, loadable_report_path) =
+    let (report_exists, report_available, report_storage, loadable_report_path) =
         corpus_report_availability(home, entry);
 
     CorpusLifecycleActionResponse {
@@ -2416,7 +2381,7 @@ fn build_corpus_lifecycle_action_response(
         updated_at: entry.lifecycle.updated_at.clone(),
         root_exists: FsPath::new(&entry.root_path).exists(),
         manifest_exists: FsPath::new(&entry.manifest_path).exists(),
-        report_exists: FsPath::new(&entry.report_path).exists(),
+        report_exists,
         report_available,
         report_storage,
         loadable_report_path,

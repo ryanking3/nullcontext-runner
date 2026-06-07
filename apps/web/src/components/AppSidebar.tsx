@@ -75,6 +75,7 @@ export function AppSidebar({
   const startupNeedsAttention =
     (startupStatus?.sessions.changed ?? 0) > 0 ||
     (startupStatus?.sessions.orphaned ?? 0) > 0 ||
+    (startupStatus?.sessions.abandoned_active ?? 0) > 0 ||
     (startupStatus?.corpora.changed ?? 0) > 0 ||
     (startupStatus?.corpora.orphaned ?? 0) > 0;
 
@@ -151,7 +152,7 @@ export function AppSidebar({
               <span>
                 sessions:{" "}
                 {startupStatus
-                  ? `${startupStatus.sessions.changed} changed | ${startupStatus.sessions.orphaned} orphaned`
+                  ? `${startupStatus.sessions.changed} changed | ${startupStatus.sessions.orphaned} orphaned | ${startupStatus.sessions.abandoned_active} abandoned active`
                   : "unavailable"}
               </span>
               <span>

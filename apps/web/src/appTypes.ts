@@ -37,6 +37,7 @@ export type StartupReconciliationSnapshot = {
   scanned: number;
   changed: number;
   orphaned: number;
+  abandoned_active: number;
   cleanup_consistent: number;
   unchanged: number;
   notes: string[];

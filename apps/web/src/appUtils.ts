@@ -113,6 +113,7 @@ export function lifecycleStateClass(state: string): string {
   if (state === "cleanup_succeeded") return "pill success";
   if (state === "cleanup_failed") return "pill failed";
   if (state === "cleanup_pending") return "pill warning";
+  if (state === "abandoned_active") return "pill warning";
   if (state === "orphaned") return "pill warning";
   if (state === "active") return "pill warning";
   return "pill neutral";
