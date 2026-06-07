@@ -324,39 +324,39 @@ Before `v1.0`, this needs at least a lightweight harness:
 
 ### Track A: Process Scanning
 
-1. `Add process memory scan report schema`
-2. `Show process scan status in privacy reports`
-3. `Add Windows process memory scan prototype`
-4. `Scan live runtime for prompt markers`
-5. `Scan post-shutdown runtime memory for prompt markers`
-6. `Add response marker scanning and report comparison`
+1. `[*] Add process memory scan report schema`
+2. `[*] Show process scan status in privacy reports`
+3. `[*] Add Windows process memory scan prototype`
+4. `[*] Scan live runtime for prompt markers`
+5. `[*] Scan post-shutdown runtime memory for prompt markers`
+6. `[*] Add response marker scanning and report comparison`
 
 ### Track B: llama Allocator / KV Introspection
 
-7. `Document llama allocator and KV introspection plan`
-8. `Add runtime capability flags for instrumented llama builds`
-9. `Expose KV cache lifecycle signals in reports`
-10. `Expose allocator reset signals in reports`
+7. `[*] Document llama allocator and KV introspection plan`
+8. `[*] Add runtime capability flags for instrumented llama builds`
+9. `[*] Expose KV cache lifecycle signals in reports`
+10. `[ ] Expose allocator reset signals in reports`
 
 ### Track C: CUDA / NVIDIA API Inspection
 
-11. `Add GPU inspection backend abstraction`
-12. `Add CUDA or NVML inspection spike implementation`
-13. `Report allocation visibility separately from PID visibility`
-14. `Improve Windows VRAM post-shutdown evidence reporting`
+11. `[ ] Add GPU inspection backend abstraction`
+12. `[ ] Add CUDA or NVML inspection spike implementation`
+13. `[ ] Report allocation visibility separately from PID visibility`
+14. `[ ] Improve Windows VRAM post-shutdown evidence reporting`
 
 ### Track D: Experimental Sanitization
 
-15. `Add VRAM cleanup strategy model`
-16. `Add baseline versus strategy comparison reporting`
-17. `Implement first experimental VRAM cleanup strategy`
-18. `Report VRAM cleanup outcome evidence`
+15. `[ ] Add VRAM cleanup strategy model`
+16. `[ ] Add baseline versus strategy comparison reporting`
+17. `[ ] Implement first experimental VRAM cleanup strategy`
+18. `[ ] Report VRAM cleanup outcome evidence`
 
 ### Track E: Validation and Release Gating
 
-19. `Add memory inspection validation harness`
-20. `Document platform security capability matrix`
-21. `Freeze security claim wording for v1`
+19. `[ ] Add memory inspection validation harness`
+20. `[ ] Document platform security capability matrix`
+21. `[ ] Freeze security claim wording for v1`
 
 ---
 

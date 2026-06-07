@@ -580,6 +580,24 @@ export function PrivacyReportViewer({
                   ),
                 },
                 {
+                  label: "kv cache initialized",
+                  value: formatBoolean(
+                    currentReport.llama_runtime.introspection.kv_cache_initialized_observed
+                  ),
+                },
+                {
+                  label: "kv cache reused",
+                  value: formatBoolean(
+                    currentReport.llama_runtime.introspection.kv_cache_reused_observed
+                  ),
+                },
+                {
+                  label: "kv cache clear observed",
+                  value: formatBoolean(
+                    currentReport.llama_runtime.introspection.kv_cache_clear_observed
+                  ),
+                },
+                {
                   label: "model unload signal",
                   value: humanizeSnakeCase(
                     currentReport.llama_runtime.introspection.model_unload_signal_status
@@ -596,6 +614,10 @@ export function PrivacyReportViewer({
 
             {currentReport.llama_runtime.introspection.notes.length > 0 && (
               <div className="report-risk-block">
+                <p>
+                  <strong>kv/cache summary:</strong>{" "}
+                  {currentReport.llama_runtime.introspection.kv_cache_summary}
+                </p>
                 {currentReport.llama_runtime.introspection.notes.map((note) => (
                   <p key={note}>{note}</p>
                 ))}

@@ -178,6 +178,10 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub instrumentation_backend: String,
     pub allocator_introspection_status: String,
     pub kv_cache_introspection_status: String,
+    pub kv_cache_initialized_observed: bool,
+    pub kv_cache_reused_observed: bool,
+    pub kv_cache_clear_observed: bool,
+    pub kv_cache_summary: String,
     pub model_unload_signal_status: String,
     pub allocator_reset_signal_status: String,
     pub summary: String,
@@ -391,8 +395,16 @@ pub fn build_llama_runtime_report(
         LlamaMemoryDomainReport {
             domain: "kv_cache_state".to_string(),
             exposure_scope: "prompt context, KV/cache state, and decoded token history inside llama.cpp".to_string(),
-            cleanup_status: "warning".to_string(),
-            notes: "KV/cache lifetime is bounded by runtime lifetime in this build, but NullContext does not yet inspect or sanitize llama.cpp cache internals directly.".to_string(),
+            cleanup_status: if introspection.kv_cache_clear_observed {
+                "successful".to_string()
+            } else if introspection.kv_cache_initialized_observed
+                || introspection.kv_cache_reused_observed
+            {
+                "warning".to_string()
+            } else {
+                "warning".to_string()
+            },
+            notes: introspection.kv_cache_summary.clone(),
         },
     ];
 
@@ -719,6 +731,12 @@ fn build_llama_runtime_introspection_report(
                     .to_string(),
                 kv_cache_introspection_status:
                     "kv_cache_introspection_capability_load_failed".to_string(),
+                kv_cache_initialized_observed: false,
+                kv_cache_reused_observed: false,
+                kv_cache_clear_observed: false,
+                kv_cache_summary:
+                    "NullContext could not load runtime introspection capabilities, so KV/cache lifecycle evidence remained unavailable for this session."
+                        .to_string(),
                 model_unload_signal_status: if startup_failed {
                     "model_unload_signal_unavailable_due_to_startup_failure".to_string()
                 } else {
@@ -754,6 +772,15 @@ fn build_llama_runtime_introspection_report(
         .iter()
         .map(map_runtime_introspection_signal)
         .collect::<Vec<_>>();
+    let observed_kv_initialized = observed_signals
+        .iter()
+        .any(|signal| signal.event == "kv_cache_initialized" && signal.status != "failed");
+    let observed_kv_reused = observed_signals
+        .iter()
+        .any(|signal| signal.event == "kv_cache_reused" && signal.status != "failed");
+    let observed_kv_clear = observed_signals
+        .iter()
+        .any(|signal| signal.event == "kv_cache_clear_observed" && signal.status != "failed");
     let observed_kv_signal = observed_signals.iter().any(|signal| {
         matches!(
             signal.event.as_str(),
@@ -772,6 +799,8 @@ fn build_llama_runtime_introspection_report(
     let observed_allocator_reset_signal = observed_signals
         .iter()
         .any(|signal| signal.event == "allocator_reset_observed" && signal.status != "failed");
+    let declared_kv_cache_introspection_status =
+        capabilities.kv_cache_introspection_status.clone();
 
     LlamaRuntimeIntrospectionReport {
         capability_source: capabilities.capability_source.clone(),
@@ -787,6 +816,24 @@ fn build_llama_runtime_introspection_report(
             "kv_cache_lifecycle_signals_observed".to_string()
         } else {
             capabilities.kv_cache_introspection_status
+        },
+        kv_cache_initialized_observed: observed_kv_initialized,
+        kv_cache_reused_observed: observed_kv_reused,
+        kv_cache_clear_observed: observed_kv_clear,
+        kv_cache_summary: if startup_failed {
+            "Runtime startup failed before normal inference lifecycle completion, so any observed KV/cache signals should be treated as partial setup evidence rather than full teardown evidence.".to_string()
+        } else if observed_kv_clear {
+            "NullContext observed an explicit KV/cache clear signal from the runtime for this session. That is stronger evidence than process-lifetime inference alone, but it is still not proof of allocator zeroization or freed-page clearing."
+                .to_string()
+        } else if observed_kv_initialized || observed_kv_reused {
+            "NullContext observed KV/cache lifecycle setup or reuse signals for this session, but it did not observe a KV/cache clear signal before shutdown. KV/cache teardown should still be treated as only indirectly bounded by runtime exit."
+                .to_string()
+        } else if declared_kv_cache_introspection_status.contains("available") {
+            "This runtime declared KV/cache lifecycle signal support, but no KV/cache events were captured for this session."
+                .to_string()
+        } else {
+            "KV/cache lifetime is still primarily bounded by runtime lifetime in this build, and NullContext did not capture any direct KV/cache lifecycle signals for this session."
+                .to_string()
         },
         model_unload_signal_status: if startup_failed
             && capabilities.model_unload_signal_status == "model_unload_not_observed_directly"
