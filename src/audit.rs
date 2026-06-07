@@ -508,37 +508,6 @@ pub fn build_llama_runtime_report(
     }
 }
 
-pub fn build_unimplemented_process_scan_report(runtime_pid: Option<u32>) -> ProcessScanReport {
-    let platform = std::env::consts::OS.to_string();
-
-    ProcessScanReport {
-        overall_status: "not_implemented".to_string(),
-        implementation_status: "schema_reserved_for_future_process_scanning".to_string(),
-        platform,
-        target_process_kind: "llama-server".to_string(),
-        target_runtime_pid: runtime_pid,
-        planned_platforms: vec![
-            "windows".to_string(),
-            "linux".to_string(),
-            "macos".to_string(),
-        ],
-        summary:
-            "NullContext has reserved a structured process-memory-scan report section, but direct llama-server process scanning is not implemented yet."
-                .to_string(),
-        residual_risk_summary:
-            "Because direct process scanning is not implemented yet, NullContext cannot currently say whether prompt, response, or canary markers remain present in readable llama-server process memory."
-                .to_string(),
-        phases: vec![
-            placeholder_process_scan_phase("live_runtime", runtime_pid),
-            placeholder_process_scan_phase("post_shutdown", runtime_pid),
-        ],
-        notes: vec![
-            "This record is intentionally explicit so future reports can distinguish 'scan not implemented' from 'scan ran and found nothing'.".to_string(),
-            "No process memory pages, regions, or marker patterns were scanned for this report.".to_string(),
-        ],
-    }
-}
-
 pub fn build_failed_launch_llama_runtime_report(
     config: &SessionConfig,
     failure: &RuntimeLaunchFailure,
@@ -710,41 +679,6 @@ fn runtime_inspection_status(post_shutdown: &RuntimePostShutdownObservation) -> 
         Some(false) => "process_not_observed_after_shutdown".to_string(),
         Some(true) => "process_still_observable_after_shutdown".to_string(),
         None => "process_shutdown_observation_inconclusive".to_string(),
-    }
-}
-
-fn placeholder_process_scan_phase(phase: &str, runtime_pid: Option<u32>) -> ProcessScanPhaseReport {
-    ProcessScanPhaseReport {
-        phase: phase.to_string(),
-        status: "not_scanned_not_implemented".to_string(),
-        method: "not_implemented".to_string(),
-        target_pid: runtime_pid,
-        scope_summary:
-            "No target process regions were scanned; this phase currently exists only as a report contract."
-                .to_string(),
-        bytes_scanned: None,
-        regions_scanned: None,
-        regions_skipped: None,
-        patterns: vec![
-            placeholder_process_scan_pattern("prompt_marker"),
-            placeholder_process_scan_pattern("response_marker"),
-            placeholder_process_scan_pattern("synthetic_canary"),
-        ],
-        notes: vec![
-            "Direct process-memory scanning is still planned work for a later implementation slice."
-                .to_string(),
-        ],
-    }
-}
-
-fn placeholder_process_scan_pattern(pattern_kind: &str) -> ProcessScanPatternReport {
-    ProcessScanPatternReport {
-        pattern_kind: pattern_kind.to_string(),
-        status: "not_scanned_not_implemented".to_string(),
-        matches_found: None,
-        notes:
-            "No scan backend exists yet, so this pattern status does not imply absence from process memory."
-                .to_string(),
     }
 }
 

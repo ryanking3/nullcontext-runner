@@ -48,6 +48,7 @@ export function inspectionStatusClass(status: string): string {
     status.includes("inconclusive") ||
     status.includes("unavailable") ||
     status.includes("unsupported") ||
+    status.includes("skipped") ||
     status.includes("not_observable") ||
     status.includes("not_completed") ||
     status.includes("not_implemented")

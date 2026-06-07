@@ -8,6 +8,33 @@ pub struct ProcessScanMarker<'a> {
     pub bytes: &'a [u8],
 }
 
+pub fn build_skipped_process_scan_report(
+    runtime_pid: Option<u32>,
+    summary: &str,
+    residual_risk_summary: &str,
+    notes: Vec<String>,
+) -> ProcessScanReport {
+    ProcessScanReport {
+        overall_status: "scan_skipped".to_string(),
+        implementation_status: if cfg!(target_os = "windows") {
+            "windows_direct_process_scan_prototype".to_string()
+        } else {
+            "direct_process_scan_not_implemented_on_platform".to_string()
+        },
+        platform: std::env::consts::OS.to_string(),
+        target_process_kind: "llama-server".to_string(),
+        target_runtime_pid: runtime_pid,
+        planned_platforms: PLANNED_PLATFORMS
+            .iter()
+            .map(|value| value.to_string())
+            .collect(),
+        summary: summary.to_string(),
+        residual_risk_summary: residual_risk_summary.to_string(),
+        phases: vec![],
+        notes,
+    }
+}
+
 pub fn build_process_scan_report(
     runtime_pid: Option<u32>,
     phases: Vec<ProcessScanPhaseReport>,

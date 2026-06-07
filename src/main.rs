@@ -20,9 +20,7 @@ mod web;
 
 use crate::logging::stdout_line;
 use anyhow::Result;
-use audit::{
-    build_failed_launch_llama_runtime_report, build_llama_runtime_report, PrivacyReport,
-};
+use audit::{build_failed_launch_llama_runtime_report, build_llama_runtime_report, PrivacyReport};
 use cleanup::{
     cleanup_ephemeral_workspace, log_sanitization_operation, scan_artifacts, CleanupReport,
     SanitizationOperation,

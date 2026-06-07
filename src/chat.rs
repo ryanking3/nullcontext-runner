@@ -1,6 +1,5 @@
 use crate::audit::{
-    build_llama_runtime_report, build_unimplemented_process_scan_report, PrivacyReport,
-    RetrievalReport, SessionProfile, TurnArtifact,
+    build_llama_runtime_report, PrivacyReport, RetrievalReport, SessionProfile, TurnArtifact,
 };
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
@@ -9,6 +8,10 @@ use crate::config::{ChatTemplate, SessionConfig};
 use crate::corpus_registry::{validate_corpus_ready, CorpusRegistry};
 use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::logging::stdout_line;
+use crate::process_scan::{
+    build_process_scan_report, build_skipped_process_scan_report, scan_live_process_phase,
+    scan_post_shutdown_process_phase, ProcessScanMarker,
+};
 use crate::registry::{
     register_active_persistent_session, register_persistent_session, unregister_persistent_session,
     SessionLifecycleMetadata,
@@ -57,6 +60,11 @@ struct ChatTurn {
 struct ChatTurnSnapshot {
     user: String,
     assistant: String,
+}
+
+struct ActiveChatProcessScanMarker {
+    kind: &'static str,
+    bytes: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -683,10 +691,42 @@ impl ChatSessionManager {
         let grounded_turn_count = active.retrieval_history.len();
         let runtime_pid = active.runtime.pid();
         let runtime_endpoint = active.runtime.endpoint_url().to_string();
+        let process_scan_markers = active_chat_process_scan_markers(&active.turns);
+        let borrowed_live_markers = borrow_active_chat_process_scan_markers(&process_scan_markers);
         let runtime_usage = active.runtime.observe_usage();
+        let live_process_scan = if process_scan_markers.is_empty() {
+            None
+        } else {
+            Some(scan_live_process_phase(runtime_pid, &borrowed_live_markers))
+        };
 
         let runtime_shutdown = active.runtime.shutdown()?;
         let post_shutdown_observation = observe_post_shutdown(runtime_pid);
+        let process_scan_report = if process_scan_markers.is_empty() {
+            build_skipped_process_scan_report(
+                Some(runtime_pid),
+                "This active chat session ended without any completed turns, so NullContext did not have representative chat-content markers to search for in process memory.",
+                "Without completed turn content to use as representative markers, NullContext cannot say whether chat-related content remained present in readable llama-server process memory.",
+                vec![
+                    "Direct process scanning is wired for active chat end, but this specific session had no completed turns to sample."
+                        .to_string(),
+                ],
+            )
+        } else {
+            let borrowed_post_shutdown_markers =
+                borrow_active_chat_process_scan_markers(&process_scan_markers);
+            build_process_scan_report(
+                Some(runtime_pid),
+                vec![
+                    live_process_scan.expect("active chat markers should exist when scan runs"),
+                    scan_post_shutdown_process_phase(
+                        runtime_pid,
+                        &post_shutdown_observation,
+                        &borrowed_post_shutdown_markers,
+                    ),
+                ],
+            )
+        };
 
         for turn in &mut active.turns {
             turn.user.sanitize();
@@ -776,7 +816,16 @@ impl ChatSessionManager {
         )
         .with_lifecycle(&lifecycle)
         .with_session_profile(profile)
-        .with_process_scan(build_unimplemented_process_scan_report(Some(runtime_pid)))
+        .with_process_scan({
+            let mut report = process_scan_report;
+            if turn_count > 0 {
+                report.notes.push(
+                    "Active chat direct scanning currently samples earliest and latest completed turn buffers rather than every turn in the full conversation history."
+                        .to_string(),
+                );
+            }
+            report
+        })
         .with_llama_runtime(build_llama_runtime_report(
             &active.config,
             Some(runtime_pid),
@@ -844,6 +893,50 @@ impl UtcNow {
         let now = chrono::Utc::now();
         now.signed_duration_since(started_at).num_milliseconds()
     }
+}
+
+fn active_chat_process_scan_markers(turns: &[ChatTurn]) -> Vec<ActiveChatProcessScanMarker> {
+    let Some(first_turn) = turns.first() else {
+        return vec![];
+    };
+
+    let mut markers = vec![
+        ActiveChatProcessScanMarker {
+            kind: "earliest_user_turn_marker",
+            bytes: first_turn.user.as_bytes().to_vec(),
+        },
+        ActiveChatProcessScanMarker {
+            kind: "earliest_assistant_turn_marker",
+            bytes: first_turn.assistant.as_bytes().to_vec(),
+        },
+    ];
+
+    if let Some(last_turn) = turns.last() {
+        if !std::ptr::eq(first_turn, last_turn) {
+            markers.push(ActiveChatProcessScanMarker {
+                kind: "latest_user_turn_marker",
+                bytes: last_turn.user.as_bytes().to_vec(),
+            });
+            markers.push(ActiveChatProcessScanMarker {
+                kind: "latest_assistant_turn_marker",
+                bytes: last_turn.assistant.as_bytes().to_vec(),
+            });
+        }
+    }
+
+    markers
+}
+
+fn borrow_active_chat_process_scan_markers(
+    markers: &[ActiveChatProcessScanMarker],
+) -> Vec<ProcessScanMarker<'_>> {
+    markers
+        .iter()
+        .map(|marker| ProcessScanMarker {
+            kind: marker.kind,
+            bytes: &marker.bytes,
+        })
+        .collect()
 }
 
 fn prepare_chat_context(
