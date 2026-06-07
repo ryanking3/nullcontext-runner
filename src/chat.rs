@@ -1,5 +1,6 @@
 use crate::audit::{
-    build_llama_runtime_report, PrivacyReport, RetrievalReport, SessionProfile, TurnArtifact,
+    build_llama_runtime_report, build_unimplemented_process_scan_report, PrivacyReport,
+    RetrievalReport, SessionProfile, TurnArtifact,
 };
 use crate::cleanup::{
     cleanup_ephemeral_workspace, scan_artifacts, CleanupReport, SanitizationOperation,
@@ -775,6 +776,7 @@ impl ChatSessionManager {
         )
         .with_lifecycle(&lifecycle)
         .with_session_profile(profile)
+        .with_process_scan(build_unimplemented_process_scan_report(Some(runtime_pid)))
         .with_llama_runtime(build_llama_runtime_report(
             &active.config,
             Some(runtime_pid),

@@ -187,6 +187,39 @@ export type RetrievalReportData = {
   context_injected: boolean;
 };
 
+export type ProcessScanPatternReportData = {
+  pattern_kind: string;
+  status: string;
+  matches_found?: number | null;
+  notes: string;
+};
+
+export type ProcessScanPhaseReportData = {
+  phase: string;
+  status: string;
+  method: string;
+  target_pid?: number | null;
+  scope_summary: string;
+  bytes_scanned?: number | null;
+  regions_scanned?: number | null;
+  regions_skipped?: number | null;
+  patterns: ProcessScanPatternReportData[];
+  notes: string[];
+};
+
+export type ProcessScanReportData = {
+  overall_status: string;
+  implementation_status: string;
+  platform: string;
+  target_process_kind: string;
+  target_runtime_pid?: number | null;
+  planned_platforms: string[];
+  summary: string;
+  residual_risk_summary: string;
+  phases: ProcessScanPhaseReportData[];
+  notes: string[];
+};
+
 export type LlamaMemoryDomainReport = {
   domain: string;
   exposure_scope: string;
@@ -265,6 +298,7 @@ export type PrivacyReportData = {
   session_profile?: SessionProfile | null;
   lifecycle?: LifecycleReport | null;
   llama_runtime?: LlamaRuntimeReportData | null;
+  process_scan?: ProcessScanReportData | null;
   retrieval?: RetrievalReportData | null;
   residual_risk: string;
 };

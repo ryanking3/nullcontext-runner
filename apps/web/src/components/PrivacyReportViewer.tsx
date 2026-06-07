@@ -671,6 +671,121 @@ export function PrivacyReportViewer({
         </section>
       )}
 
+      {currentReport.process_scan && (
+        <section className="report-section">
+          <div className="panel-title">process memory scanning</div>
+
+          <div className="report-risk-block">
+            <p>{currentReport.process_scan.summary}</p>
+          </div>
+
+          <div className="registry-lifecycle-summary">
+            <span className={inspectionStatusClass(currentReport.process_scan.overall_status)}>
+              overall {humanizeSnakeCase(currentReport.process_scan.overall_status)}
+            </span>
+            <span
+              className={inspectionStatusClass(currentReport.process_scan.implementation_status)}
+            >
+              impl {humanizeSnakeCase(currentReport.process_scan.implementation_status)}
+            </span>
+          </div>
+
+          <ReportGrid
+            entries={[
+              {
+                label: "target process",
+                value: currentReport.process_scan.target_process_kind,
+              },
+              {
+                label: "target runtime pid",
+                value: currentReport.process_scan.target_runtime_pid?.toString() || "none",
+              },
+              {
+                label: "report platform",
+                value: currentReport.process_scan.platform,
+              },
+              {
+                label: "planned platforms",
+                value: currentReport.process_scan.planned_platforms.join(", ") || "none",
+              },
+            ]}
+          />
+
+          <div className="report-risk-block">
+            <p>{currentReport.process_scan.residual_risk_summary}</p>
+          </div>
+
+          <details className="report-detail" open>
+            <summary>
+              process scan phases ({currentReport.process_scan.phases.length})
+            </summary>
+            <div className="report-list">
+              {currentReport.process_scan.phases.map((phase) => (
+                <div className="report-item" key={phase.phase}>
+                  <div className="report-item-header">
+                    <strong>{humanizeSnakeCase(phase.phase)}</strong>
+                    <span className={inspectionStatusClass(phase.status)}>
+                      {humanizeSnakeCase(phase.status)}
+                    </span>
+                  </div>
+                  <div className="report-path-list">
+                    <div>method: {humanizeSnakeCase(phase.method)}</div>
+                    <div>scope: {phase.scope_summary}</div>
+                    <div>target pid: {phase.target_pid?.toString() || "none"}</div>
+                    <div>
+                      bytes scanned:{" "}
+                      {phase.bytes_scanned === undefined || phase.bytes_scanned === null
+                        ? "none"
+                        : formatBytes(phase.bytes_scanned)}
+                    </div>
+                    <div>
+                      regions scanned:{" "}
+                      {phase.regions_scanned === undefined || phase.regions_scanned === null
+                        ? "none"
+                        : phase.regions_scanned}
+                    </div>
+                    <div>
+                      regions skipped:{" "}
+                      {phase.regions_skipped === undefined || phase.regions_skipped === null
+                        ? "none"
+                        : phase.regions_skipped}
+                    </div>
+                  </div>
+
+                  <div className="registry-lifecycle-summary">
+                    {phase.patterns.map((pattern) => (
+                      <span key={`${phase.phase}-${pattern.pattern_kind}`}>
+                        {humanizeSnakeCase(pattern.pattern_kind)}:{" "}
+                        {humanizeSnakeCase(pattern.status)}
+                      </span>
+                    ))}
+                  </div>
+
+                  {phase.notes.length > 0 && (
+                    <ul className="report-note-list">
+                      {phase.notes.map((note, index) => (
+                        <li key={`${phase.phase}-note-${index}`}>{note}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
+
+          {currentReport.process_scan.notes.length > 0 && (
+            <details className="report-detail">
+              <summary>process scan notes ({currentReport.process_scan.notes.length})</summary>
+              <ul className="report-note-list">
+                {currentReport.process_scan.notes.map((note, index) => (
+                  <li key={`process-scan-note-${index}`}>{note}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </section>
+      )}
+
       {currentReport.retrieval && (
         <section className="report-section">
           <div className="panel-title">retrieval provenance</div>

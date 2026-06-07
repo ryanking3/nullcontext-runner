@@ -1,6 +1,7 @@
 use crate::audit::{
-    build_failed_launch_llama_runtime_report, build_llama_runtime_report, sync_report_lifecycle,
-    PrivacyReport, RetrievalReport,
+    build_failed_launch_llama_runtime_report, build_llama_runtime_report,
+    build_unimplemented_failed_start_process_scan_report, build_unimplemented_process_scan_report,
+    sync_report_lifecycle, PrivacyReport, RetrievalReport,
 };
 use crate::chat::{CancelChatResponse, ChatMessageRequest, ChatSessionManager, StartChatRequest};
 use crate::cleanup::{
@@ -1164,6 +1165,7 @@ fn run_direct_streaming_session(
         cleanup_report.clone(),
     )
     .with_lifecycle(&lifecycle)
+    .with_process_scan(build_unimplemented_process_scan_report(Some(runtime_pid)))
     .with_llama_runtime(build_llama_runtime_report(
         &config,
         Some(runtime_pid),
@@ -1288,6 +1290,9 @@ fn handle_failed_streaming_startup(
         cleanup_report.clone(),
     )
     .with_lifecycle(&lifecycle)
+    .with_process_scan(build_unimplemented_failed_start_process_scan_report(Some(
+        failure.runtime_pid,
+    )))
     .with_llama_runtime(build_failed_launch_llama_runtime_report(config, failure));
     let report = if let Some(retrieval_report) = retrieval_report {
         report.with_retrieval(retrieval_report)
