@@ -241,6 +241,8 @@ export type LlamaResidentRegionDeltaReport = {
 };
 
 export type LlamaRuntimeIntrospectionReport = {
+  capability_source: string;
+  manifest_path?: string | null;
   runtime_build_profile: string;
   instrumentation_backend: string;
   allocator_introspection_status: string;

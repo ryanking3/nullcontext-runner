@@ -552,6 +552,14 @@ export function PrivacyReportViewer({
             <ReportGrid
               entries={[
                 {
+                  label: "capability source",
+                  value: currentReport.llama_runtime.introspection.capability_source,
+                },
+                {
+                  label: "manifest path",
+                  value: currentReport.llama_runtime.introspection.manifest_path || "none",
+                },
+                {
                   label: "runtime build profile",
                   value: currentReport.llama_runtime.introspection.runtime_build_profile,
                 },

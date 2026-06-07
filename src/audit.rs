@@ -7,6 +7,7 @@ use crate::runtime::{
     RuntimeLaunchFailure, RuntimePostShutdownObservation, RuntimeResidentRegion,
     RuntimeShutdownOutcome, RuntimeUsageSnapshot,
 };
+use crate::runtime_capabilities::detect_runtime_introspection_capabilities;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -170,6 +171,8 @@ pub struct LlamaRuntimeReport {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlamaRuntimeIntrospectionReport {
+    pub capability_source: String,
+    pub manifest_path: Option<String>,
     pub runtime_build_profile: String,
     pub instrumentation_backend: String,
     pub allocator_introspection_status: String,
@@ -311,7 +314,7 @@ pub fn build_llama_runtime_report(
     let gpu_layers_requested = config.gpu_layers.parse::<u32>().unwrap_or(0);
     let gpu_offload_requested = gpu_layers_requested > 0;
     let process_exited_cleanly = shutdown.stopped;
-    let introspection = build_llama_runtime_introspection_report(false);
+    let introspection = build_llama_runtime_introspection_report(&config.llama_path, false);
 
     let mut memory_domains = vec![
         LlamaMemoryDomainReport {
@@ -534,7 +537,7 @@ pub fn build_failed_launch_llama_runtime_report(
     } else {
         "failed"
     };
-    let introspection = build_llama_runtime_introspection_report(true);
+    let introspection = build_llama_runtime_introspection_report(&config.llama_path, true);
 
     LlamaRuntimeReport {
         runtime_kind: "llama-server".to_string(),
@@ -682,32 +685,84 @@ pub fn build_failed_launch_llama_runtime_report(
 }
 
 fn build_llama_runtime_introspection_report(
+    llama_path: &str,
     startup_failed: bool,
 ) -> LlamaRuntimeIntrospectionReport {
+    let capabilities = match detect_runtime_introspection_capabilities(llama_path) {
+        Ok(capabilities) => capabilities,
+        Err(error) => {
+            return LlamaRuntimeIntrospectionReport {
+                capability_source: "manifest_load_failed_fallback".to_string(),
+                manifest_path: None,
+                runtime_build_profile: "stock_external_llama_server".to_string(),
+                instrumentation_backend: "none".to_string(),
+                allocator_introspection_status: "allocator_introspection_capability_load_failed"
+                    .to_string(),
+                kv_cache_introspection_status:
+                    "kv_cache_introspection_capability_load_failed".to_string(),
+                model_unload_signal_status: if startup_failed {
+                    "model_unload_signal_unavailable_due_to_startup_failure".to_string()
+                } else {
+                    "model_unload_not_observed_directly".to_string()
+                },
+                allocator_reset_signal_status: if startup_failed {
+                    "allocator_reset_signal_unavailable_due_to_startup_failure".to_string()
+                } else {
+                    "allocator_reset_not_observed_directly".to_string()
+                },
+                summary: format!(
+                    "NullContext tried to load runtime introspection capabilities for this llama-server path, but capability loading failed: {}. Falling back to stock-runtime assumptions.",
+                    error
+                ),
+                notes: vec![
+                    format!("Capability load failure: {}", error),
+                    "Future allocator/KV work should fill this section with explicit runtime capability evidence rather than freeform caveats.".to_string(),
+                ],
+            };
+        }
+    };
+
+    let mut notes = capabilities.notes;
+    notes.push(
+        "Future allocator/KV work should fill this section with explicit runtime capability evidence rather than freeform caveats."
+            .to_string(),
+    );
+
     LlamaRuntimeIntrospectionReport {
-        runtime_build_profile: "stock_external_llama_server".to_string(),
-        instrumentation_backend: "none".to_string(),
-        allocator_introspection_status: "allocator_introspection_unavailable".to_string(),
-        kv_cache_introspection_status: "kv_cache_introspection_unavailable".to_string(),
-        model_unload_signal_status: if startup_failed {
+        capability_source: capabilities.capability_source.clone(),
+        manifest_path: capabilities.manifest_path,
+        runtime_build_profile: capabilities.runtime_build_profile.clone(),
+        instrumentation_backend: capabilities.instrumentation_backend.clone(),
+        allocator_introspection_status: capabilities.allocator_introspection_status,
+        kv_cache_introspection_status: capabilities.kv_cache_introspection_status,
+        model_unload_signal_status: if startup_failed
+            && capabilities.model_unload_signal_status == "model_unload_not_observed_directly"
+        {
             "model_unload_signal_unavailable_due_to_startup_failure".to_string()
         } else {
-            "model_unload_not_observed_directly".to_string()
+            capabilities.model_unload_signal_status
         },
-        allocator_reset_signal_status: if startup_failed {
+        allocator_reset_signal_status: if startup_failed
+            && capabilities.allocator_reset_signal_status == "allocator_reset_not_observed_directly"
+        {
             "allocator_reset_signal_unavailable_due_to_startup_failure".to_string()
         } else {
-            "allocator_reset_not_observed_directly".to_string()
+            capabilities.allocator_reset_signal_status
         },
         summary: if startup_failed {
-            "This runtime was a stock external llama-server process, and startup failed before any allocator/KV introspection hooks could have existed. NullContext currently has no direct visibility into llama.cpp allocator reset, KV/cache teardown, or model-unload signals on this path.".to_string()
+            format!(
+                "This runtime used '{}' capability detection on a build profiled as '{}', but startup failed before any allocator/KV signals could be observed directly. NullContext still lacks direct visibility into allocator reset, KV/cache teardown, or model-unload behavior on this path.",
+                capabilities.capability_source, capabilities.runtime_build_profile
+            )
+        } else if capabilities.capability_source == "sidecar_manifest" {
+            format!(
+                "NullContext loaded runtime introspection capabilities from a sidecar manifest for build profile '{}'. Host-tool memory observation is still in use, but allocator/KV-specific capability slots are now wired for this runtime.",
+                capabilities.runtime_build_profile
+            )
         } else {
-            "This runtime used a stock external llama-server build. NullContext can currently observe process- and host-tool-level evidence, but it does not yet have direct allocator, KV/cache, or model-unload introspection inside llama.cpp.".to_string()
+            "This runtime is being treated as a stock external llama-server build. NullContext can currently observe process- and host-tool-level evidence, but it does not yet have direct allocator, KV/cache, or model-unload introspection inside llama.cpp.".to_string()
         },
-        notes: vec![
-            "No patched or instrumented llama.cpp runtime is active in this build.".to_string(),
-            "Future allocator/KV work should fill this section with explicit runtime capability evidence rather than freeform caveats.".to_string(),
-        ],
+        notes,
     }
 }
 
