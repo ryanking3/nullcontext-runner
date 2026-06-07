@@ -1,7 +1,6 @@
 use crate::audit::{
-    build_failed_launch_llama_runtime_report, build_llama_runtime_report,
-    build_unimplemented_failed_start_process_scan_report, sync_report_lifecycle, PrivacyReport,
-    RetrievalReport,
+    build_failed_launch_llama_runtime_report, build_llama_runtime_report, sync_report_lifecycle,
+    PrivacyReport, RetrievalReport,
 };
 use crate::chat::{CancelChatResponse, ChatMessageRequest, ChatSessionManager, StartChatRequest};
 use crate::cleanup::{
@@ -23,8 +22,8 @@ use crate::llama_stream::{stream_completion_from_llama, StreamTermination};
 use crate::logging::{stderr_line, stdout_line};
 use crate::memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
 use crate::process_scan::{
-    build_process_scan_report, scan_live_process_phase, scan_post_shutdown_process_phase,
-    ProcessScanMarker,
+    build_process_scan_report, scan_failed_start_cleanup_phase, scan_live_process_phase,
+    scan_post_shutdown_process_phase, ProcessScanMarker,
 };
 use crate::registry::{
     archived_report_path, due_retention_cleanup_session_ids, ensure_registry_dirs,
@@ -1324,9 +1323,17 @@ fn handle_failed_streaming_startup(
         cleanup_report.clone(),
     )
     .with_lifecycle(&lifecycle)
-    .with_process_scan(build_unimplemented_failed_start_process_scan_report(Some(
-        failure.runtime_pid,
-    )))
+    .with_process_scan(build_process_scan_report(
+        Some(failure.runtime_pid),
+        vec![scan_failed_start_cleanup_phase(
+            failure.runtime_pid,
+            &failure.post_cleanup_observation,
+            &[ProcessScanMarker {
+                kind: "prompt_marker",
+                bytes: prompt_probe,
+            }],
+        )],
+    ))
     .with_llama_runtime(build_failed_launch_llama_runtime_report(config, failure));
     let report = if let Some(retrieval_report) = retrieval_report {
         report.with_retrieval(retrieval_report)

@@ -111,10 +111,27 @@ pub fn scan_post_shutdown_process_phase(
     post_shutdown: &RuntimePostShutdownObservation,
     markers: &[ProcessScanMarker<'_>],
 ) -> ProcessScanPhaseReport {
+    scan_conditional_process_phase("post_shutdown", pid, post_shutdown, markers)
+}
+
+pub fn scan_failed_start_cleanup_phase(
+    pid: u32,
+    post_shutdown: &RuntimePostShutdownObservation,
+    markers: &[ProcessScanMarker<'_>],
+) -> ProcessScanPhaseReport {
+    scan_conditional_process_phase("failed_start_cleanup", pid, post_shutdown, markers)
+}
+
+fn scan_conditional_process_phase(
+    phase_name: &str,
+    pid: u32,
+    post_shutdown: &RuntimePostShutdownObservation,
+    markers: &[ProcessScanMarker<'_>],
+) -> ProcessScanPhaseReport {
     match post_shutdown.process_present_after_shutdown {
-        Some(true) => scan_process_phase("post_shutdown", pid, markers),
+        Some(true) => scan_process_phase(phase_name, pid, markers),
         Some(false) => ProcessScanPhaseReport {
-            phase: "post_shutdown".to_string(),
+            phase: phase_name.to_string(),
             status: "process_not_observable_for_scan".to_string(),
             method: "not_applicable_process_not_observed".to_string(),
             target_pid: Some(pid),
@@ -136,12 +153,14 @@ pub fn scan_post_shutdown_process_phase(
                 })
                 .collect(),
             notes: vec![
-                "NullContext could not perform a direct post-shutdown process scan because the PID was not observable after shutdown."
-                    .to_string(),
+                format!(
+                    "NullContext could not perform a direct {} process scan because the PID was not observable after cleanup.",
+                    phase_name.replace('_', " ")
+                ),
             ],
         },
         None => ProcessScanPhaseReport {
-            phase: "post_shutdown".to_string(),
+            phase: phase_name.to_string(),
             status: "post_shutdown_observation_inconclusive".to_string(),
             method: "not_attempted_inconclusive_target_state".to_string(),
             target_pid: Some(pid),
@@ -163,8 +182,10 @@ pub fn scan_post_shutdown_process_phase(
                 })
                 .collect(),
             notes: vec![
-                "NullContext skipped direct post-shutdown scanning because the post-shutdown PID observation was inconclusive."
-                    .to_string(),
+                format!(
+                    "NullContext skipped direct {} scanning because PID visibility after cleanup was inconclusive.",
+                    phase_name.replace('_', " ")
+                ),
             ],
         },
     }

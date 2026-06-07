@@ -81,6 +81,7 @@ pub struct RuntimeLaunchFailure {
     pub cleanup_shutdown_method: Option<String>,
     pub cleanup_exit_code: Option<i32>,
     pub cleanup_error: Option<String>,
+    pub post_cleanup_observation: RuntimePostShutdownObservation,
     pub stdout: String,
     pub stderr: String,
 }
@@ -218,6 +219,7 @@ impl ManagedRuntime {
     fn build_failed_launch_error(&mut self, startup_error: anyhow::Error) -> anyhow::Error {
         let pid = self.pid();
         let cleanup_result = self.shutdown();
+        let post_cleanup_observation = observe_post_shutdown(pid);
         let stdout = read_child_stdout(&mut self.child);
         let stderr = read_child_stderr(&mut self.child);
 
@@ -230,6 +232,7 @@ impl ManagedRuntime {
                 cleanup_shutdown_method: Some(outcome.shutdown_method),
                 cleanup_exit_code: outcome.exit_code,
                 cleanup_error: None,
+                post_cleanup_observation,
                 stdout,
                 stderr,
             },
@@ -241,6 +244,7 @@ impl ManagedRuntime {
                 cleanup_shutdown_method: None,
                 cleanup_exit_code: None,
                 cleanup_error: Some(error.to_string()),
+                post_cleanup_observation,
                 stdout,
                 stderr,
             },

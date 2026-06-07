@@ -21,8 +21,7 @@ mod web;
 use crate::logging::stdout_line;
 use anyhow::Result;
 use audit::{
-    build_failed_launch_llama_runtime_report, build_llama_runtime_report,
-    build_unimplemented_failed_start_process_scan_report, PrivacyReport,
+    build_failed_launch_llama_runtime_report, build_llama_runtime_report, PrivacyReport,
 };
 use cleanup::{
     cleanup_ephemeral_workspace, log_sanitization_operation, scan_artifacts, CleanupReport,
@@ -31,6 +30,7 @@ use cleanup::{
 use config::{AppCommand, SessionConfig};
 use inference::run_inference;
 use memory_scan::{buffer_contains_pattern, verify_buffer_zeroization};
+use process_scan::{build_process_scan_report, scan_failed_start_cleanup_phase, ProcessScanMarker};
 use registry::{list_sessions, register_persistent_session, show_report, SessionLifecycleMetadata};
 use runtime::RuntimeLaunchFailure;
 use session::Session;
@@ -297,9 +297,17 @@ fn finalize_failed_startup_session(
         cleanup_report.clone(),
     )
     .with_lifecycle(&lifecycle)
-    .with_process_scan(build_unimplemented_failed_start_process_scan_report(Some(
-        failure.runtime_pid,
-    )))
+    .with_process_scan(build_process_scan_report(
+        Some(failure.runtime_pid),
+        vec![scan_failed_start_cleanup_phase(
+            failure.runtime_pid,
+            &failure.post_cleanup_observation,
+            &[ProcessScanMarker {
+                kind: "prompt_marker",
+                bytes: prompt_probe,
+            }],
+        )],
+    ))
     .with_llama_runtime(build_failed_launch_llama_runtime_report(config, failure));
 
     let report_json = report.to_pretty_json()?;

@@ -539,25 +539,6 @@ pub fn build_unimplemented_process_scan_report(runtime_pid: Option<u32>) -> Proc
     }
 }
 
-pub fn build_unimplemented_failed_start_process_scan_report(
-    runtime_pid: Option<u32>,
-) -> ProcessScanReport {
-    let mut report = build_unimplemented_process_scan_report(runtime_pid);
-    report.summary =
-        "NullContext reserved a structured process-memory-scan section for this failed-start report, but no direct process scan backend exists yet.".to_string();
-    report.residual_risk_summary =
-        "Because direct process scanning is not implemented yet, NullContext cannot say whether startup-time prompt material or runtime setup markers remained present in readable llama-server process memory after failed-start cleanup.".to_string();
-    report.phases = vec![placeholder_process_scan_phase(
-        "failed_start_cleanup",
-        runtime_pid,
-    )];
-    report.notes.push(
-        "The runtime failed before normal readiness, so the future direct-scan path for this report shape will focus on failed-start cleanup evidence."
-            .to_string(),
-    );
-    report
-}
-
 pub fn build_failed_launch_llama_runtime_report(
     config: &SessionConfig,
     failure: &RuntimeLaunchFailure,
@@ -595,20 +576,42 @@ pub fn build_failed_launch_llama_runtime_report(
         observed_gpu_pid: None,
         observed_gpu_memory_bytes: None,
         gpu_memory_source: None,
-        process_present_after_shutdown: None,
-        process_check_source: None,
-        process_resident_bytes_after_shutdown: None,
-        process_virtual_bytes_after_shutdown: None,
-        physical_footprint_bytes_after_shutdown: None,
-        physical_footprint_peak_bytes_after_shutdown: None,
-        vmmap_summary_source_after_shutdown: None,
-        resident_regions_after_shutdown: vec![],
+        process_present_after_shutdown: failure
+            .post_cleanup_observation
+            .process_present_after_shutdown,
+        process_check_source: failure.post_cleanup_observation.process_check_source.clone(),
+        process_resident_bytes_after_shutdown: failure
+            .post_cleanup_observation
+            .process_resident_bytes_after_shutdown,
+        process_virtual_bytes_after_shutdown: failure
+            .post_cleanup_observation
+            .process_virtual_bytes_after_shutdown,
+        physical_footprint_bytes_after_shutdown: failure
+            .post_cleanup_observation
+            .physical_footprint_bytes_after_shutdown,
+        physical_footprint_peak_bytes_after_shutdown: failure
+            .post_cleanup_observation
+            .physical_footprint_peak_bytes_after_shutdown,
+        vmmap_summary_source_after_shutdown: failure
+            .post_cleanup_observation
+            .vmmap_summary_source_after_shutdown
+            .clone(),
+        resident_regions_after_shutdown: failure
+            .post_cleanup_observation
+            .resident_regions_after_shutdown
+            .iter()
+            .map(LlamaResidentRegionReport::from_runtime_region)
+            .collect(),
         physical_footprint_delta_bytes: None,
         resident_region_deltas: vec![],
-        verification_window_ms: 0,
-        gpu_entry_present_after_shutdown: None,
-        gpu_memory_bytes_after_shutdown: None,
-        gpu_check_source: None,
+        verification_window_ms: failure.post_cleanup_observation.verification_window_ms,
+        gpu_entry_present_after_shutdown: failure
+            .post_cleanup_observation
+            .gpu_entry_present_after_shutdown,
+        gpu_memory_bytes_after_shutdown: failure
+            .post_cleanup_observation
+            .gpu_memory_bytes_after_shutdown,
+        gpu_check_source: failure.post_cleanup_observation.gpu_check_source.clone(),
         inspection_status: "runtime_startup_failed_before_ready".to_string(),
         ram_inspection_status: "ram_inspection_unavailable_due_to_startup_failure".to_string(),
         vram_inspection_status: if gpu_offload_requested {
@@ -634,6 +637,8 @@ pub fn build_failed_launch_llama_runtime_report(
                     "Automatic cleanup of the failed startup runtime also failed: {error}"
                 ));
             }
+
+            notes.extend(failure.post_cleanup_observation.observation_notes.clone());
 
             if !failure.stdout.trim().is_empty() {
                 notes.push("llama-server stdout was captured during failed startup.".to_string());
