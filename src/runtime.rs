@@ -1,5 +1,8 @@
 use crate::config::SessionConfig;
 use crate::logging::stdout_line;
+use crate::runtime_introspection::{
+    parse_runtime_introspection_signals, RuntimeIntrospectionSignal,
+};
 use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
 #[cfg(target_os = "windows")]
@@ -23,6 +26,7 @@ pub struct RuntimeShutdownOutcome {
     pub shutdown_method: String,
     pub exit_code: Option<i32>,
     pub graceful_shutdown_supported: bool,
+    pub introspection_signals: Vec<RuntimeIntrospectionSignal>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +88,7 @@ pub struct RuntimeLaunchFailure {
     pub post_cleanup_observation: RuntimePostShutdownObservation,
     pub stdout: String,
     pub stderr: String,
+    pub introspection_signals: Vec<RuntimeIntrospectionSignal>,
 }
 
 const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
@@ -153,20 +158,32 @@ impl ManagedRuntime {
         stdout_line("Shutting down runtime...");
 
         match self.child.try_wait()? {
-            Some(status) => Ok(RuntimeShutdownOutcome {
-                stopped: true,
-                shutdown_method: "already_exited".to_string(),
-                exit_code: status.code(),
-                graceful_shutdown_supported: false,
-            }),
+            Some(status) => {
+                let stdout = read_child_stdout(&mut self.child);
+                let stderr = read_child_stderr(&mut self.child);
+                let introspection_signals = parse_runtime_introspection_signals(&stdout, &stderr);
+
+                Ok(RuntimeShutdownOutcome {
+                    stopped: true,
+                    shutdown_method: "already_exited".to_string(),
+                    exit_code: status.code(),
+                    graceful_shutdown_supported: false,
+                    introspection_signals,
+                })
+            }
             None => {
                 self.child.kill()?;
                 let status = self.child.wait()?;
+                let stdout = read_child_stdout(&mut self.child);
+                let stderr = read_child_stderr(&mut self.child);
+                let introspection_signals = parse_runtime_introspection_signals(&stdout, &stderr);
+
                 Ok(RuntimeShutdownOutcome {
                     stopped: true,
                     shutdown_method: "forced_kill_wait".to_string(),
                     exit_code: status.code(),
                     graceful_shutdown_supported: false,
+                    introspection_signals,
                 })
             }
         }
@@ -222,6 +239,7 @@ impl ManagedRuntime {
         let post_cleanup_observation = observe_post_shutdown(pid);
         let stdout = read_child_stdout(&mut self.child);
         let stderr = read_child_stderr(&mut self.child);
+        let introspection_signals = parse_runtime_introspection_signals(&stdout, &stderr);
 
         let failure = match cleanup_result {
             Ok(outcome) => RuntimeLaunchFailure {
@@ -235,6 +253,7 @@ impl ManagedRuntime {
                 post_cleanup_observation,
                 stdout,
                 stderr,
+                introspection_signals: outcome.introspection_signals,
             },
             Err(error) => RuntimeLaunchFailure {
                 runtime_pid: pid,
@@ -247,6 +266,7 @@ impl ManagedRuntime {
                 post_cleanup_observation,
                 stdout,
                 stderr,
+                introspection_signals,
             },
         };
 

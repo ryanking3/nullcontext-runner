@@ -15,6 +15,7 @@ mod registry;
 mod retrieval;
 mod runtime;
 mod runtime_capabilities;
+mod runtime_introspection;
 mod sensitive;
 mod session;
 mod web;

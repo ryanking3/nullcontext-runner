@@ -250,7 +250,15 @@ export type LlamaRuntimeIntrospectionReport = {
   model_unload_signal_status: string;
   allocator_reset_signal_status: string;
   summary: string;
+  observed_events: LlamaRuntimeIntrospectionEventReport[];
   notes: string[];
+};
+
+export type LlamaRuntimeIntrospectionEventReport = {
+  event: string;
+  status: string;
+  source: string;
+  details: string;
 };
 
 export type LlamaRuntimeReportData = {

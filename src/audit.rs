@@ -8,6 +8,7 @@ use crate::runtime::{
     RuntimeShutdownOutcome, RuntimeUsageSnapshot,
 };
 use crate::runtime_capabilities::detect_runtime_introspection_capabilities;
+use crate::runtime_introspection::RuntimeIntrospectionSignal;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -180,7 +181,16 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub model_unload_signal_status: String,
     pub allocator_reset_signal_status: String,
     pub summary: String,
+    pub observed_events: Vec<LlamaRuntimeIntrospectionEventReport>,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlamaRuntimeIntrospectionEventReport {
+    pub event: String,
+    pub status: String,
+    pub source: String,
+    pub details: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,7 +324,11 @@ pub fn build_llama_runtime_report(
     let gpu_layers_requested = config.gpu_layers.parse::<u32>().unwrap_or(0);
     let gpu_offload_requested = gpu_layers_requested > 0;
     let process_exited_cleanly = shutdown.stopped;
-    let introspection = build_llama_runtime_introspection_report(&config.llama_path, false);
+    let introspection = build_llama_runtime_introspection_report(
+        &config.llama_path,
+        false,
+        &shutdown.introspection_signals,
+    );
 
     let mut memory_domains = vec![
         LlamaMemoryDomainReport {
@@ -537,7 +551,11 @@ pub fn build_failed_launch_llama_runtime_report(
     } else {
         "failed"
     };
-    let introspection = build_llama_runtime_introspection_report(&config.llama_path, true);
+    let introspection = build_llama_runtime_introspection_report(
+        &config.llama_path,
+        true,
+        &failure.introspection_signals,
+    );
 
     LlamaRuntimeReport {
         runtime_kind: "llama-server".to_string(),
@@ -687,6 +705,7 @@ pub fn build_failed_launch_llama_runtime_report(
 fn build_llama_runtime_introspection_report(
     llama_path: &str,
     startup_failed: bool,
+    observed_signals: &[RuntimeIntrospectionSignal],
 ) -> LlamaRuntimeIntrospectionReport {
     let capabilities = match detect_runtime_introspection_capabilities(llama_path) {
         Ok(capabilities) => capabilities,
@@ -714,6 +733,10 @@ fn build_llama_runtime_introspection_report(
                     "NullContext tried to load runtime introspection capabilities for this llama-server path, but capability loading failed: {}. Falling back to stock-runtime assumptions.",
                     error
                 ),
+                observed_events: observed_signals
+                    .iter()
+                    .map(map_runtime_introspection_signal)
+                    .collect(),
                 notes: vec![
                     format!("Capability load failure: {}", error),
                     "Future allocator/KV work should fill this section with explicit runtime capability evidence rather than freeform caveats.".to_string(),
@@ -727,18 +750,50 @@ fn build_llama_runtime_introspection_report(
         "Future allocator/KV work should fill this section with explicit runtime capability evidence rather than freeform caveats."
             .to_string(),
     );
+    let observed_events = observed_signals
+        .iter()
+        .map(map_runtime_introspection_signal)
+        .collect::<Vec<_>>();
+    let observed_kv_signal = observed_signals.iter().any(|signal| {
+        matches!(
+            signal.event.as_str(),
+            "kv_cache_initialized" | "kv_cache_reused" | "kv_cache_clear_observed"
+        ) && signal.status != "failed"
+    });
+    let observed_allocator_signal = observed_signals.iter().any(|signal| {
+        matches!(
+            signal.event.as_str(),
+            "allocator_reset_observed" | "allocator_initialized" | "allocator_teardown_observed"
+        ) && signal.status != "failed"
+    });
+    let observed_model_unload_signal = observed_signals
+        .iter()
+        .any(|signal| signal.event == "model_unload_observed" && signal.status != "failed");
+    let observed_allocator_reset_signal = observed_signals
+        .iter()
+        .any(|signal| signal.event == "allocator_reset_observed" && signal.status != "failed");
 
     LlamaRuntimeIntrospectionReport {
         capability_source: capabilities.capability_source.clone(),
         manifest_path: capabilities.manifest_path,
         runtime_build_profile: capabilities.runtime_build_profile.clone(),
         instrumentation_backend: capabilities.instrumentation_backend.clone(),
-        allocator_introspection_status: capabilities.allocator_introspection_status,
-        kv_cache_introspection_status: capabilities.kv_cache_introspection_status,
+        allocator_introspection_status: if observed_allocator_signal {
+            "allocator_lifecycle_signals_observed".to_string()
+        } else {
+            capabilities.allocator_introspection_status
+        },
+        kv_cache_introspection_status: if observed_kv_signal {
+            "kv_cache_lifecycle_signals_observed".to_string()
+        } else {
+            capabilities.kv_cache_introspection_status
+        },
         model_unload_signal_status: if startup_failed
             && capabilities.model_unload_signal_status == "model_unload_not_observed_directly"
         {
             "model_unload_signal_unavailable_due_to_startup_failure".to_string()
+        } else if observed_model_unload_signal {
+            "model_unload_signal_observed".to_string()
         } else {
             capabilities.model_unload_signal_status
         },
@@ -746,6 +801,8 @@ fn build_llama_runtime_introspection_report(
             && capabilities.allocator_reset_signal_status == "allocator_reset_not_observed_directly"
         {
             "allocator_reset_signal_unavailable_due_to_startup_failure".to_string()
+        } else if observed_allocator_reset_signal {
+            "allocator_reset_signal_observed".to_string()
         } else {
             capabilities.allocator_reset_signal_status
         },
@@ -756,13 +813,31 @@ fn build_llama_runtime_introspection_report(
             )
         } else if capabilities.capability_source == "sidecar_manifest" {
             format!(
-                "NullContext loaded runtime introspection capabilities from a sidecar manifest for build profile '{}'. Host-tool memory observation is still in use, but allocator/KV-specific capability slots are now wired for this runtime.",
-                capabilities.runtime_build_profile
+                "NullContext loaded runtime introspection capabilities from a sidecar manifest for build profile '{}'. Host-tool memory observation is still in use, and {} lifecycle signal(s) were captured from runtime output for this session.",
+                capabilities.runtime_build_profile,
+                observed_events.len()
+            )
+        } else if !observed_events.is_empty() {
+            format!(
+                "NullContext captured {} runtime lifecycle signal(s) from llama-server output, even though this runtime is otherwise being treated as a stock external build.",
+                observed_events.len()
             )
         } else {
             "This runtime is being treated as a stock external llama-server build. NullContext can currently observe process- and host-tool-level evidence, but it does not yet have direct allocator, KV/cache, or model-unload introspection inside llama.cpp.".to_string()
         },
+        observed_events,
         notes,
+    }
+}
+
+fn map_runtime_introspection_signal(
+    signal: &RuntimeIntrospectionSignal,
+) -> LlamaRuntimeIntrospectionEventReport {
+    LlamaRuntimeIntrospectionEventReport {
+        event: signal.event.clone(),
+        status: signal.status.clone(),
+        source: signal.source_stream.clone(),
+        details: signal.details.clone(),
     }
 }
 

@@ -601,6 +601,36 @@ export function PrivacyReportViewer({
                 ))}
               </div>
             )}
+
+            <details className="report-detail" open>
+              <summary>
+                <span>observed lifecycle signals</span>
+                <span className="pill neutral">
+                  {currentReport.llama_runtime.introspection.observed_events.length}
+                </span>
+              </summary>
+              {currentReport.llama_runtime.introspection.observed_events.length === 0 ? (
+                <p className="muted-text">no allocator or kv lifecycle signals were captured</p>
+              ) : (
+                <div className="report-list">
+                  {currentReport.llama_runtime.introspection.observed_events.map((event) => (
+                    <div
+                      className="report-item"
+                      key={`${event.source}-${event.event}-${event.details}`}
+                    >
+                      <div className="report-item-header">
+                        <strong>{humanizeSnakeCase(event.event)}</strong>
+                        <span className={statusClass(event.status)}>{event.status}</span>
+                      </div>
+                      <div className="report-path-list">
+                        <div>source: {event.source}</div>
+                        <div>{event.details || "no extra details"}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </details>
           </details>
 
           <details className="report-detail" open>
