@@ -240,6 +240,17 @@ export type LlamaResidentRegionDeltaReport = {
   resident_delta_bytes: number;
 };
 
+export type LlamaRuntimeIntrospectionReport = {
+  runtime_build_profile: string;
+  instrumentation_backend: string;
+  allocator_introspection_status: string;
+  kv_cache_introspection_status: string;
+  model_unload_signal_status: string;
+  allocator_reset_signal_status: string;
+  summary: string;
+  notes: string[];
+};
+
 export type LlamaRuntimeReportData = {
   runtime_kind: string;
   runtime_pid?: number | null;
@@ -283,6 +294,7 @@ export type LlamaRuntimeReportData = {
   observation_notes: string[];
   cleanup_summary: string;
   residual_risk_summary: string;
+  introspection: LlamaRuntimeIntrospectionReport;
   memory_domains: LlamaMemoryDomainReport[];
 };
 

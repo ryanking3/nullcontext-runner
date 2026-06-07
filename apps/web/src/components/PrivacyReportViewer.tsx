@@ -537,6 +537,66 @@ export function PrivacyReportViewer({
 
           <details className="report-detail" open>
             <summary>
+              <span>runtime introspection capabilities</span>
+              <span className="pill warning">
+                {humanizeSnakeCase(
+                  currentReport.llama_runtime.introspection.allocator_introspection_status
+                )}
+              </span>
+            </summary>
+
+            <div className="report-risk-block">
+              <p>{currentReport.llama_runtime.introspection.summary}</p>
+            </div>
+
+            <ReportGrid
+              entries={[
+                {
+                  label: "runtime build profile",
+                  value: currentReport.llama_runtime.introspection.runtime_build_profile,
+                },
+                {
+                  label: "instrumentation backend",
+                  value: currentReport.llama_runtime.introspection.instrumentation_backend,
+                },
+                {
+                  label: "allocator introspection",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.introspection.allocator_introspection_status
+                  ),
+                },
+                {
+                  label: "kv/cache introspection",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.introspection.kv_cache_introspection_status
+                  ),
+                },
+                {
+                  label: "model unload signal",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.introspection.model_unload_signal_status
+                  ),
+                },
+                {
+                  label: "allocator reset signal",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.introspection.allocator_reset_signal_status
+                  ),
+                },
+              ]}
+            />
+
+            {currentReport.llama_runtime.introspection.notes.length > 0 && (
+              <div className="report-risk-block">
+                {currentReport.llama_runtime.introspection.notes.map((note) => (
+                  <p key={note}>{note}</p>
+                ))}
+              </div>
+            )}
+          </details>
+
+          <details className="report-detail" open>
+            <summary>
               <span>resident regions</span>
               <span className="pill neutral">
                 {currentReport.llama_runtime.resident_regions.length}
