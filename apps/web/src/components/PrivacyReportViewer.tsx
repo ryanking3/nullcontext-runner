@@ -574,6 +574,24 @@ export function PrivacyReportViewer({
                   ),
                 },
                 {
+                  label: "allocator initialized",
+                  value: formatBoolean(
+                    currentReport.llama_runtime.introspection.allocator_initialized_observed
+                  ),
+                },
+                {
+                  label: "allocator teardown observed",
+                  value: formatBoolean(
+                    currentReport.llama_runtime.introspection.allocator_teardown_observed
+                  ),
+                },
+                {
+                  label: "allocator reset observed",
+                  value: formatBoolean(
+                    currentReport.llama_runtime.introspection.allocator_reset_observed
+                  ),
+                },
+                {
                   label: "kv/cache introspection",
                   value: humanizeSnakeCase(
                     currentReport.llama_runtime.introspection.kv_cache_introspection_status
@@ -614,6 +632,10 @@ export function PrivacyReportViewer({
 
             {currentReport.llama_runtime.introspection.notes.length > 0 && (
               <div className="report-risk-block">
+                <p>
+                  <strong>allocator summary:</strong>{" "}
+                  {currentReport.llama_runtime.introspection.allocator_summary}
+                </p>
                 <p>
                   <strong>kv/cache summary:</strong>{" "}
                   {currentReport.llama_runtime.introspection.kv_cache_summary}

@@ -336,7 +336,7 @@ Before `v1.0`, this needs at least a lightweight harness:
 7. `[*] Document llama allocator and KV introspection plan`
 8. `[*] Add runtime capability flags for instrumented llama builds`
 9. `[*] Expose KV cache lifecycle signals in reports`
-10. `[ ] Expose allocator reset signals in reports`
+10. `[*] Expose allocator reset signals in reports`
 
 ### Track C: CUDA / NVIDIA API Inspection
 

@@ -177,6 +177,10 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub runtime_build_profile: String,
     pub instrumentation_backend: String,
     pub allocator_introspection_status: String,
+    pub allocator_initialized_observed: bool,
+    pub allocator_teardown_observed: bool,
+    pub allocator_reset_observed: bool,
+    pub allocator_summary: String,
     pub kv_cache_introspection_status: String,
     pub kv_cache_initialized_observed: bool,
     pub kv_cache_reused_observed: bool,
@@ -383,8 +387,16 @@ pub fn build_llama_runtime_report(
         LlamaMemoryDomainReport {
             domain: "llama_internal_allocator".to_string(),
             exposure_scope: "llama.cpp allocator state and freed runtime pages".to_string(),
-            cleanup_status: "warning".to_string(),
-            notes: "NullContext does not currently verify allocator-level clearing inside llama.cpp after shutdown.".to_string(),
+            cleanup_status: if introspection.allocator_reset_observed {
+                "successful".to_string()
+            } else if introspection.allocator_initialized_observed
+                || introspection.allocator_teardown_observed
+            {
+                "warning".to_string()
+            } else {
+                "warning".to_string()
+            },
+            notes: introspection.allocator_summary.clone(),
         },
         LlamaMemoryDomainReport {
             domain: "model_weights_ram".to_string(),
@@ -729,6 +741,12 @@ fn build_llama_runtime_introspection_report(
                 instrumentation_backend: "none".to_string(),
                 allocator_introspection_status: "allocator_introspection_capability_load_failed"
                     .to_string(),
+                allocator_initialized_observed: false,
+                allocator_teardown_observed: false,
+                allocator_reset_observed: false,
+                allocator_summary:
+                    "NullContext could not load runtime introspection capabilities, so allocator lifecycle evidence remained unavailable for this session."
+                        .to_string(),
                 kv_cache_introspection_status:
                     "kv_cache_introspection_capability_load_failed".to_string(),
                 kv_cache_initialized_observed: false,
@@ -793,14 +811,21 @@ fn build_llama_runtime_introspection_report(
             "allocator_reset_observed" | "allocator_initialized" | "allocator_teardown_observed"
         ) && signal.status != "failed"
     });
+    let observed_allocator_initialized = observed_signals
+        .iter()
+        .any(|signal| signal.event == "allocator_initialized" && signal.status != "failed");
+    let observed_allocator_teardown = observed_signals
+        .iter()
+        .any(|signal| signal.event == "allocator_teardown_observed" && signal.status != "failed");
     let observed_model_unload_signal = observed_signals
         .iter()
         .any(|signal| signal.event == "model_unload_observed" && signal.status != "failed");
     let observed_allocator_reset_signal = observed_signals
         .iter()
         .any(|signal| signal.event == "allocator_reset_observed" && signal.status != "failed");
-    let declared_kv_cache_introspection_status =
-        capabilities.kv_cache_introspection_status.clone();
+    let declared_allocator_introspection_status =
+        capabilities.allocator_introspection_status.clone();
+    let declared_kv_cache_introspection_status = capabilities.kv_cache_introspection_status.clone();
 
     LlamaRuntimeIntrospectionReport {
         capability_source: capabilities.capability_source.clone(),
@@ -811,6 +836,25 @@ fn build_llama_runtime_introspection_report(
             "allocator_lifecycle_signals_observed".to_string()
         } else {
             capabilities.allocator_introspection_status
+        },
+        allocator_initialized_observed: observed_allocator_initialized,
+        allocator_teardown_observed: observed_allocator_teardown,
+        allocator_reset_observed: observed_allocator_reset_signal,
+        allocator_summary: if startup_failed {
+            "Runtime startup failed before normal teardown, so any observed allocator lifecycle signals should be treated as partial setup evidence rather than proof of allocator reset."
+                .to_string()
+        } else if observed_allocator_reset_signal {
+            "NullContext observed an explicit allocator reset signal from the runtime for this session. That is stronger evidence than process-lifetime inference alone, but it is still not proof that freed pages were overwritten or zeroized."
+                .to_string()
+        } else if observed_allocator_initialized || observed_allocator_teardown {
+            "NullContext observed allocator lifecycle setup or teardown signals for this session, but it did not observe an allocator reset signal before shutdown. Allocator cleanup should still be treated as only partially evidenced."
+                .to_string()
+        } else if declared_allocator_introspection_status.contains("available") {
+            "This runtime declared allocator lifecycle signal support, but no allocator events were captured for this session."
+                .to_string()
+        } else {
+            "Allocator state is still primarily bounded by runtime lifetime in this build, and NullContext did not capture any direct allocator lifecycle signals for this session."
+                .to_string()
         },
         kv_cache_introspection_status: if observed_kv_signal {
             "kv_cache_lifecycle_signals_observed".to_string()

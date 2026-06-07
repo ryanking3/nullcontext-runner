@@ -246,6 +246,10 @@ export type LlamaRuntimeIntrospectionReport = {
   runtime_build_profile: string;
   instrumentation_backend: string;
   allocator_introspection_status: string;
+  allocator_initialized_observed: boolean;
+  allocator_teardown_observed: boolean;
+  allocator_reset_observed: boolean;
+  allocator_summary: string;
   kv_cache_introspection_status: string;
   kv_cache_initialized_observed: boolean;
   kv_cache_reused_observed: boolean;
