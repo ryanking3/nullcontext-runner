@@ -1,4 +1,5 @@
 use crate::config::SessionConfig;
+use crate::gpu_inspection::observe_gpu_process;
 use crate::logging::stdout_line;
 use crate::runtime_introspection::{
     parse_runtime_introspection_signals, RuntimeIntrospectionSignal,
@@ -40,6 +41,7 @@ pub struct RuntimeUsageSnapshot {
     pub resident_regions: Vec<RuntimeResidentRegion>,
     pub gpu_pid_observed: Option<bool>,
     pub gpu_memory_bytes: Option<u64>,
+    pub gpu_observation_backend: Option<String>,
     pub gpu_memory_source: Option<String>,
     pub observation_notes: Vec<String>,
 }
@@ -64,16 +66,9 @@ pub struct RuntimePostShutdownObservation {
     pub verification_window_ms: u64,
     pub gpu_entry_present_after_shutdown: Option<bool>,
     pub gpu_memory_bytes_after_shutdown: Option<u64>,
+    pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub observation_notes: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeGpuObservation {
-    memory_bytes: Option<u64>,
-    source: Option<String>,
-    pid_observed: Option<bool>,
-    note: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -142,9 +137,10 @@ impl ManagedRuntime {
         let pid = self.pid();
         let mut snapshot = observe_process_memory(pid);
 
-        let gpu = observe_gpu_memory(pid);
+        let gpu = observe_gpu_process(pid);
         snapshot.gpu_pid_observed = gpu.pid_observed;
         snapshot.gpu_memory_bytes = gpu.memory_bytes;
+        snapshot.gpu_observation_backend = gpu.backend;
         snapshot.gpu_memory_source = gpu.source;
 
         if let Some(note) = gpu.note {
@@ -358,7 +354,7 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
         None
     };
 
-    let gpu = observe_gpu_memory(pid);
+    let gpu = observe_gpu_process(pid);
     let gpu_entry_present_after_shutdown = gpu.pid_observed;
 
     let mut observation_notes = Vec::new();
@@ -396,6 +392,7 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
         verification_window_ms: POST_SHUTDOWN_VERIFICATION_WINDOW_MS,
         gpu_entry_present_after_shutdown,
         gpu_memory_bytes_after_shutdown: gpu.memory_bytes,
+        gpu_check_backend: gpu.backend,
         gpu_check_source: gpu.source,
         observation_notes,
     }
@@ -424,6 +421,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                 resident_regions: vec![],
                 gpu_pid_observed: None,
                 gpu_memory_bytes: None,
+                gpu_observation_backend: None,
                 gpu_memory_source: None,
                 observation_notes: vec![],
             }
@@ -438,6 +436,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
             resident_regions: vec![],
             gpu_pid_observed: None,
             gpu_memory_bytes: None,
+            gpu_observation_backend: None,
             gpu_memory_source: None,
             observation_notes: vec![format!(
                 "Process memory observation via ps failed with status {}.",
@@ -454,6 +453,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
             resident_regions: vec![],
             gpu_pid_observed: None,
             gpu_memory_bytes: None,
+            gpu_observation_backend: None,
             gpu_memory_source: None,
             observation_notes: vec![format!(
                 "Process memory observation via ps was unavailable: {error}."
@@ -535,6 +535,7 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
                         resident_regions: vec![],
                         gpu_pid_observed: None,
                         gpu_memory_bytes: None,
+                        gpu_observation_backend: None,
                         gpu_memory_source: None,
                         observation_notes,
                     }
@@ -549,6 +550,7 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
                     resident_regions: vec![],
                     gpu_pid_observed: None,
                     gpu_memory_bytes: None,
+                    gpu_observation_backend: None,
                     gpu_memory_source: None,
                     observation_notes: vec![format!(
                         "Windows process memory observation returned unparsable JSON: {error}."
@@ -566,6 +568,7 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
             resident_regions: vec![],
             gpu_pid_observed: None,
             gpu_memory_bytes: None,
+            gpu_observation_backend: None,
             gpu_memory_source: None,
             observation_notes: vec![format!(
                 "Windows process memory observation via PowerShell failed with status {}.",
@@ -582,6 +585,7 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
             resident_regions: vec![],
             gpu_pid_observed: None,
             gpu_memory_bytes: None,
+            gpu_observation_backend: None,
             gpu_memory_source: None,
             observation_notes: vec![format!(
                 "Windows process memory observation via PowerShell was unavailable: {error}."
@@ -602,227 +606,12 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
         resident_regions: vec![],
         gpu_pid_observed: None,
         gpu_memory_bytes: None,
+        gpu_observation_backend: None,
         gpu_memory_source: None,
         observation_notes: vec![
             "Process memory observation is not yet implemented on this platform.".to_string(),
         ],
     }
-}
-
-fn observe_gpu_memory(pid: u32) -> RuntimeGpuObservation {
-    let mut prior_notes = Vec::new();
-    let mut prior_sources = Vec::new();
-
-    if let Some(observation) = observe_gpu_memory_compute_apps(pid) {
-        if observation.pid_observed == Some(true) && observation.memory_bytes.is_some() {
-            return observation;
-        }
-
-        if let Some(source) = observation.source {
-            prior_sources.push(source);
-        }
-
-        if let Some(note) = observation.note {
-            prior_notes.push(note);
-        }
-    }
-
-    if let Some(mut observation) = observe_gpu_memory_pmon(pid) {
-        if !prior_sources.is_empty() {
-            observation.source = Some(merge_gpu_sources(
-                &prior_sources,
-                observation.source.as_deref(),
-            ));
-        }
-
-        if !prior_notes.is_empty() {
-            observation.note = Some(match observation.note.take() {
-                Some(note) => format!("{} {}", prior_notes.join(" "), note),
-                None => prior_notes.join(" "),
-            });
-        }
-
-        return observation;
-    }
-
-    RuntimeGpuObservation {
-        memory_bytes: None,
-        source: if prior_sources.is_empty() {
-            None
-        } else {
-            Some(merge_gpu_sources(&prior_sources, None))
-        },
-        pid_observed: None,
-        note: Some(if prior_notes.is_empty() {
-            "GPU memory observation via nvidia-smi was unavailable or inconclusive.".to_string()
-        } else {
-            prior_notes.join(" ")
-        }),
-    }
-}
-
-fn observe_gpu_memory_compute_apps(pid: u32) -> Option<RuntimeGpuObservation> {
-    let output = Command::new("nvidia-smi")
-        .args([
-            "--query-compute-apps=pid,used_gpu_memory",
-            "--format=csv,noheader,nounits",
-        ])
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-
-            for line in stdout.lines() {
-                let mut parts = line.split(',').map(|part| part.trim());
-                let observed_pid = parts.next().and_then(|value| value.parse::<u32>().ok());
-                let memory_raw = parts.next().map(str::trim);
-                let memory_mb = memory_raw.and_then(|value| value.parse::<u64>().ok());
-
-                if observed_pid == Some(pid) {
-                    return Some(RuntimeGpuObservation {
-                        memory_bytes: memory_mb.map(|value| value * 1024 * 1024),
-                        source: Some("nvidia-smi compute-apps".to_string()),
-                        pid_observed: Some(true),
-                        note: if memory_mb.is_none() {
-                            Some(compute_apps_memory_unavailable_note(
-                                memory_raw.unwrap_or("unknown"),
-                            ))
-                        } else {
-                            None
-                        },
-                    });
-                }
-            }
-
-            None
-        }
-        Ok(output) => Some(RuntimeGpuObservation {
-            memory_bytes: None,
-            source: None,
-            pid_observed: None,
-            note: Some(format!(
-                "GPU memory observation via nvidia-smi compute-apps failed with status {}.",
-                output.status
-            )),
-        }),
-        Err(error) => Some(RuntimeGpuObservation {
-            memory_bytes: None,
-            source: None,
-            pid_observed: None,
-            note: Some(format!(
-                "GPU memory observation via nvidia-smi compute-apps was unavailable: {error}."
-            )),
-        }),
-    }
-}
-
-fn observe_gpu_memory_pmon(pid: u32) -> Option<RuntimeGpuObservation> {
-    let output = Command::new("nvidia-smi")
-        .args(["pmon", "-c", "1"])
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-
-            for line in stdout.lines() {
-                let trimmed = line.trim();
-
-                if trimmed.is_empty() || trimmed.starts_with('#') {
-                    continue;
-                }
-
-                let parts: Vec<&str> = trimmed.split_whitespace().collect();
-
-                if parts.len() < 2 {
-                    continue;
-                }
-
-                let observed_pid = parts.get(1).and_then(|value| value.parse::<u32>().ok());
-
-                if observed_pid == Some(pid) {
-                    return Some(RuntimeGpuObservation {
-                        memory_bytes: None,
-                        source: Some("nvidia-smi pmon".to_string()),
-                        pid_observed: Some(true),
-                        note: Some(
-                            "llama-server PID was observed in nvidia-smi pmon, but per-process GPU memory bytes were unavailable from the current NVIDIA tooling path."
-                                .to_string(),
-                        ),
-                    });
-                }
-            }
-
-            Some(RuntimeGpuObservation {
-                memory_bytes: None,
-                source: Some("nvidia-smi compute-apps + pmon".to_string()),
-                pid_observed: Some(false),
-                note: Some(no_matching_gpu_pid_note()),
-            })
-        }
-        Ok(output) => Some(RuntimeGpuObservation {
-            memory_bytes: None,
-            source: None,
-            pid_observed: None,
-            note: Some(format!(
-                "GPU process observation via nvidia-smi pmon failed with status {}.",
-                output.status
-            )),
-        }),
-        Err(error) => Some(RuntimeGpuObservation {
-            memory_bytes: None,
-            source: None,
-            pid_observed: None,
-            note: Some(format!(
-                "GPU process observation via nvidia-smi pmon was unavailable: {error}."
-            )),
-        }),
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn no_matching_gpu_pid_note() -> String {
-    "No matching NVIDIA GPU process entry was found for the llama-server PID. On Windows WDDM systems, per-process VRAM visibility can be incomplete even when GPU offload was requested."
-        .to_string()
-}
-
-#[cfg(not(target_os = "windows"))]
-fn no_matching_gpu_pid_note() -> String {
-    "No matching NVIDIA GPU process entry was found for the llama-server PID at observation time."
-        .to_string()
-}
-
-#[cfg(target_os = "windows")]
-fn compute_apps_memory_unavailable_note(memory_raw: &str) -> String {
-    format!(
-        "llama-server PID was observed in nvidia-smi compute-apps, but per-process GPU memory bytes were unavailable ({memory_raw}). On Windows WDDM systems, used_gpu_memory may remain hidden even when GPU offload is active."
-    )
-}
-
-#[cfg(not(target_os = "windows"))]
-fn compute_apps_memory_unavailable_note(memory_raw: &str) -> String {
-    format!(
-        "llama-server PID was observed in nvidia-smi compute-apps, but per-process GPU memory bytes were unavailable ({memory_raw})."
-    )
-}
-
-fn merge_gpu_sources(prior_sources: &[String], current_source: Option<&str>) -> String {
-    let mut merged = Vec::new();
-
-    for source in prior_sources {
-        if !merged.iter().any(|existing: &String| existing == source) {
-            merged.push(source.clone());
-        }
-    }
-
-    if let Some(source) = current_source {
-        if !merged.iter().any(|existing| existing == source) {
-            merged.push(source.to_string());
-        }
-    }
-
-    merged.join(" + ")
 }
 
 fn observe_process_presence(pid: u32) -> (Option<bool>, Option<String>, Option<String>) {
@@ -932,6 +721,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                     resident_regions: vec![],
                     gpu_pid_observed: None,
                     gpu_memory_bytes: None,
+                    gpu_observation_backend: None,
                     gpu_memory_source: None,
                     observation_notes: vec![],
                 }
@@ -946,6 +736,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                 resident_regions: vec![],
                 gpu_pid_observed: None,
                 gpu_memory_bytes: None,
+                gpu_observation_backend: None,
                 gpu_memory_source: None,
                 observation_notes: vec![format!(
                     "Process memory observation via ps failed with status {}.",
@@ -962,6 +753,7 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                 resident_regions: vec![],
                 gpu_pid_observed: None,
                 gpu_memory_bytes: None,
+                gpu_observation_backend: None,
                 gpu_memory_source: None,
                 observation_notes: vec![format!(
                     "Process memory observation via ps was unavailable: {error}."

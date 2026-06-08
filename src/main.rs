@@ -6,6 +6,7 @@ mod corpus;
 mod corpus_registry;
 mod docs;
 mod embed;
+mod gpu_inspection;
 mod inference;
 mod llama_stream;
 mod logging;

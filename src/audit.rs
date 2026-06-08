@@ -144,6 +144,7 @@ pub struct LlamaRuntimeReport {
     pub resident_regions: Vec<LlamaResidentRegionReport>,
     pub observed_gpu_pid: Option<bool>,
     pub observed_gpu_memory_bytes: Option<u64>,
+    pub gpu_observation_backend: Option<String>,
     pub gpu_memory_source: Option<String>,
     pub process_present_after_shutdown: Option<bool>,
     pub process_check_source: Option<String>,
@@ -158,6 +159,7 @@ pub struct LlamaRuntimeReport {
     pub verification_window_ms: u64,
     pub gpu_entry_present_after_shutdown: Option<bool>,
     pub gpu_memory_bytes_after_shutdown: Option<u64>,
+    pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub inspection_status: String,
     pub ram_inspection_status: String,
@@ -518,6 +520,7 @@ pub fn build_llama_runtime_report(
         resident_regions,
         observed_gpu_pid: usage.gpu_pid_observed,
         observed_gpu_memory_bytes: usage.gpu_memory_bytes,
+        gpu_observation_backend: usage.gpu_observation_backend.clone(),
         gpu_memory_source: usage.gpu_memory_source.clone(),
         process_present_after_shutdown: post_shutdown.process_present_after_shutdown,
         process_check_source: post_shutdown.process_check_source.clone(),
@@ -536,6 +539,7 @@ pub fn build_llama_runtime_report(
         verification_window_ms: post_shutdown.verification_window_ms,
         gpu_entry_present_after_shutdown: post_shutdown.gpu_entry_present_after_shutdown,
         gpu_memory_bytes_after_shutdown: post_shutdown.gpu_memory_bytes_after_shutdown,
+        gpu_check_backend: post_shutdown.gpu_check_backend.clone(),
         gpu_check_source: post_shutdown.gpu_check_source.clone(),
         inspection_status,
         ram_inspection_status,
@@ -605,6 +609,7 @@ pub fn build_failed_launch_llama_runtime_report(
         resident_regions: vec![],
         observed_gpu_pid: None,
         observed_gpu_memory_bytes: None,
+        gpu_observation_backend: None,
         gpu_memory_source: None,
         process_present_after_shutdown: failure
             .post_cleanup_observation
@@ -641,6 +646,7 @@ pub fn build_failed_launch_llama_runtime_report(
         gpu_memory_bytes_after_shutdown: failure
             .post_cleanup_observation
             .gpu_memory_bytes_after_shutdown,
+        gpu_check_backend: failure.post_cleanup_observation.gpu_check_backend.clone(),
         gpu_check_source: failure.post_cleanup_observation.gpu_check_source.clone(),
         inspection_status: "runtime_startup_failed_before_ready".to_string(),
         ram_inspection_status: "ram_inspection_unavailable_due_to_startup_failure".to_string(),

@@ -332,6 +332,9 @@ export function PrivacyReportViewer({
               <span>
                 source: {currentReport.llama_runtime.process_memory_source || "none"}
               </span>
+              <span>
+                gpu backend: {currentReport.llama_runtime.gpu_observation_backend || "none"}
+              </span>
               <span>window: {currentReport.llama_runtime.verification_window_ms} ms</span>
               <span>
                 shutdown: {humanizeSnakeCase(currentReport.llama_runtime.shutdown_method)}
@@ -441,6 +444,10 @@ export function PrivacyReportViewer({
                 value: currentReport.llama_runtime.gpu_memory_source || "none",
               },
               {
+                label: "live gpu backend",
+                value: currentReport.llama_runtime.gpu_observation_backend || "none",
+              },
+              {
                 label: "vmmap summary source",
                 value: currentReport.llama_runtime.vmmap_summary_source || "none",
               },
@@ -513,6 +520,10 @@ export function PrivacyReportViewer({
               {
                 label: "gpu check source",
                 value: currentReport.llama_runtime.gpu_check_source || "none",
+              },
+              {
+                label: "post-shutdown gpu backend",
+                value: currentReport.llama_runtime.gpu_check_backend || "none",
               },
               {
                 label: "post-shutdown vmmap source",

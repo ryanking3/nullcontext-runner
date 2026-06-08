@@ -290,6 +290,7 @@ export type LlamaRuntimeReportData = {
   resident_regions: LlamaResidentRegionReport[];
   observed_gpu_pid?: boolean | null;
   observed_gpu_memory_bytes?: number | null;
+  gpu_observation_backend?: string | null;
   gpu_memory_source?: string | null;
   process_present_after_shutdown?: boolean | null;
   process_check_source?: string | null;
@@ -304,6 +305,7 @@ export type LlamaRuntimeReportData = {
   verification_window_ms: number;
   gpu_entry_present_after_shutdown?: boolean | null;
   gpu_memory_bytes_after_shutdown?: number | null;
+  gpu_check_backend?: string | null;
   gpu_check_source?: string | null;
   inspection_status: string;
   ram_inspection_status: string;
