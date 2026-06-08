@@ -335,6 +335,10 @@ export function PrivacyReportViewer({
               <span>
                 gpu backend: {currentReport.llama_runtime.gpu_observation_backend || "none"}
               </span>
+              <span>
+                gpu live:{" "}
+                {humanizeSnakeCase(currentReport.llama_runtime.live_gpu_visibility_status)}
+              </span>
               <span>window: {currentReport.llama_runtime.verification_window_ms} ms</span>
               <span>
                 shutdown: {humanizeSnakeCase(currentReport.llama_runtime.shutdown_method)}
@@ -436,6 +440,10 @@ export function PrivacyReportViewer({
                   : "none",
               },
               {
+                label: "live gpu visibility",
+                value: humanizeSnakeCase(currentReport.llama_runtime.live_gpu_visibility_status),
+              },
+              {
                 label: "process memory source",
                 value: currentReport.llama_runtime.process_memory_source || "none",
               },
@@ -512,6 +520,12 @@ export function PrivacyReportViewer({
                 value: currentReport.llama_runtime.gpu_memory_bytes_after_shutdown
                   ? formatBytes(currentReport.llama_runtime.gpu_memory_bytes_after_shutdown)
                   : "none",
+              },
+              {
+                label: "post-shutdown gpu visibility",
+                value: humanizeSnakeCase(
+                  currentReport.llama_runtime.post_shutdown_gpu_visibility_status
+                ),
               },
               {
                 label: "process check source",

@@ -144,6 +144,7 @@ pub struct LlamaRuntimeReport {
     pub resident_regions: Vec<LlamaResidentRegionReport>,
     pub observed_gpu_pid: Option<bool>,
     pub observed_gpu_memory_bytes: Option<u64>,
+    pub live_gpu_visibility_status: String,
     pub gpu_observation_backend: Option<String>,
     pub gpu_memory_source: Option<String>,
     pub process_present_after_shutdown: Option<bool>,
@@ -159,6 +160,7 @@ pub struct LlamaRuntimeReport {
     pub verification_window_ms: u64,
     pub gpu_entry_present_after_shutdown: Option<bool>,
     pub gpu_memory_bytes_after_shutdown: Option<u64>,
+    pub post_shutdown_gpu_visibility_status: String,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub inspection_status: String,
@@ -490,6 +492,9 @@ pub fn build_llama_runtime_report(
     };
     let inspection_status = runtime_inspection_status(post_shutdown);
     let ram_inspection_status = ram_inspection_status(post_shutdown);
+    let live_gpu_visibility_status = live_gpu_visibility_status(gpu_offload_requested, usage);
+    let post_shutdown_gpu_visibility_status =
+        post_shutdown_gpu_visibility_status(gpu_offload_requested, post_shutdown);
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
     let inspection_summary = runtime_inspection_summary(
         &inspection_status,
@@ -520,6 +525,7 @@ pub fn build_llama_runtime_report(
         resident_regions,
         observed_gpu_pid: usage.gpu_pid_observed,
         observed_gpu_memory_bytes: usage.gpu_memory_bytes,
+        live_gpu_visibility_status,
         gpu_observation_backend: usage.gpu_observation_backend.clone(),
         gpu_memory_source: usage.gpu_memory_source.clone(),
         process_present_after_shutdown: post_shutdown.process_present_after_shutdown,
@@ -539,6 +545,7 @@ pub fn build_llama_runtime_report(
         verification_window_ms: post_shutdown.verification_window_ms,
         gpu_entry_present_after_shutdown: post_shutdown.gpu_entry_present_after_shutdown,
         gpu_memory_bytes_after_shutdown: post_shutdown.gpu_memory_bytes_after_shutdown,
+        post_shutdown_gpu_visibility_status,
         gpu_check_backend: post_shutdown.gpu_check_backend.clone(),
         gpu_check_source: post_shutdown.gpu_check_source.clone(),
         inspection_status,
@@ -609,6 +616,11 @@ pub fn build_failed_launch_llama_runtime_report(
         resident_regions: vec![],
         observed_gpu_pid: None,
         observed_gpu_memory_bytes: None,
+        live_gpu_visibility_status: if gpu_offload_requested {
+            "gpu_visibility_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
         gpu_observation_backend: None,
         gpu_memory_source: None,
         process_present_after_shutdown: failure
@@ -646,6 +658,11 @@ pub fn build_failed_launch_llama_runtime_report(
         gpu_memory_bytes_after_shutdown: failure
             .post_cleanup_observation
             .gpu_memory_bytes_after_shutdown,
+        post_shutdown_gpu_visibility_status: if gpu_offload_requested {
+            "post_shutdown_gpu_visibility_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
         gpu_check_backend: failure.post_cleanup_observation.gpu_check_backend.clone(),
         gpu_check_source: failure.post_cleanup_observation.gpu_check_source.clone(),
         inspection_status: "runtime_startup_failed_before_ready".to_string(),
@@ -961,6 +978,51 @@ fn ram_inspection_status(post_shutdown: &RuntimePostShutdownObservation) -> Stri
         Some(false) => "resident_memory_not_observed_after_shutdown".to_string(),
         Some(true) => "resident_memory_still_observable_after_shutdown".to_string(),
         None => "ram_inspection_inconclusive".to_string(),
+    }
+}
+
+fn live_gpu_visibility_status(gpu_offload_requested: bool, usage: &RuntimeUsageSnapshot) -> String {
+    if !gpu_offload_requested {
+        return "gpu_offload_not_requested".to_string();
+    }
+
+    match usage.gpu_pid_observed {
+        Some(true) => {
+            if usage.gpu_memory_bytes.is_some() {
+                "gpu_pid_and_allocation_bytes_observed".to_string()
+            } else {
+                "gpu_pid_observed_but_allocation_bytes_unavailable".to_string()
+            }
+        }
+        Some(false) => "gpu_pid_not_observed".to_string(),
+        None => "gpu_visibility_unavailable".to_string(),
+    }
+}
+
+fn post_shutdown_gpu_visibility_status(
+    gpu_offload_requested: bool,
+    post_shutdown: &RuntimePostShutdownObservation,
+) -> String {
+    if !gpu_offload_requested {
+        return "gpu_offload_not_requested".to_string();
+    }
+
+    match post_shutdown.gpu_entry_present_after_shutdown {
+        Some(true) => {
+            if post_shutdown.gpu_memory_bytes_after_shutdown.is_some() {
+                "post_shutdown_gpu_pid_and_allocation_bytes_observed".to_string()
+            } else {
+                "post_shutdown_gpu_pid_observed_but_allocation_bytes_unavailable".to_string()
+            }
+        }
+        Some(false) => {
+            if gpu_post_shutdown_visibility_limited(post_shutdown) {
+                "post_shutdown_gpu_pid_not_observed_but_visibility_limited".to_string()
+            } else {
+                "post_shutdown_gpu_pid_not_observed".to_string()
+            }
+        }
+        None => "post_shutdown_gpu_visibility_unavailable".to_string(),
     }
 }
 
