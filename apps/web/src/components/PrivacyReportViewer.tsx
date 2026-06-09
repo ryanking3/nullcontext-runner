@@ -587,6 +587,80 @@ export function PrivacyReportViewer({
 
           <details className="report-detail" open>
             <summary>
+              <span>vram cleanup strategy</span>
+              <span className="pill neutral">
+                {humanizeSnakeCase(currentReport.llama_runtime.vram_cleanup.evidence_outcome)}
+              </span>
+            </summary>
+
+            <div className="report-risk-block">
+              <p>{currentReport.llama_runtime.vram_cleanup.summary}</p>
+            </div>
+
+            <ReportGrid
+              entries={[
+                {
+                  label: "strategy",
+                  value: currentReport.llama_runtime.vram_cleanup.strategy_label,
+                },
+                {
+                  label: "strategy id",
+                  value: currentReport.llama_runtime.vram_cleanup.strategy_id,
+                },
+                {
+                  label: "kind",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.strategy_kind
+                  ),
+                },
+                {
+                  label: "implementation",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.implementation_status
+                  ),
+                },
+                {
+                  label: "support",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.support_status
+                  ),
+                },
+                {
+                  label: "attempt",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.attempt_status
+                  ),
+                },
+                {
+                  label: "activation timing",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.activation_timing
+                  ),
+                },
+                {
+                  label: "evidence outcome",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.evidence_outcome
+                  ),
+                },
+                {
+                  label: "expected scope",
+                  value: currentReport.llama_runtime.vram_cleanup.expected_effect_scope,
+                },
+              ]}
+            />
+
+            {currentReport.llama_runtime.vram_cleanup.notes.length > 0 && (
+              <div className="report-risk-block">
+                {currentReport.llama_runtime.vram_cleanup.notes.map((note) => (
+                  <p key={note}>{note}</p>
+                ))}
+              </div>
+            )}
+          </details>
+
+          <details className="report-detail" open>
+            <summary>
               <span>runtime introspection capabilities</span>
               <span className="pill warning">
                 {humanizeSnakeCase(

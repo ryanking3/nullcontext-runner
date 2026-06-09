@@ -175,7 +175,24 @@ pub struct LlamaRuntimeReport {
     pub cleanup_summary: String,
     pub residual_risk_summary: String,
     pub introspection: LlamaRuntimeIntrospectionReport,
+    #[serde(default = "default_vram_cleanup_strategy_report")]
+    pub vram_cleanup: VramCleanupStrategyReport,
     pub memory_domains: Vec<LlamaMemoryDomainReport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VramCleanupStrategyReport {
+    pub strategy_id: String,
+    pub strategy_label: String,
+    pub strategy_kind: String,
+    pub implementation_status: String,
+    pub support_status: String,
+    pub attempt_status: String,
+    pub activation_timing: String,
+    pub evidence_outcome: String,
+    pub expected_effect_scope: String,
+    pub summary: String,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -503,6 +520,11 @@ pub fn build_llama_runtime_report(
     let post_shutdown_gpu_visibility_status =
         post_shutdown_gpu_visibility_status(gpu_offload_requested, post_shutdown);
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
+    let vram_cleanup = build_vram_cleanup_strategy_report(
+        gpu_offload_requested,
+        &vram_inspection_status,
+        post_shutdown,
+    );
     let inspection_summary = runtime_inspection_summary(
         &inspection_status,
         &ram_inspection_status,
@@ -583,6 +605,7 @@ pub fn build_llama_runtime_report(
                 .to_string()
         },
         introspection,
+        vram_cleanup,
         memory_domains,
     }
 }
@@ -598,6 +621,7 @@ pub fn build_failed_launch_llama_runtime_report(
     } else {
         "failed"
     };
+    let vram_cleanup = build_failed_start_vram_cleanup_strategy_report(gpu_offload_requested);
     let introspection = build_llama_runtime_introspection_report(
         &config.llama_path,
         true,
@@ -744,6 +768,7 @@ pub fn build_failed_launch_llama_runtime_report(
             "Because runtime startup failed before readiness, allocator state and RAM residency were not inspected through the normal shutdown path.".to_string()
         },
         introspection,
+        vram_cleanup,
         memory_domains: vec![
             LlamaMemoryDomainReport {
                 domain: "llama_process_runtime".to_string(),
@@ -1047,6 +1072,140 @@ fn post_shutdown_gpu_visibility_status(
             }
         }
         None => "post_shutdown_gpu_visibility_unavailable".to_string(),
+    }
+}
+
+fn build_vram_cleanup_strategy_report(
+    gpu_offload_requested: bool,
+    vram_inspection_status: &str,
+    post_shutdown: &RuntimePostShutdownObservation,
+) -> VramCleanupStrategyReport {
+    if !gpu_offload_requested {
+        return VramCleanupStrategyReport {
+            strategy_id: "gpu_offload_not_requested".to_string(),
+            strategy_label: "GPU Offload Not Requested".to_string(),
+            strategy_kind: "not_applicable".to_string(),
+            implementation_status: "not_applicable".to_string(),
+            support_status: "not_applicable".to_string(),
+            attempt_status: "not_applicable".to_string(),
+            activation_timing: "none".to_string(),
+            evidence_outcome: "not_applicable".to_string(),
+            expected_effect_scope: "No VRAM cleanup strategy was relevant because llama.cpp GPU offload was not requested for this session."
+                .to_string(),
+            summary: "NullContext did not need a VRAM cleanup strategy because the session did not request GPU offload."
+                .to_string(),
+            notes: vec![],
+        };
+    }
+
+    VramCleanupStrategyReport {
+        strategy_id: "baseline_no_special_vram_cleanup".to_string(),
+        strategy_label: "Baseline Observation Only".to_string(),
+        strategy_kind: "baseline".to_string(),
+        implementation_status: "strategy_model_defined".to_string(),
+        support_status: "supported".to_string(),
+        attempt_status: "baseline_only_no_special_strategy".to_string(),
+        activation_timing: "post_shutdown_observation_only".to_string(),
+        evidence_outcome: baseline_vram_cleanup_evidence_outcome(vram_inspection_status),
+        expected_effect_scope:
+            "This baseline records what VRAM evidence looked like after normal runtime shutdown without any extra cleanup strategy such as forced context teardown, allocator churn, or device reset."
+                .to_string(),
+        summary: format!(
+            "NullContext recorded baseline VRAM evidence over a {} ms post-shutdown window without applying a special VRAM cleanup strategy.",
+            post_shutdown.verification_window_ms
+        ),
+        notes: vec![
+            "Process termination and post-shutdown inspection were recorded, but no experimental VRAM cleanup action was attempted yet."
+                .to_string(),
+            "This baseline entry exists so later strategies can be compared against the same report contract."
+                .to_string(),
+        ],
+    }
+}
+
+fn default_vram_cleanup_strategy_report() -> VramCleanupStrategyReport {
+    VramCleanupStrategyReport {
+        strategy_id: "legacy_report_no_vram_cleanup_section".to_string(),
+        strategy_label: "Legacy Report".to_string(),
+        strategy_kind: "unknown".to_string(),
+        implementation_status: "section_missing_in_legacy_report".to_string(),
+        support_status: "unknown".to_string(),
+        attempt_status: "unknown".to_string(),
+        activation_timing: "unknown".to_string(),
+        evidence_outcome: "legacy_report_unavailable".to_string(),
+        expected_effect_scope:
+            "This report was created before NullContext recorded structured VRAM cleanup strategy data."
+                .to_string(),
+        summary:
+            "Structured VRAM cleanup strategy reporting was not present in this older report."
+                .to_string(),
+        notes: vec![
+            "Open a newer session report to compare baseline or experimental VRAM cleanup outcomes."
+                .to_string(),
+        ],
+    }
+}
+
+fn build_failed_start_vram_cleanup_strategy_report(
+    gpu_offload_requested: bool,
+) -> VramCleanupStrategyReport {
+    if !gpu_offload_requested {
+        return VramCleanupStrategyReport {
+            strategy_id: "gpu_offload_not_requested".to_string(),
+            strategy_label: "GPU Offload Not Requested".to_string(),
+            strategy_kind: "not_applicable".to_string(),
+            implementation_status: "not_applicable".to_string(),
+            support_status: "not_applicable".to_string(),
+            attempt_status: "not_applicable".to_string(),
+            activation_timing: "none".to_string(),
+            evidence_outcome: "not_applicable".to_string(),
+            expected_effect_scope: "No VRAM cleanup strategy was relevant because llama.cpp GPU offload was not requested for this failed-start session."
+                .to_string(),
+            summary: "No VRAM cleanup strategy was needed because GPU offload was not requested."
+                .to_string(),
+            notes: vec![],
+        };
+    }
+
+    VramCleanupStrategyReport {
+        strategy_id: "baseline_no_special_vram_cleanup".to_string(),
+        strategy_label: "Baseline Observation Only".to_string(),
+        strategy_kind: "baseline".to_string(),
+        implementation_status: "strategy_model_defined".to_string(),
+        support_status: "supported".to_string(),
+        attempt_status: "unattempted_due_to_startup_failure".to_string(),
+        activation_timing: "post_shutdown_observation_only".to_string(),
+        evidence_outcome: "inconclusive_due_to_startup_failure".to_string(),
+        expected_effect_scope:
+            "This baseline would normally describe VRAM evidence after normal shutdown without an extra cleanup strategy, but startup failed before the runtime became healthy."
+                .to_string(),
+        summary: "NullContext defined the VRAM cleanup strategy model, but this run never reached a normal baseline cleanup stage because startup failed before readiness."
+            .to_string(),
+        notes: vec![
+            "No special VRAM cleanup strategy was attempted.".to_string(),
+            "Startup failure prevented a normal baseline comparison for post-shutdown VRAM evidence."
+                .to_string(),
+        ],
+    }
+}
+
+fn baseline_vram_cleanup_evidence_outcome(vram_inspection_status: &str) -> String {
+    match vram_inspection_status {
+        "gpu_entry_not_observed_after_shutdown" => {
+            "baseline_evidence_recorded_not_observed".to_string()
+        }
+        "gpu_entry_not_observed_after_shutdown_but_visibility_limited" => {
+            "baseline_evidence_visibility_limited".to_string()
+        }
+        "gpu_entry_observed_during_post_shutdown_window" => {
+            "baseline_evidence_explicit_vram_residency_observed".to_string()
+        }
+        "gpu_pid_observed_during_post_shutdown_window_but_memory_bytes_unavailable" => {
+            "baseline_evidence_pid_visible_bytes_unavailable".to_string()
+        }
+        "gpu_inspection_unavailable" => "baseline_evidence_inspection_unavailable".to_string(),
+        "gpu_offload_not_requested" => "not_applicable".to_string(),
+        _ => "baseline_evidence_inconclusive".to_string(),
     }
 }
 

@@ -3,6 +3,7 @@ import type {
   CorpusIngestionReport,
   PrivacyReportData,
   StreamPayload,
+  VramCleanupStrategyReport,
 } from "./appTypes";
 
 export function statusClass(status: string): string {
@@ -243,10 +244,36 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
   }
 
   try {
-    return JSON.parse(raw) as PrivacyReportData;
+    const parsed = JSON.parse(raw) as PrivacyReportData;
+
+    if (parsed.llama_runtime && !parsed.llama_runtime.vram_cleanup) {
+      parsed.llama_runtime.vram_cleanup = legacyVramCleanupStrategyReport();
+    }
+
+    return parsed;
   } catch {
     return null;
   }
+}
+
+function legacyVramCleanupStrategyReport(): VramCleanupStrategyReport {
+  return {
+    strategy_id: "legacy_report_no_vram_cleanup_section",
+    strategy_label: "Legacy Report",
+    strategy_kind: "unknown",
+    implementation_status: "section_missing_in_legacy_report",
+    support_status: "unknown",
+    attempt_status: "unknown",
+    activation_timing: "unknown",
+    evidence_outcome: "legacy_report_unavailable",
+    expected_effect_scope:
+      "This report was created before NullContext recorded structured VRAM cleanup strategy data.",
+    summary:
+      "Structured VRAM cleanup strategy reporting was not present in this older report.",
+    notes: [
+      "Open a newer session report to compare baseline or experimental VRAM cleanup outcomes.",
+    ],
+  };
 }
 
 export function parseCorpusReport(raw: string): CorpusIngestionReport | null {

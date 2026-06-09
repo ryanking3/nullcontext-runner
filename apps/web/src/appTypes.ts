@@ -269,6 +269,20 @@ export type LlamaRuntimeIntrospectionEventReport = {
   details: string;
 };
 
+export type VramCleanupStrategyReport = {
+  strategy_id: string;
+  strategy_label: string;
+  strategy_kind: string;
+  implementation_status: string;
+  support_status: string;
+  attempt_status: string;
+  activation_timing: string;
+  evidence_outcome: string;
+  expected_effect_scope: string;
+  summary: string;
+  notes: string[];
+};
+
 export type LlamaRuntimeReportData = {
   runtime_kind: string;
   runtime_pid?: number | null;
@@ -321,6 +335,7 @@ export type LlamaRuntimeReportData = {
   cleanup_summary: string;
   residual_risk_summary: string;
   introspection: LlamaRuntimeIntrospectionReport;
+  vram_cleanup: VramCleanupStrategyReport;
   memory_domains: LlamaMemoryDomainReport[];
 };
 
