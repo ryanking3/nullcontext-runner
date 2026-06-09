@@ -1077,20 +1077,37 @@ fn post_shutdown_gpu_visibility_status(
     gpu_offload_requested: bool,
     post_shutdown: &RuntimePostShutdownObservation,
 ) -> String {
+    post_shutdown_gpu_visibility_status_from_gpu_window(
+        gpu_offload_requested,
+        post_shutdown.gpu_entry_present_after_shutdown,
+        post_shutdown.gpu_memory_bytes_after_shutdown,
+        post_shutdown.gpu_check_backend.as_deref(),
+    )
+}
+
+fn post_shutdown_gpu_visibility_status_from_gpu_window(
+    gpu_offload_requested: bool,
+    gpu_entry_present: Option<bool>,
+    gpu_memory_bytes: Option<u64>,
+    gpu_check_backend: Option<&str>,
+) -> String {
     if !gpu_offload_requested {
         return "gpu_offload_not_requested".to_string();
     }
 
-    match post_shutdown.gpu_entry_present_after_shutdown {
+    match gpu_entry_present {
         Some(true) => {
-            if post_shutdown.gpu_memory_bytes_after_shutdown.is_some() {
+            if gpu_memory_bytes.is_some() {
                 "post_shutdown_gpu_pid_and_allocation_bytes_observed".to_string()
             } else {
                 "post_shutdown_gpu_pid_observed_but_allocation_bytes_unavailable".to_string()
             }
         }
         Some(false) => {
-            if gpu_post_shutdown_visibility_limited(post_shutdown) {
+            if gpu_post_shutdown_visibility_limited_from_backend(
+                gpu_entry_present,
+                gpu_check_backend,
+            ) {
                 "post_shutdown_gpu_pid_not_observed_but_visibility_limited".to_string()
             } else {
                 "post_shutdown_gpu_pid_not_observed".to_string()
@@ -1126,6 +1143,50 @@ fn build_vram_cleanup_strategy_report(
 
     let baseline_snapshot =
         build_vram_cleanup_evidence_snapshot(vram_inspection_status, post_shutdown);
+
+    if let Some(strategy_window) = &post_shutdown.vram_cleanup_strategy_window {
+        let strategy_snapshot =
+            build_vram_cleanup_strategy_snapshot(gpu_offload_requested, strategy_window);
+        let comparison =
+            build_experimental_vram_cleanup_comparison_report(baseline_snapshot, strategy_snapshot);
+        let evidence_outcome = strategy_evidence_outcome(&comparison.evidence_improvement_status);
+
+        return VramCleanupStrategyReport {
+            strategy_id: post_shutdown
+                .vram_cleanup_strategy_id
+                .clone()
+                .unwrap_or_else(|| "post_shutdown_cooldown_recheck".to_string()),
+            strategy_label: "Post-Shutdown Cooldown Recheck".to_string(),
+            strategy_kind: "experimental_timing_recheck".to_string(),
+            implementation_status: "experimental_strategy_implemented".to_string(),
+            support_status: "supported".to_string(),
+            attempt_status: "strategy_attempted".to_string(),
+            activation_timing: "after_baseline_post_shutdown_window".to_string(),
+            evidence_outcome,
+            expected_effect_scope:
+                "This experimental strategy waits for an additional cooldown period after the baseline post-shutdown window, then re-checks GPU residency to see whether driver-visible VRAM evidence decays without a more invasive cleanup action."
+                    .to_string(),
+            summary: format!(
+                "NullContext ran experimental VRAM cleanup strategy {} by waiting {} ms after the baseline window, then re-checking GPU residency over a {} ms strategy window. {}",
+                post_shutdown
+                    .vram_cleanup_strategy_id
+                    .as_deref()
+                    .unwrap_or("post_shutdown_cooldown_recheck"),
+                post_shutdown
+                    .vram_cleanup_strategy_cooldown_ms
+                    .unwrap_or(0),
+                strategy_window.verification_window_ms,
+                comparison.summary.as_str()
+            ),
+            comparison,
+            notes: vec![
+                "This is a timing-based experimental strategy, not proof of allocator- or driver-level VRAM sanitization."
+                    .to_string(),
+                "A stronger future strategy may need explicit context teardown, allocator churn, or lower-level CUDA/NVML control."
+                    .to_string(),
+            ],
+        };
+    }
 
     VramCleanupStrategyReport {
         strategy_id: "baseline_no_special_vram_cleanup".to_string(),
@@ -1244,6 +1305,27 @@ fn baseline_vram_cleanup_evidence_outcome(vram_inspection_status: &str) -> Strin
     }
 }
 
+fn strategy_evidence_outcome(evidence_improvement_status: &str) -> String {
+    match evidence_improvement_status {
+        "evidence_improved_pid_no_longer_observed_after_strategy" => {
+            "strategy_evidence_improved".to_string()
+        }
+        "evidence_improved_peak_bytes_lower_but_residency_still_observed" => {
+            "strategy_evidence_improved_but_residency_still_visible".to_string()
+        }
+        "evidence_improved_bytes_no_longer_visible_but_pid_still_observed" => {
+            "strategy_evidence_improved_but_pid_still_visible".to_string()
+        }
+        "evidence_unchanged_pid_still_observed" | "evidence_unchanged_not_observed" => {
+            "strategy_evidence_unchanged".to_string()
+        }
+        "evidence_worsened_gpu_visibility_increased_after_strategy" => {
+            "strategy_evidence_worsened".to_string()
+        }
+        _ => "strategy_evidence_inconclusive".to_string(),
+    }
+}
+
 fn build_vram_cleanup_evidence_snapshot(
     vram_inspection_status: &str,
     post_shutdown: &RuntimePostShutdownObservation,
@@ -1260,6 +1342,32 @@ fn build_vram_cleanup_evidence_snapshot(
         gpu_samples_collected: post_shutdown.gpu_samples_collected_after_shutdown,
         gpu_samples_with_pid_observed: post_shutdown.gpu_samples_with_pid_observed_after_shutdown,
         gpu_last_pid_observed_at_ms: post_shutdown.gpu_last_pid_observed_at_ms,
+    }
+}
+
+fn build_vram_cleanup_strategy_snapshot(
+    gpu_offload_requested: bool,
+    strategy_window: &crate::runtime::RuntimeGpuObservationWindow,
+) -> VramCleanupEvidenceSnapshot {
+    VramCleanupEvidenceSnapshot {
+        vram_inspection_status: vram_inspection_status_from_gpu_window(
+            gpu_offload_requested,
+            strategy_window.gpu_entry_present,
+            strategy_window.gpu_memory_bytes,
+            strategy_window.gpu_check_backend.as_deref(),
+        ),
+        post_shutdown_gpu_visibility_status: post_shutdown_gpu_visibility_status_from_gpu_window(
+            gpu_offload_requested,
+            strategy_window.gpu_entry_present,
+            strategy_window.gpu_memory_bytes,
+            strategy_window.gpu_check_backend.as_deref(),
+        ),
+        gpu_entry_observed: strategy_window.gpu_entry_present,
+        gpu_memory_bytes: strategy_window.gpu_memory_bytes,
+        gpu_peak_memory_bytes: strategy_window.gpu_peak_memory_bytes,
+        gpu_samples_collected: strategy_window.gpu_samples_collected,
+        gpu_samples_with_pid_observed: strategy_window.gpu_samples_with_pid_observed,
+        gpu_last_pid_observed_at_ms: strategy_window.gpu_last_pid_observed_at_ms,
     }
 }
 
@@ -1281,6 +1389,143 @@ fn build_baseline_only_vram_cleanup_comparison_report(
             "A future experimental strategy should reuse this comparison shape and report whether evidence improved, stayed unchanged, or remained inconclusive."
                 .to_string(),
         ],
+    }
+}
+
+fn compare_vram_cleanup_snapshots(
+    baseline: &VramCleanupEvidenceSnapshot,
+    current: &VramCleanupEvidenceSnapshot,
+) -> String {
+    if snapshot_is_inconclusive(current) || snapshot_is_inconclusive(baseline) {
+        return "evidence_inconclusive_visibility_limited_or_unavailable".to_string();
+    }
+
+    match (baseline.gpu_entry_observed, current.gpu_entry_observed) {
+        (Some(true), Some(false)) => {
+            return "evidence_improved_pid_no_longer_observed_after_strategy".to_string();
+        }
+        (Some(false), Some(false)) => return "evidence_unchanged_not_observed".to_string(),
+        (Some(false), Some(true)) | (None, Some(true)) => {
+            return "evidence_worsened_gpu_visibility_increased_after_strategy".to_string();
+        }
+        _ => {}
+    }
+
+    if baseline.gpu_entry_observed == Some(true) && current.gpu_entry_observed == Some(true) {
+        match (
+            baseline.gpu_peak_memory_bytes,
+            current.gpu_peak_memory_bytes,
+        ) {
+            (Some(before), Some(after)) if after < before => {
+                return "evidence_improved_peak_bytes_lower_but_residency_still_observed"
+                    .to_string();
+            }
+            (Some(before), Some(after)) if after > before => {
+                return "evidence_worsened_peak_bytes_higher_after_strategy".to_string();
+            }
+            _ => {}
+        }
+
+        if baseline.gpu_memory_bytes.is_some() && current.gpu_memory_bytes.is_none() {
+            return "evidence_improved_bytes_no_longer_visible_but_pid_still_observed".to_string();
+        }
+
+        return "evidence_unchanged_pid_still_observed".to_string();
+    }
+
+    "evidence_inconclusive".to_string()
+}
+
+fn snapshot_is_inconclusive(snapshot: &VramCleanupEvidenceSnapshot) -> bool {
+    snapshot
+        .vram_inspection_status
+        .contains("visibility_limited")
+        || snapshot.vram_inspection_status.contains("unavailable")
+        || snapshot.vram_inspection_status.contains("inconclusive")
+        || snapshot
+            .post_shutdown_gpu_visibility_status
+            .contains("visibility_limited")
+        || snapshot
+            .post_shutdown_gpu_visibility_status
+            .contains("unavailable")
+}
+
+fn vram_cleanup_comparison_summary(evidence_improvement_status: &str) -> String {
+    match evidence_improvement_status {
+        "evidence_improved_pid_no_longer_observed_after_strategy" => {
+            "Compared with the baseline window, the strategy recheck no longer observed a matching GPU PID. This is stronger post-shutdown evidence, but not proof of full VRAM sanitization."
+                .to_string()
+        }
+        "evidence_improved_peak_bytes_lower_but_residency_still_observed" => {
+            "The strategy recheck still observed GPU residency, but with lower peak byte visibility than the baseline window."
+                .to_string()
+        }
+        "evidence_improved_bytes_no_longer_visible_but_pid_still_observed" => {
+            "The strategy recheck still observed the GPU PID, but per-process GPU memory bytes were no longer visible."
+                .to_string()
+        }
+        "evidence_unchanged_not_observed" => {
+            "Neither the baseline nor the strategy recheck observed a matching GPU PID. The strategy did not improve the already-clear driver-visible evidence."
+                .to_string()
+        }
+        "evidence_unchanged_pid_still_observed" => {
+            "The strategy recheck still observed GPU residency with no meaningful improvement over the baseline window."
+                .to_string()
+        }
+        "evidence_worsened_gpu_visibility_increased_after_strategy" => {
+            "The strategy recheck surfaced more GPU visibility than the baseline window, so this experimental strategy did not improve the observed outcome."
+                .to_string()
+        }
+        "evidence_worsened_peak_bytes_higher_after_strategy" => {
+            "The strategy recheck still observed GPU residency and reported higher peak byte visibility than the baseline window."
+                .to_string()
+        }
+        _ => "The strategy comparison remained inconclusive because GPU visibility stayed limited or the evidence did not support a clear improvement claim."
+            .to_string(),
+    }
+}
+
+fn vram_cleanup_comparison_notes(
+    baseline: &VramCleanupEvidenceSnapshot,
+    current: &VramCleanupEvidenceSnapshot,
+) -> Vec<String> {
+    vec![
+        format!(
+            "Baseline window: {} sample(s), {} GPU-positive sample(s), peak bytes {}.",
+            baseline.gpu_samples_collected,
+            baseline.gpu_samples_with_pid_observed,
+            baseline
+                .gpu_peak_memory_bytes
+                .map(|value| format!("{value}"))
+                .unwrap_or_else(|| "unknown".to_string())
+        ),
+        format!(
+            "Strategy window: {} sample(s), {} GPU-positive sample(s), peak bytes {}.",
+            current.gpu_samples_collected,
+            current.gpu_samples_with_pid_observed,
+            current
+                .gpu_peak_memory_bytes
+                .map(|value| format!("{value}"))
+                .unwrap_or_else(|| "unknown".to_string())
+        ),
+    ]
+}
+
+fn build_experimental_vram_cleanup_comparison_report(
+    baseline_snapshot: VramCleanupEvidenceSnapshot,
+    current_snapshot: VramCleanupEvidenceSnapshot,
+) -> VramCleanupComparisonReport {
+    let evidence_improvement_status =
+        compare_vram_cleanup_snapshots(&baseline_snapshot, &current_snapshot);
+
+    VramCleanupComparisonReport {
+        comparison_status: "baseline_compared_to_experimental_strategy".to_string(),
+        current_run_role: "experimental_strategy_result".to_string(),
+        summary: vram_cleanup_comparison_summary(&evidence_improvement_status),
+        notes: vram_cleanup_comparison_notes(&baseline_snapshot, &current_snapshot),
+        evidence_improvement_status,
+        baseline_snapshot,
+        current_snapshot,
     }
 }
 
@@ -1370,20 +1615,37 @@ fn vram_inspection_status(
     gpu_offload_requested: bool,
     post_shutdown: &RuntimePostShutdownObservation,
 ) -> String {
+    vram_inspection_status_from_gpu_window(
+        gpu_offload_requested,
+        post_shutdown.gpu_entry_present_after_shutdown,
+        post_shutdown.gpu_memory_bytes_after_shutdown,
+        post_shutdown.gpu_check_backend.as_deref(),
+    )
+}
+
+fn vram_inspection_status_from_gpu_window(
+    gpu_offload_requested: bool,
+    gpu_entry_present: Option<bool>,
+    gpu_memory_bytes: Option<u64>,
+    gpu_check_backend: Option<&str>,
+) -> String {
     if !gpu_offload_requested {
         return "gpu_offload_not_requested".to_string();
     }
 
-    match post_shutdown.gpu_entry_present_after_shutdown {
+    match gpu_entry_present {
         Some(false) => {
-            if gpu_post_shutdown_visibility_limited(post_shutdown) {
+            if gpu_post_shutdown_visibility_limited_from_backend(
+                gpu_entry_present,
+                gpu_check_backend,
+            ) {
                 "gpu_entry_not_observed_after_shutdown_but_visibility_limited".to_string()
             } else {
                 "gpu_entry_not_observed_after_shutdown".to_string()
             }
         }
         Some(true) => {
-            if post_shutdown.gpu_memory_bytes_after_shutdown.is_some() {
+            if gpu_memory_bytes.is_some() {
                 "gpu_entry_observed_during_post_shutdown_window".to_string()
             } else {
                 "gpu_pid_observed_during_post_shutdown_window_but_memory_bytes_unavailable"
@@ -1451,11 +1713,19 @@ fn runtime_inspection_summary(
 }
 
 fn gpu_post_shutdown_visibility_limited(post_shutdown: &RuntimePostShutdownObservation) -> bool {
+    gpu_post_shutdown_visibility_limited_from_backend(
+        post_shutdown.gpu_entry_present_after_shutdown,
+        post_shutdown.gpu_check_backend.as_deref(),
+    )
+}
+
+fn gpu_post_shutdown_visibility_limited_from_backend(
+    gpu_entry_present: Option<bool>,
+    gpu_check_backend: Option<&str>,
+) -> bool {
     cfg!(target_os = "windows")
-        && post_shutdown.gpu_entry_present_after_shutdown == Some(false)
-        && post_shutdown
-            .gpu_check_backend
-            .as_deref()
+        && gpu_entry_present == Some(false)
+        && gpu_check_backend
             .map(|backend| backend.contains("pmon"))
             .unwrap_or(false)
 }

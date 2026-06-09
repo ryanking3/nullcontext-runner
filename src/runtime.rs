@@ -72,6 +72,23 @@ pub struct RuntimePostShutdownObservation {
     pub gpu_last_pid_observed_at_ms: Option<u64>,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
+    pub vram_cleanup_strategy_id: Option<String>,
+    pub vram_cleanup_strategy_cooldown_ms: Option<u64>,
+    pub vram_cleanup_strategy_window: Option<RuntimeGpuObservationWindow>,
+    pub observation_notes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeGpuObservationWindow {
+    pub verification_window_ms: u64,
+    pub gpu_entry_present: Option<bool>,
+    pub gpu_memory_bytes: Option<u64>,
+    pub gpu_peak_memory_bytes: Option<u64>,
+    pub gpu_samples_collected: u32,
+    pub gpu_samples_with_pid_observed: u32,
+    pub gpu_last_pid_observed_at_ms: Option<u64>,
+    pub gpu_check_backend: Option<String>,
+    pub gpu_check_source: Option<String>,
     pub observation_notes: Vec<String>,
 }
 
@@ -106,6 +123,9 @@ pub struct RuntimeLaunchFailure {
 
 const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
 const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
+const VRAM_CLEANUP_STRATEGY_ID: &str = "post_shutdown_cooldown_recheck";
+const VRAM_CLEANUP_STRATEGY_COOLDOWN_MS: u64 = 1500;
+const VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS: u64 = 1000;
 
 impl RuntimePostShutdownGpuWindowObservation {
     fn record_sample(
@@ -135,6 +155,42 @@ impl RuntimePostShutdownGpuWindowObservation {
         push_unique_label(&mut self.sources, sample.source);
         push_unique_label(&mut self.notes, sample.note);
     }
+
+    fn finalize(self, verification_window_ms: u64) -> RuntimeGpuObservationWindow {
+        let mut observation_notes = self.notes;
+
+        if self.sample_count > 0 {
+            observation_notes.push(format!(
+                "GPU inspection collected {} sample(s) over the {} ms window; {} sample(s) observed a matching GPU PID.",
+                self.sample_count, verification_window_ms, self.samples_with_pid_observed
+            ));
+        }
+
+        RuntimeGpuObservationWindow {
+            verification_window_ms,
+            gpu_entry_present: if self.any_sample_collected {
+                Some(self.any_pid_observed)
+            } else {
+                None
+            },
+            gpu_memory_bytes: self.last_memory_bytes,
+            gpu_peak_memory_bytes: self.peak_memory_bytes,
+            gpu_samples_collected: self.sample_count,
+            gpu_samples_with_pid_observed: self.samples_with_pid_observed,
+            gpu_last_pid_observed_at_ms: self.last_pid_observed_at_ms,
+            gpu_check_backend: if self.backends.is_empty() {
+                None
+            } else {
+                Some(merge_observation_labels(&self.backends))
+            },
+            gpu_check_source: if self.sources.is_empty() {
+                None
+            } else {
+                Some(merge_observation_labels(&self.sources))
+            },
+            observation_notes,
+        }
+    }
 }
 
 fn push_unique_label(target: &mut Vec<String>, value: Option<String>) {
@@ -149,6 +205,10 @@ fn push_unique_label(target: &mut Vec<String>, value: Option<String>) {
 
 fn merge_observation_labels(labels: &[String]) -> String {
     labels.join(" + ")
+}
+
+fn gpu_offload_requested(config: &SessionConfig) -> bool {
+    config.gpu_layers.parse::<u32>().unwrap_or(0) > 0
 }
 
 impl ManagedRuntime {
@@ -174,7 +234,7 @@ impl ManagedRuntime {
         let mut runtime = Self { child, base_url };
 
         if let Err(error) = runtime.wait_until_ready(Duration::from_secs(60)) {
-            return Err(runtime.build_failed_launch_error(error));
+            return Err(runtime.build_failed_launch_error(error, gpu_offload_requested(config)));
         }
 
         stdout_line(format!("Runtime endpoint: {}", runtime.base_url));
@@ -291,10 +351,14 @@ impl ManagedRuntime {
         )
     }
 
-    fn build_failed_launch_error(&mut self, startup_error: anyhow::Error) -> anyhow::Error {
+    fn build_failed_launch_error(
+        &mut self,
+        startup_error: anyhow::Error,
+        gpu_offload_requested: bool,
+    ) -> anyhow::Error {
         let pid = self.pid();
         let cleanup_result = self.shutdown();
-        let post_cleanup_observation = observe_post_shutdown(pid);
+        let post_cleanup_observation = observe_post_shutdown(pid, gpu_offload_requested);
         let stdout = read_child_stdout(&mut self.child);
         let stderr = read_child_stderr(&mut self.child);
         let introspection_signals = parse_runtime_introspection_signals(&stdout, &stderr);
@@ -384,7 +448,10 @@ fn reserve_local_runtime_port() -> Result<u16> {
     Ok(port)
 }
 
-pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
+pub fn observe_post_shutdown(
+    pid: u32,
+    gpu_offload_requested: bool,
+) -> RuntimePostShutdownObservation {
     let started_at = Instant::now();
     let verification_window = Duration::from_millis(POST_SHUTDOWN_VERIFICATION_WINDOW_MS);
     let mut process_present_after_shutdown = None;
@@ -414,6 +481,19 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
         ));
     }
 
+    let baseline_gpu_window = gpu_window.finalize(POST_SHUTDOWN_VERIFICATION_WINDOW_MS);
+
+    let vram_cleanup_strategy_window = if gpu_offload_requested {
+        thread::sleep(Duration::from_millis(VRAM_CLEANUP_STRATEGY_COOLDOWN_MS));
+        Some(observe_gpu_window(
+            pid,
+            VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS,
+            POST_SHUTDOWN_VERIFICATION_INTERVAL_MS,
+        ))
+    } else {
+        None
+    };
+
     let post_shutdown_process_sample = if process_present_after_shutdown == Some(true) {
         Some(observe_process_memory(pid))
     } else {
@@ -426,15 +506,17 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
         observation_notes.push(note);
     }
 
-    observation_notes.extend(gpu_window.notes.clone());
+    observation_notes.extend(baseline_gpu_window.observation_notes.clone());
 
-    if gpu_window.sample_count > 0 {
+    if let Some(strategy_window) = &vram_cleanup_strategy_window {
         observation_notes.push(format!(
-            "Post-shutdown GPU inspection collected {} sample(s) over the {} ms verification window; {} sample(s) observed a matching GPU PID.",
-            gpu_window.sample_count,
-            POST_SHUTDOWN_VERIFICATION_WINDOW_MS,
-            gpu_window.samples_with_pid_observed
+            "Experimental VRAM cleanup strategy {} waited {} ms after the baseline window, then collected {} GPU sample(s) over a {} ms recheck window.",
+            VRAM_CLEANUP_STRATEGY_ID,
+            VRAM_CLEANUP_STRATEGY_COOLDOWN_MS,
+            strategy_window.gpu_samples_collected,
+            strategy_window.verification_window_ms
         ));
+        observation_notes.extend(strategy_window.observation_notes.clone());
     }
 
     RuntimePostShutdownObservation {
@@ -460,28 +542,48 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
             .map(|sample| sample.resident_regions.clone())
             .unwrap_or_default(),
         verification_window_ms: POST_SHUTDOWN_VERIFICATION_WINDOW_MS,
-        gpu_entry_present_after_shutdown: if gpu_window.any_sample_collected {
-            Some(gpu_window.any_pid_observed)
-        } else {
-            None
-        },
-        gpu_memory_bytes_after_shutdown: gpu_window.last_memory_bytes,
-        gpu_peak_memory_bytes_after_shutdown: gpu_window.peak_memory_bytes,
-        gpu_samples_collected_after_shutdown: gpu_window.sample_count,
-        gpu_samples_with_pid_observed_after_shutdown: gpu_window.samples_with_pid_observed,
-        gpu_last_pid_observed_at_ms: gpu_window.last_pid_observed_at_ms,
-        gpu_check_backend: if gpu_window.backends.is_empty() {
-            None
-        } else {
-            Some(merge_observation_labels(&gpu_window.backends))
-        },
-        gpu_check_source: if gpu_window.sources.is_empty() {
-            None
-        } else {
-            Some(merge_observation_labels(&gpu_window.sources))
-        },
+        gpu_entry_present_after_shutdown: baseline_gpu_window.gpu_entry_present,
+        gpu_memory_bytes_after_shutdown: baseline_gpu_window.gpu_memory_bytes,
+        gpu_peak_memory_bytes_after_shutdown: baseline_gpu_window.gpu_peak_memory_bytes,
+        gpu_samples_collected_after_shutdown: baseline_gpu_window.gpu_samples_collected,
+        gpu_samples_with_pid_observed_after_shutdown: baseline_gpu_window
+            .gpu_samples_with_pid_observed,
+        gpu_last_pid_observed_at_ms: baseline_gpu_window.gpu_last_pid_observed_at_ms,
+        gpu_check_backend: baseline_gpu_window.gpu_check_backend.clone(),
+        gpu_check_source: baseline_gpu_window.gpu_check_source.clone(),
+        vram_cleanup_strategy_id: vram_cleanup_strategy_window
+            .as_ref()
+            .map(|_| VRAM_CLEANUP_STRATEGY_ID.to_string()),
+        vram_cleanup_strategy_cooldown_ms: vram_cleanup_strategy_window
+            .as_ref()
+            .map(|_| VRAM_CLEANUP_STRATEGY_COOLDOWN_MS),
+        vram_cleanup_strategy_window,
         observation_notes,
     }
+}
+
+fn observe_gpu_window(
+    pid: u32,
+    verification_window_ms: u64,
+    interval_ms: u64,
+) -> RuntimeGpuObservationWindow {
+    let started_at = Instant::now();
+    let verification_window = Duration::from_millis(verification_window_ms);
+    let mut collector = RuntimePostShutdownGpuWindowObservation::default();
+
+    while started_at.elapsed() <= verification_window {
+        let elapsed_ms = started_at.elapsed().as_millis() as u64;
+        let gpu = observe_gpu_process(pid);
+        collector.record_sample(elapsed_ms, gpu);
+
+        if started_at.elapsed() >= verification_window {
+            break;
+        }
+
+        thread::sleep(Duration::from_millis(interval_ms));
+    }
+
+    collector.finalize(verification_window_ms)
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]

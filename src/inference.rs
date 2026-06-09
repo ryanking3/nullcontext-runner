@@ -73,7 +73,10 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
         ],
     );
     let runtime_shutdown = runtime.shutdown()?;
-    let post_shutdown_observation = observe_post_shutdown(runtime_pid);
+    let post_shutdown_observation = observe_post_shutdown(
+        runtime_pid,
+        config.gpu_layers.parse::<u32>().unwrap_or(0) > 0,
+    );
     let post_shutdown_process_scan = scan_post_shutdown_process_phase(
         runtime_pid,
         &post_shutdown_observation,
