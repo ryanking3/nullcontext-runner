@@ -248,6 +248,8 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
 
     if (parsed.llama_runtime && !parsed.llama_runtime.vram_cleanup) {
       parsed.llama_runtime.vram_cleanup = legacyVramCleanupStrategyReport();
+    } else if (parsed.llama_runtime && !parsed.llama_runtime.vram_cleanup.comparison) {
+      parsed.llama_runtime.vram_cleanup.comparison = legacyVramCleanupComparisonReport();
     }
 
     return parsed;
@@ -270,8 +272,42 @@ function legacyVramCleanupStrategyReport(): VramCleanupStrategyReport {
       "This report was created before NullContext recorded structured VRAM cleanup strategy data.",
     summary:
       "Structured VRAM cleanup strategy reporting was not present in this older report.",
+    comparison: legacyVramCleanupComparisonReport(),
     notes: [
       "Open a newer session report to compare baseline or experimental VRAM cleanup outcomes.",
+    ],
+  };
+}
+
+function legacyVramCleanupComparisonReport() {
+  return {
+    comparison_status: "legacy_report_unavailable",
+    current_run_role: "legacy_report_unavailable",
+    evidence_improvement_status: "legacy_report_unavailable",
+    baseline_snapshot: {
+      vram_inspection_status: "legacy_report_unavailable",
+      post_shutdown_gpu_visibility_status: "legacy_report_unavailable",
+      gpu_entry_observed: null,
+      gpu_memory_bytes: null,
+      gpu_peak_memory_bytes: null,
+      gpu_samples_collected: 0,
+      gpu_samples_with_pid_observed: 0,
+      gpu_last_pid_observed_at_ms: null,
+    },
+    current_snapshot: {
+      vram_inspection_status: "legacy_report_unavailable",
+      post_shutdown_gpu_visibility_status: "legacy_report_unavailable",
+      gpu_entry_observed: null,
+      gpu_memory_bytes: null,
+      gpu_peak_memory_bytes: null,
+      gpu_samples_collected: 0,
+      gpu_samples_with_pid_observed: 0,
+      gpu_last_pid_observed_at_ms: null,
+    },
+    summary:
+      "This older report did not include structured baseline-versus-strategy VRAM comparison data.",
+    notes: [
+      "Open a newer report to inspect comparison snapshots and evidence-improvement status.",
     ],
   };
 }

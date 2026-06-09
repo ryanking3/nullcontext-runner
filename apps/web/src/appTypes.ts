@@ -280,7 +280,29 @@ export type VramCleanupStrategyReport = {
   evidence_outcome: string;
   expected_effect_scope: string;
   summary: string;
+  comparison: VramCleanupComparisonReport;
   notes: string[];
+};
+
+export type VramCleanupComparisonReport = {
+  comparison_status: string;
+  current_run_role: string;
+  evidence_improvement_status: string;
+  baseline_snapshot: VramCleanupEvidenceSnapshot;
+  current_snapshot: VramCleanupEvidenceSnapshot;
+  summary: string;
+  notes: string[];
+};
+
+export type VramCleanupEvidenceSnapshot = {
+  vram_inspection_status: string;
+  post_shutdown_gpu_visibility_status: string;
+  gpu_entry_observed?: boolean | null;
+  gpu_memory_bytes?: number | null;
+  gpu_peak_memory_bytes?: number | null;
+  gpu_samples_collected: number;
+  gpu_samples_with_pid_observed: number;
+  gpu_last_pid_observed_at_ms?: number | null;
 };
 
 export type LlamaRuntimeReportData = {

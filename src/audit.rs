@@ -192,7 +192,32 @@ pub struct VramCleanupStrategyReport {
     pub evidence_outcome: String,
     pub expected_effect_scope: String,
     pub summary: String,
+    #[serde(default = "default_vram_cleanup_comparison_report")]
+    pub comparison: VramCleanupComparisonReport,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VramCleanupComparisonReport {
+    pub comparison_status: String,
+    pub current_run_role: String,
+    pub evidence_improvement_status: String,
+    pub baseline_snapshot: VramCleanupEvidenceSnapshot,
+    pub current_snapshot: VramCleanupEvidenceSnapshot,
+    pub summary: String,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VramCleanupEvidenceSnapshot {
+    pub vram_inspection_status: String,
+    pub post_shutdown_gpu_visibility_status: String,
+    pub gpu_entry_observed: Option<bool>,
+    pub gpu_memory_bytes: Option<u64>,
+    pub gpu_peak_memory_bytes: Option<u64>,
+    pub gpu_samples_collected: u32,
+    pub gpu_samples_with_pid_observed: u32,
+    pub gpu_last_pid_observed_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1094,9 +1119,13 @@ fn build_vram_cleanup_strategy_report(
                 .to_string(),
             summary: "NullContext did not need a VRAM cleanup strategy because the session did not request GPU offload."
                 .to_string(),
+            comparison: build_not_applicable_vram_cleanup_comparison_report(),
             notes: vec![],
         };
     }
+
+    let baseline_snapshot =
+        build_vram_cleanup_evidence_snapshot(vram_inspection_status, post_shutdown);
 
     VramCleanupStrategyReport {
         strategy_id: "baseline_no_special_vram_cleanup".to_string(),
@@ -1113,6 +1142,9 @@ fn build_vram_cleanup_strategy_report(
         summary: format!(
             "NullContext recorded baseline VRAM evidence over a {} ms post-shutdown window without applying a special VRAM cleanup strategy.",
             post_shutdown.verification_window_ms
+        ),
+        comparison: build_baseline_only_vram_cleanup_comparison_report(
+            baseline_snapshot.clone(),
         ),
         notes: vec![
             "Process termination and post-shutdown inspection were recorded, but no experimental VRAM cleanup action was attempted yet."
@@ -1139,6 +1171,7 @@ fn default_vram_cleanup_strategy_report() -> VramCleanupStrategyReport {
         summary:
             "Structured VRAM cleanup strategy reporting was not present in this older report."
                 .to_string(),
+        comparison: default_vram_cleanup_comparison_report(),
         notes: vec![
             "Open a newer session report to compare baseline or experimental VRAM cleanup outcomes."
                 .to_string(),
@@ -1163,6 +1196,7 @@ fn build_failed_start_vram_cleanup_strategy_report(
                 .to_string(),
             summary: "No VRAM cleanup strategy was needed because GPU offload was not requested."
                 .to_string(),
+            comparison: build_not_applicable_vram_cleanup_comparison_report(),
             notes: vec![],
         };
     }
@@ -1181,6 +1215,7 @@ fn build_failed_start_vram_cleanup_strategy_report(
                 .to_string(),
         summary: "NullContext defined the VRAM cleanup strategy model, but this run never reached a normal baseline cleanup stage because startup failed before readiness."
             .to_string(),
+        comparison: build_startup_failed_vram_cleanup_comparison_report(),
         notes: vec![
             "No special VRAM cleanup strategy was attempted.".to_string(),
             "Startup failure prevented a normal baseline comparison for post-shutdown VRAM evidence."
@@ -1206,6 +1241,128 @@ fn baseline_vram_cleanup_evidence_outcome(vram_inspection_status: &str) -> Strin
         "gpu_inspection_unavailable" => "baseline_evidence_inspection_unavailable".to_string(),
         "gpu_offload_not_requested" => "not_applicable".to_string(),
         _ => "baseline_evidence_inconclusive".to_string(),
+    }
+}
+
+fn build_vram_cleanup_evidence_snapshot(
+    vram_inspection_status: &str,
+    post_shutdown: &RuntimePostShutdownObservation,
+) -> VramCleanupEvidenceSnapshot {
+    VramCleanupEvidenceSnapshot {
+        vram_inspection_status: vram_inspection_status.to_string(),
+        post_shutdown_gpu_visibility_status: post_shutdown_gpu_visibility_status(
+            true,
+            post_shutdown,
+        ),
+        gpu_entry_observed: post_shutdown.gpu_entry_present_after_shutdown,
+        gpu_memory_bytes: post_shutdown.gpu_memory_bytes_after_shutdown,
+        gpu_peak_memory_bytes: post_shutdown.gpu_peak_memory_bytes_after_shutdown,
+        gpu_samples_collected: post_shutdown.gpu_samples_collected_after_shutdown,
+        gpu_samples_with_pid_observed: post_shutdown.gpu_samples_with_pid_observed_after_shutdown,
+        gpu_last_pid_observed_at_ms: post_shutdown.gpu_last_pid_observed_at_ms,
+    }
+}
+
+fn build_baseline_only_vram_cleanup_comparison_report(
+    baseline_snapshot: VramCleanupEvidenceSnapshot,
+) -> VramCleanupComparisonReport {
+    VramCleanupComparisonReport {
+        comparison_status: "baseline_reference_recorded_no_strategy_delta".to_string(),
+        current_run_role: "baseline_reference".to_string(),
+        evidence_improvement_status: "baseline_only_no_strategy_delta".to_string(),
+        baseline_snapshot: baseline_snapshot.clone(),
+        current_snapshot: baseline_snapshot,
+        summary:
+            "This run establishes the baseline VRAM evidence reference. No experimental cleanup strategy was applied yet, so there is no strategy delta to compare."
+                .to_string(),
+        notes: vec![
+            "Baseline and current snapshots are identical because this report records the control path only."
+                .to_string(),
+            "A future experimental strategy should reuse this comparison shape and report whether evidence improved, stayed unchanged, or remained inconclusive."
+                .to_string(),
+        ],
+    }
+}
+
+fn build_not_applicable_vram_cleanup_comparison_report() -> VramCleanupComparisonReport {
+    let snapshot = VramCleanupEvidenceSnapshot {
+        vram_inspection_status: "gpu_offload_not_requested".to_string(),
+        post_shutdown_gpu_visibility_status: "gpu_offload_not_requested".to_string(),
+        gpu_entry_observed: None,
+        gpu_memory_bytes: None,
+        gpu_peak_memory_bytes: None,
+        gpu_samples_collected: 0,
+        gpu_samples_with_pid_observed: 0,
+        gpu_last_pid_observed_at_ms: None,
+    };
+
+    VramCleanupComparisonReport {
+        comparison_status: "not_applicable".to_string(),
+        current_run_role: "not_applicable".to_string(),
+        evidence_improvement_status: "not_applicable".to_string(),
+        baseline_snapshot: snapshot.clone(),
+        current_snapshot: snapshot,
+        summary:
+            "No baseline-versus-strategy comparison was relevant because GPU offload was not requested."
+                .to_string(),
+        notes: vec![],
+    }
+}
+
+fn build_startup_failed_vram_cleanup_comparison_report() -> VramCleanupComparisonReport {
+    let snapshot = VramCleanupEvidenceSnapshot {
+        vram_inspection_status: "gpu_inspection_unavailable_due_to_startup_failure".to_string(),
+        post_shutdown_gpu_visibility_status:
+            "post_shutdown_gpu_visibility_unavailable_due_to_startup_failure".to_string(),
+        gpu_entry_observed: None,
+        gpu_memory_bytes: None,
+        gpu_peak_memory_bytes: None,
+        gpu_samples_collected: 0,
+        gpu_samples_with_pid_observed: 0,
+        gpu_last_pid_observed_at_ms: None,
+    };
+
+    VramCleanupComparisonReport {
+        comparison_status: "inconclusive_due_to_startup_failure".to_string(),
+        current_run_role: "startup_failed_before_baseline".to_string(),
+        evidence_improvement_status: "inconclusive_due_to_startup_failure".to_string(),
+        baseline_snapshot: snapshot.clone(),
+        current_snapshot: snapshot,
+        summary:
+            "No baseline-versus-strategy comparison was available because startup failed before NullContext could complete a normal VRAM observation baseline."
+                .to_string(),
+        notes: vec![
+            "A future successful run is required before any cleanup strategy delta can be measured."
+                .to_string(),
+        ],
+    }
+}
+
+fn default_vram_cleanup_comparison_report() -> VramCleanupComparisonReport {
+    let snapshot = VramCleanupEvidenceSnapshot {
+        vram_inspection_status: "legacy_report_unavailable".to_string(),
+        post_shutdown_gpu_visibility_status: "legacy_report_unavailable".to_string(),
+        gpu_entry_observed: None,
+        gpu_memory_bytes: None,
+        gpu_peak_memory_bytes: None,
+        gpu_samples_collected: 0,
+        gpu_samples_with_pid_observed: 0,
+        gpu_last_pid_observed_at_ms: None,
+    };
+
+    VramCleanupComparisonReport {
+        comparison_status: "legacy_report_unavailable".to_string(),
+        current_run_role: "legacy_report_unavailable".to_string(),
+        evidence_improvement_status: "legacy_report_unavailable".to_string(),
+        baseline_snapshot: snapshot.clone(),
+        current_snapshot: snapshot,
+        summary:
+            "This older report did not include structured baseline-versus-strategy VRAM comparison data."
+                .to_string(),
+        notes: vec![
+            "Open a newer report to inspect comparison snapshots and evidence-improvement status."
+                .to_string(),
+        ],
     }
 }
 

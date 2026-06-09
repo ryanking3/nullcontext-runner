@@ -650,6 +650,126 @@ export function PrivacyReportViewer({
               ]}
             />
 
+            <div className="report-risk-block">
+              <p>
+                <strong>comparison summary:</strong>{" "}
+                {currentReport.llama_runtime.vram_cleanup.comparison.summary}
+              </p>
+            </div>
+
+            <ReportGrid
+              entries={[
+                {
+                  label: "comparison status",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.comparison.comparison_status
+                  ),
+                },
+                {
+                  label: "run role",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.comparison.current_run_role
+                  ),
+                },
+                {
+                  label: "improvement status",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.comparison
+                      .evidence_improvement_status
+                  ),
+                },
+              ]}
+            />
+
+            <details className="report-detail" open>
+              <summary>
+                <span>baseline vs current evidence</span>
+                <span className="pill neutral">
+                  {humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.comparison
+                      .evidence_improvement_status
+                  )}
+                </span>
+              </summary>
+
+              <ReportGrid
+                entries={[
+                  {
+                    label: "baseline vram status",
+                    value: humanizeSnakeCase(
+                      currentReport.llama_runtime.vram_cleanup.comparison.baseline_snapshot
+                        .vram_inspection_status
+                    ),
+                  },
+                  {
+                    label: "current vram status",
+                    value: humanizeSnakeCase(
+                      currentReport.llama_runtime.vram_cleanup.comparison.current_snapshot
+                        .vram_inspection_status
+                    ),
+                  },
+                  {
+                    label: "baseline gpu visibility",
+                    value: humanizeSnakeCase(
+                      currentReport.llama_runtime.vram_cleanup.comparison.baseline_snapshot
+                        .post_shutdown_gpu_visibility_status
+                    ),
+                  },
+                  {
+                    label: "current gpu visibility",
+                    value: humanizeSnakeCase(
+                      currentReport.llama_runtime.vram_cleanup.comparison.current_snapshot
+                        .post_shutdown_gpu_visibility_status
+                    ),
+                  },
+                  {
+                    label: "baseline peak bytes",
+                    value:
+                      currentReport.llama_runtime.vram_cleanup.comparison.baseline_snapshot
+                        .gpu_peak_memory_bytes
+                        ? formatBytes(
+                            currentReport.llama_runtime.vram_cleanup.comparison
+                              .baseline_snapshot.gpu_peak_memory_bytes
+                          )
+                        : "none",
+                  },
+                  {
+                    label: "current peak bytes",
+                    value:
+                      currentReport.llama_runtime.vram_cleanup.comparison.current_snapshot
+                        .gpu_peak_memory_bytes
+                        ? formatBytes(
+                            currentReport.llama_runtime.vram_cleanup.comparison.current_snapshot
+                              .gpu_peak_memory_bytes
+                          )
+                        : "none",
+                  },
+                  {
+                    label: "baseline gpu-positive samples",
+                    value: String(
+                      currentReport.llama_runtime.vram_cleanup.comparison.baseline_snapshot
+                        .gpu_samples_with_pid_observed
+                    ),
+                  },
+                  {
+                    label: "current gpu-positive samples",
+                    value: String(
+                      currentReport.llama_runtime.vram_cleanup.comparison.current_snapshot
+                        .gpu_samples_with_pid_observed
+                    ),
+                  },
+                ]}
+              />
+
+              {currentReport.llama_runtime.vram_cleanup.comparison.notes.length > 0 && (
+                <div className="report-risk-block">
+                  {currentReport.llama_runtime.vram_cleanup.comparison.notes.map((note) => (
+                    <p key={note}>{note}</p>
+                  ))}
+                </div>
+              )}
+            </details>
+
             {currentReport.llama_runtime.vram_cleanup.notes.length > 0 && (
               <div className="report-risk-block">
                 {currentReport.llama_runtime.vram_cleanup.notes.map((note) => (

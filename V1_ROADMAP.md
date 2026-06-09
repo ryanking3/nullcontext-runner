@@ -348,7 +348,7 @@ Before `v1.0`, this needs at least a lightweight harness:
 ### Track D: Experimental Sanitization
 
 15. `[*] Add VRAM cleanup strategy model`
-16. `[ ] Add baseline versus strategy comparison reporting`
+16. `[*] Add baseline versus strategy comparison reporting`
 17. `[ ] Implement first experimental VRAM cleanup strategy`
 18. `[ ] Report VRAM cleanup outcome evidence`
 
