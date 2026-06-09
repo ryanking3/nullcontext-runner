@@ -281,6 +281,7 @@ export type VramCleanupStrategyReport = {
   expected_effect_scope: string;
   summary: string;
   comparison: VramCleanupComparisonReport;
+  stages: VramCleanupStrategyStageReport[];
   notes: string[];
 };
 
@@ -303,6 +304,17 @@ export type VramCleanupEvidenceSnapshot = {
   gpu_samples_collected: number;
   gpu_samples_with_pid_observed: number;
   gpu_last_pid_observed_at_ms?: number | null;
+};
+
+export type VramCleanupStrategyStageReport = {
+  stage_id: string;
+  stage_label: string;
+  cooldown_ms_before_stage: number;
+  verification_window_ms: number;
+  evidence_improvement_status: string;
+  evidence_snapshot: VramCleanupEvidenceSnapshot;
+  summary: string;
+  notes: string[];
 };
 
 export type LlamaRuntimeReportData = {

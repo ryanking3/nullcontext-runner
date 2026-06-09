@@ -248,8 +248,14 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
 
     if (parsed.llama_runtime && !parsed.llama_runtime.vram_cleanup) {
       parsed.llama_runtime.vram_cleanup = legacyVramCleanupStrategyReport();
-    } else if (parsed.llama_runtime && !parsed.llama_runtime.vram_cleanup.comparison) {
+    }
+
+    if (parsed.llama_runtime && !parsed.llama_runtime.vram_cleanup.comparison) {
       parsed.llama_runtime.vram_cleanup.comparison = legacyVramCleanupComparisonReport();
+    }
+
+    if (parsed.llama_runtime && !parsed.llama_runtime.vram_cleanup.stages) {
+      parsed.llama_runtime.vram_cleanup.stages = [];
     }
 
     return parsed;
@@ -273,6 +279,7 @@ function legacyVramCleanupStrategyReport(): VramCleanupStrategyReport {
     summary:
       "Structured VRAM cleanup strategy reporting was not present in this older report.",
     comparison: legacyVramCleanupComparisonReport(),
+    stages: [],
     notes: [
       "Open a newer session report to compare baseline or experimental VRAM cleanup outcomes.",
     ],

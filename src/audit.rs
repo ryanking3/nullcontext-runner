@@ -194,6 +194,8 @@ pub struct VramCleanupStrategyReport {
     pub summary: String,
     #[serde(default = "default_vram_cleanup_comparison_report")]
     pub comparison: VramCleanupComparisonReport,
+    #[serde(default)]
+    pub stages: Vec<VramCleanupStrategyStageReport>,
     pub notes: Vec<String>,
 }
 
@@ -218,6 +220,18 @@ pub struct VramCleanupEvidenceSnapshot {
     pub gpu_samples_collected: u32,
     pub gpu_samples_with_pid_observed: u32,
     pub gpu_last_pid_observed_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VramCleanupStrategyStageReport {
+    pub stage_id: String,
+    pub stage_label: String,
+    pub cooldown_ms_before_stage: u64,
+    pub verification_window_ms: u64,
+    pub evidence_improvement_status: String,
+    pub evidence_snapshot: VramCleanupEvidenceSnapshot,
+    pub summary: String,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1137,6 +1151,7 @@ fn build_vram_cleanup_strategy_report(
             summary: "NullContext did not need a VRAM cleanup strategy because the session did not request GPU offload."
                 .to_string(),
             comparison: build_not_applicable_vram_cleanup_comparison_report(),
+            stages: vec![],
             notes: vec![],
         };
     }
@@ -1144,43 +1159,56 @@ fn build_vram_cleanup_strategy_report(
     let baseline_snapshot =
         build_vram_cleanup_evidence_snapshot(vram_inspection_status, post_shutdown);
 
-    if let Some(strategy_window) = &post_shutdown.vram_cleanup_strategy_window {
-        let strategy_snapshot =
-            build_vram_cleanup_strategy_snapshot(gpu_offload_requested, strategy_window);
-        let comparison =
-            build_experimental_vram_cleanup_comparison_report(baseline_snapshot, strategy_snapshot);
+    if !post_shutdown.vram_cleanup_strategy_windows.is_empty() {
+        let mut stage_reports = Vec::new();
+
+        for strategy_stage in &post_shutdown.vram_cleanup_strategy_windows {
+            stage_reports.push(build_vram_cleanup_stage_report(
+                gpu_offload_requested,
+                &baseline_snapshot,
+                strategy_stage,
+            ));
+        }
+
+        let final_stage = stage_reports
+            .last()
+            .cloned()
+            .expect("strategy stages should exist when reporting experimental cleanup");
+        let comparison = build_experimental_vram_cleanup_comparison_report(
+            baseline_snapshot.clone(),
+            final_stage.evidence_snapshot.clone(),
+        );
         let evidence_outcome = strategy_evidence_outcome(&comparison.evidence_improvement_status);
 
         return VramCleanupStrategyReport {
             strategy_id: post_shutdown
                 .vram_cleanup_strategy_id
                 .clone()
-                .unwrap_or_else(|| "post_shutdown_cooldown_recheck".to_string()),
-            strategy_label: "Post-Shutdown Cooldown Recheck".to_string(),
-            strategy_kind: "experimental_timing_recheck".to_string(),
+                .unwrap_or_else(|| "multi_stage_cooldown_recheck".to_string()),
+            strategy_label: "Multi-Stage Cooldown Recheck".to_string(),
+            strategy_kind: "experimental_multi_stage_timing_recheck".to_string(),
             implementation_status: "experimental_strategy_implemented".to_string(),
             support_status: "supported".to_string(),
             attempt_status: "strategy_attempted".to_string(),
-            activation_timing: "after_baseline_post_shutdown_window".to_string(),
+            activation_timing: "after_baseline_post_shutdown_window_in_multiple_stages"
+                .to_string(),
             evidence_outcome,
             expected_effect_scope:
-                "This experimental strategy waits for an additional cooldown period after the baseline post-shutdown window, then re-checks GPU residency to see whether driver-visible VRAM evidence decays without a more invasive cleanup action."
+                "This experimental strategy runs multiple post-shutdown cooldown rechecks to see whether driver-visible GPU residency decays over time without a more invasive cleanup action."
                     .to_string(),
             summary: format!(
-                "NullContext ran experimental VRAM cleanup strategy {} by waiting {} ms after the baseline window, then re-checking GPU residency over a {} ms strategy window. {}",
+                "NullContext ran experimental VRAM cleanup strategy {} with {} staged recheck(s) after the baseline window. Final-stage comparison: {}",
                 post_shutdown
                     .vram_cleanup_strategy_id
                     .as_deref()
-                    .unwrap_or("post_shutdown_cooldown_recheck"),
-                post_shutdown
-                    .vram_cleanup_strategy_cooldown_ms
-                    .unwrap_or(0),
-                strategy_window.verification_window_ms,
+                    .unwrap_or("multi_stage_cooldown_recheck"),
+                stage_reports.len(),
                 comparison.summary.as_str()
             ),
             comparison,
+            stages: stage_reports,
             notes: vec![
-                "This is a timing-based experimental strategy, not proof of allocator- or driver-level VRAM sanitization."
+                "These are timing-based experimental stages, not proof of allocator- or driver-level VRAM sanitization."
                     .to_string(),
                 "A stronger future strategy may need explicit context teardown, allocator churn, or lower-level CUDA/NVML control."
                     .to_string(),
@@ -1207,6 +1235,7 @@ fn build_vram_cleanup_strategy_report(
         comparison: build_baseline_only_vram_cleanup_comparison_report(
             baseline_snapshot.clone(),
         ),
+        stages: vec![],
         notes: vec![
             "Process termination and post-shutdown inspection were recorded, but no experimental VRAM cleanup action was attempted yet."
                 .to_string(),
@@ -1233,6 +1262,7 @@ fn default_vram_cleanup_strategy_report() -> VramCleanupStrategyReport {
             "Structured VRAM cleanup strategy reporting was not present in this older report."
                 .to_string(),
         comparison: default_vram_cleanup_comparison_report(),
+        stages: vec![],
         notes: vec![
             "Open a newer session report to compare baseline or experimental VRAM cleanup outcomes."
                 .to_string(),
@@ -1255,9 +1285,10 @@ fn build_failed_start_vram_cleanup_strategy_report(
             evidence_outcome: "not_applicable".to_string(),
             expected_effect_scope: "No VRAM cleanup strategy was relevant because llama.cpp GPU offload was not requested for this failed-start session."
                 .to_string(),
-            summary: "No VRAM cleanup strategy was needed because GPU offload was not requested."
+        summary: "No VRAM cleanup strategy was needed because GPU offload was not requested."
                 .to_string(),
             comparison: build_not_applicable_vram_cleanup_comparison_report(),
+            stages: vec![],
             notes: vec![],
         };
     }
@@ -1277,6 +1308,7 @@ fn build_failed_start_vram_cleanup_strategy_report(
         summary: "NullContext defined the VRAM cleanup strategy model, but this run never reached a normal baseline cleanup stage because startup failed before readiness."
             .to_string(),
         comparison: build_startup_failed_vram_cleanup_comparison_report(),
+        stages: vec![],
         notes: vec![
             "No special VRAM cleanup strategy was attempted.".to_string(),
             "Startup failure prevented a normal baseline comparison for post-shutdown VRAM evidence."
@@ -1368,6 +1400,34 @@ fn build_vram_cleanup_strategy_snapshot(
         gpu_samples_collected: strategy_window.gpu_samples_collected,
         gpu_samples_with_pid_observed: strategy_window.gpu_samples_with_pid_observed,
         gpu_last_pid_observed_at_ms: strategy_window.gpu_last_pid_observed_at_ms,
+    }
+}
+
+fn build_vram_cleanup_stage_report(
+    gpu_offload_requested: bool,
+    baseline_snapshot: &VramCleanupEvidenceSnapshot,
+    strategy_stage: &crate::runtime::RuntimeGpuObservationStrategyStage,
+) -> VramCleanupStrategyStageReport {
+    let evidence_snapshot =
+        build_vram_cleanup_strategy_snapshot(gpu_offload_requested, &strategy_stage.window);
+    let evidence_improvement_status =
+        compare_vram_cleanup_snapshots(baseline_snapshot, &evidence_snapshot);
+
+    VramCleanupStrategyStageReport {
+        stage_id: strategy_stage.stage_id.clone(),
+        stage_label: strategy_stage.stage_label.clone(),
+        cooldown_ms_before_stage: strategy_stage.cooldown_ms_before_stage,
+        verification_window_ms: strategy_stage.window.verification_window_ms,
+        summary: format!(
+            "{} waited {} ms before collecting a {} ms GPU recheck window. {}",
+            strategy_stage.stage_label,
+            strategy_stage.cooldown_ms_before_stage,
+            strategy_stage.window.verification_window_ms,
+            vram_cleanup_comparison_summary(&evidence_improvement_status)
+        ),
+        notes: vram_cleanup_comparison_notes(baseline_snapshot, &evidence_snapshot),
+        evidence_improvement_status,
+        evidence_snapshot,
     }
 }
 

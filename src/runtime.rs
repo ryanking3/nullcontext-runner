@@ -73,8 +73,7 @@ pub struct RuntimePostShutdownObservation {
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub vram_cleanup_strategy_id: Option<String>,
-    pub vram_cleanup_strategy_cooldown_ms: Option<u64>,
-    pub vram_cleanup_strategy_window: Option<RuntimeGpuObservationWindow>,
+    pub vram_cleanup_strategy_windows: Vec<RuntimeGpuObservationStrategyStage>,
     pub observation_notes: Vec<String>,
 }
 
@@ -90,6 +89,14 @@ pub struct RuntimeGpuObservationWindow {
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub observation_notes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeGpuObservationStrategyStage {
+    pub stage_id: String,
+    pub stage_label: String,
+    pub cooldown_ms_before_stage: u64,
+    pub window: RuntimeGpuObservationWindow,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -123,9 +130,16 @@ pub struct RuntimeLaunchFailure {
 
 const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
 const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
-const VRAM_CLEANUP_STRATEGY_ID: &str = "post_shutdown_cooldown_recheck";
-const VRAM_CLEANUP_STRATEGY_COOLDOWN_MS: u64 = 1500;
+const VRAM_CLEANUP_STRATEGY_ID: &str = "multi_stage_cooldown_recheck";
 const VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS: u64 = 1000;
+const VRAM_CLEANUP_STRATEGY_STAGES: [(&str, &str, u64); 2] = [
+    ("short_cooldown_recheck", "Short Cooldown Recheck", 1500),
+    (
+        "extended_cooldown_recheck",
+        "Extended Cooldown Recheck",
+        3000,
+    ),
+];
 
 impl RuntimePostShutdownGpuWindowObservation {
     fn record_sample(
@@ -483,15 +497,26 @@ pub fn observe_post_shutdown(
 
     let baseline_gpu_window = gpu_window.finalize(POST_SHUTDOWN_VERIFICATION_WINDOW_MS);
 
-    let vram_cleanup_strategy_window = if gpu_offload_requested {
-        thread::sleep(Duration::from_millis(VRAM_CLEANUP_STRATEGY_COOLDOWN_MS));
-        Some(observe_gpu_window(
-            pid,
-            VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS,
-            POST_SHUTDOWN_VERIFICATION_INTERVAL_MS,
-        ))
+    let vram_cleanup_strategy_windows = if gpu_offload_requested {
+        let mut stages = Vec::new();
+
+        for (stage_id, stage_label, cooldown_ms_before_stage) in VRAM_CLEANUP_STRATEGY_STAGES {
+            thread::sleep(Duration::from_millis(cooldown_ms_before_stage));
+            stages.push(RuntimeGpuObservationStrategyStage {
+                stage_id: stage_id.to_string(),
+                stage_label: stage_label.to_string(),
+                cooldown_ms_before_stage,
+                window: observe_gpu_window(
+                    pid,
+                    VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS,
+                    POST_SHUTDOWN_VERIFICATION_INTERVAL_MS,
+                ),
+            });
+        }
+
+        stages
     } else {
-        None
+        vec![]
     };
 
     let post_shutdown_process_sample = if process_present_after_shutdown == Some(true) {
@@ -508,15 +533,16 @@ pub fn observe_post_shutdown(
 
     observation_notes.extend(baseline_gpu_window.observation_notes.clone());
 
-    if let Some(strategy_window) = &vram_cleanup_strategy_window {
+    for strategy_stage in &vram_cleanup_strategy_windows {
         observation_notes.push(format!(
-            "Experimental VRAM cleanup strategy {} waited {} ms after the baseline window, then collected {} GPU sample(s) over a {} ms recheck window.",
-            VRAM_CLEANUP_STRATEGY_ID,
-            VRAM_CLEANUP_STRATEGY_COOLDOWN_MS,
-            strategy_window.gpu_samples_collected,
-            strategy_window.verification_window_ms
+            "Experimental VRAM cleanup stage {} ({}) waited {} ms, then collected {} GPU sample(s) over a {} ms recheck window.",
+            strategy_stage.stage_id,
+            strategy_stage.stage_label,
+            strategy_stage.cooldown_ms_before_stage,
+            strategy_stage.window.gpu_samples_collected,
+            strategy_stage.window.verification_window_ms
         ));
-        observation_notes.extend(strategy_window.observation_notes.clone());
+        observation_notes.extend(strategy_stage.window.observation_notes.clone());
     }
 
     RuntimePostShutdownObservation {
@@ -551,13 +577,9 @@ pub fn observe_post_shutdown(
         gpu_last_pid_observed_at_ms: baseline_gpu_window.gpu_last_pid_observed_at_ms,
         gpu_check_backend: baseline_gpu_window.gpu_check_backend.clone(),
         gpu_check_source: baseline_gpu_window.gpu_check_source.clone(),
-        vram_cleanup_strategy_id: vram_cleanup_strategy_window
-            .as_ref()
-            .map(|_| VRAM_CLEANUP_STRATEGY_ID.to_string()),
-        vram_cleanup_strategy_cooldown_ms: vram_cleanup_strategy_window
-            .as_ref()
-            .map(|_| VRAM_CLEANUP_STRATEGY_COOLDOWN_MS),
-        vram_cleanup_strategy_window,
+        vram_cleanup_strategy_id: (!vram_cleanup_strategy_windows.is_empty())
+            .then(|| VRAM_CLEANUP_STRATEGY_ID.to_string()),
+        vram_cleanup_strategy_windows,
         observation_notes,
     }
 }

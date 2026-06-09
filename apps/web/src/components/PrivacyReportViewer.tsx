@@ -770,6 +770,46 @@ export function PrivacyReportViewer({
               )}
             </details>
 
+            {currentReport.llama_runtime.vram_cleanup.stages.length > 0 && (
+              <details className="report-detail" open>
+                <summary>
+                  <span>strategy stages</span>
+                  <span className="pill neutral">
+                    {currentReport.llama_runtime.vram_cleanup.stages.length}
+                  </span>
+                </summary>
+
+                <div className="report-list">
+                  {currentReport.llama_runtime.vram_cleanup.stages.map((stage) => (
+                    <div className="report-item" key={stage.stage_id}>
+                      <div className="report-item-header">
+                        <strong>{stage.stage_label}</strong>
+                        <span className={inspectionStatusClass(stage.evidence_improvement_status)}>
+                          {humanizeSnakeCase(stage.evidence_improvement_status)}
+                        </span>
+                      </div>
+                      <div className="report-path-list">
+                        <div>stage id: {stage.stage_id}</div>
+                        <div>cooldown: {stage.cooldown_ms_before_stage} ms</div>
+                        <div>window: {stage.verification_window_ms} ms</div>
+                        <div>
+                          peak gpu bytes:{" "}
+                          {stage.evidence_snapshot.gpu_peak_memory_bytes
+                            ? formatBytes(stage.evidence_snapshot.gpu_peak_memory_bytes)
+                            : "none"}
+                        </div>
+                        <div>
+                          gpu-positive samples:{" "}
+                          {stage.evidence_snapshot.gpu_samples_with_pid_observed}
+                        </div>
+                        <div>{stage.summary}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
             {currentReport.llama_runtime.vram_cleanup.notes.length > 0 && (
               <div className="report-risk-block">
                 {currentReport.llama_runtime.vram_cleanup.notes.map((note) => (
