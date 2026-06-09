@@ -306,6 +306,10 @@ export type LlamaRuntimeReportData = {
   verification_window_ms: number;
   gpu_entry_present_after_shutdown?: boolean | null;
   gpu_memory_bytes_after_shutdown?: number | null;
+  gpu_peak_memory_bytes_after_shutdown?: number | null;
+  gpu_samples_collected_after_shutdown: number;
+  gpu_samples_with_pid_observed_after_shutdown: number;
+  gpu_last_pid_observed_at_ms?: number | null;
   post_shutdown_gpu_visibility_status: string;
   gpu_check_backend?: string | null;
   gpu_check_source?: string | null;

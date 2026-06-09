@@ -45,14 +45,15 @@ function runtimeInspectionTakeaway(
     return "The runtime process was still visible after shutdown, so cleanup evidence is currently unfavorable.";
   }
 
-  if (vramStatus === "gpu_entry_still_observable_after_shutdown") {
-    return "GPU residency was still visible after shutdown, so VRAM exposure remains explicitly observable.";
+  if (vramStatus === "gpu_entry_observed_during_post_shutdown_window") {
+    return "GPU residency was observed during the post-shutdown window, so VRAM exposure remains explicitly observable.";
   }
 
   if (
-    vramStatus === "gpu_pid_still_observable_after_shutdown_but_memory_bytes_unavailable"
+    vramStatus ===
+    "gpu_pid_observed_during_post_shutdown_window_but_memory_bytes_unavailable"
   ) {
-    return "A matching GPU PID remained visible after shutdown, but NVIDIA tooling did not expose per-process VRAM bytes.";
+    return "A matching GPU PID was observed during the post-shutdown window, but the current GPU backend did not expose per-process VRAM bytes.";
   }
 
   if (vramStatus === "gpu_entry_not_observed_after_shutdown_but_visibility_limited") {
@@ -520,6 +521,30 @@ export function PrivacyReportViewer({
                 value: currentReport.llama_runtime.gpu_memory_bytes_after_shutdown
                   ? formatBytes(currentReport.llama_runtime.gpu_memory_bytes_after_shutdown)
                   : "none",
+              },
+              {
+                label: "peak gpu memory after shutdown",
+                value: currentReport.llama_runtime.gpu_peak_memory_bytes_after_shutdown
+                  ? formatBytes(currentReport.llama_runtime.gpu_peak_memory_bytes_after_shutdown)
+                  : "none",
+              },
+              {
+                label: "post-shutdown gpu samples",
+                value: String(currentReport.llama_runtime.gpu_samples_collected_after_shutdown),
+              },
+              {
+                label: "gpu-positive samples",
+                value: String(
+                  currentReport.llama_runtime.gpu_samples_with_pid_observed_after_shutdown
+                ),
+              },
+              {
+                label: "last gpu pid seen",
+                value:
+                  currentReport.llama_runtime.gpu_last_pid_observed_at_ms === undefined ||
+                  currentReport.llama_runtime.gpu_last_pid_observed_at_ms === null
+                    ? "none"
+                    : `${currentReport.llama_runtime.gpu_last_pid_observed_at_ms} ms`,
               },
               {
                 label: "post-shutdown gpu visibility",

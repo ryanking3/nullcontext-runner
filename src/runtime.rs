@@ -66,9 +66,27 @@ pub struct RuntimePostShutdownObservation {
     pub verification_window_ms: u64,
     pub gpu_entry_present_after_shutdown: Option<bool>,
     pub gpu_memory_bytes_after_shutdown: Option<u64>,
+    pub gpu_peak_memory_bytes_after_shutdown: Option<u64>,
+    pub gpu_samples_collected_after_shutdown: u32,
+    pub gpu_samples_with_pid_observed_after_shutdown: u32,
+    pub gpu_last_pid_observed_at_ms: Option<u64>,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub observation_notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimePostShutdownGpuWindowObservation {
+    any_pid_observed: bool,
+    any_sample_collected: bool,
+    last_memory_bytes: Option<u64>,
+    peak_memory_bytes: Option<u64>,
+    sample_count: u32,
+    samples_with_pid_observed: u32,
+    last_pid_observed_at_ms: Option<u64>,
+    backends: Vec<String>,
+    sources: Vec<String>,
+    notes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +106,50 @@ pub struct RuntimeLaunchFailure {
 
 const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
 const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
+
+impl RuntimePostShutdownGpuWindowObservation {
+    fn record_sample(
+        &mut self,
+        elapsed_ms: u64,
+        sample: crate::gpu_inspection::GpuInspectionObservation,
+    ) {
+        self.any_sample_collected = true;
+        self.sample_count = self.sample_count.saturating_add(1);
+
+        if sample.pid_observed == Some(true) {
+            self.any_pid_observed = true;
+            self.samples_with_pid_observed = self.samples_with_pid_observed.saturating_add(1);
+            self.last_pid_observed_at_ms = Some(elapsed_ms);
+            self.last_memory_bytes = sample.memory_bytes;
+
+            if let Some(memory_bytes) = sample.memory_bytes {
+                self.peak_memory_bytes = Some(
+                    self.peak_memory_bytes
+                        .map(|existing| existing.max(memory_bytes))
+                        .unwrap_or(memory_bytes),
+                );
+            }
+        }
+
+        push_unique_label(&mut self.backends, sample.backend);
+        push_unique_label(&mut self.sources, sample.source);
+        push_unique_label(&mut self.notes, sample.note);
+    }
+}
+
+fn push_unique_label(target: &mut Vec<String>, value: Option<String>) {
+    let Some(value) = value else {
+        return;
+    };
+
+    if !target.iter().any(|existing| existing == &value) {
+        target.push(value);
+    }
+}
+
+fn merge_observation_labels(labels: &[String]) -> String {
+    labels.join(" + ")
+}
 
 impl ManagedRuntime {
     pub fn launch(config: &SessionConfig) -> Result<Self> {
@@ -324,11 +386,13 @@ fn reserve_local_runtime_port() -> Result<u16> {
 
 pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
     let started_at = Instant::now();
-    let mut process_present_after_shutdown;
-    let mut process_check_source;
+    let verification_window = Duration::from_millis(POST_SHUTDOWN_VERIFICATION_WINDOW_MS);
+    let mut process_present_after_shutdown = None;
+    let mut process_check_source = None;
     let mut process_note = None;
+    let mut gpu_window = RuntimePostShutdownGpuWindowObservation::default();
 
-    loop {
+    while started_at.elapsed() <= verification_window {
         let (present, source, note) = observe_process_presence(pid);
         process_present_after_shutdown = present;
         process_check_source = source;
@@ -337,9 +401,11 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
             process_note = note;
         }
 
-        if present == Some(false)
-            || started_at.elapsed() >= Duration::from_millis(POST_SHUTDOWN_VERIFICATION_WINDOW_MS)
-        {
+        let elapsed_ms = started_at.elapsed().as_millis() as u64;
+        let gpu = observe_gpu_process(pid);
+        gpu_window.record_sample(elapsed_ms, gpu);
+
+        if started_at.elapsed() >= verification_window {
             break;
         }
 
@@ -354,17 +420,21 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
         None
     };
 
-    let gpu = observe_gpu_process(pid);
-    let gpu_entry_present_after_shutdown = gpu.pid_observed;
-
     let mut observation_notes = Vec::new();
 
     if let Some(note) = process_note {
         observation_notes.push(note);
     }
 
-    if let Some(note) = gpu.note {
-        observation_notes.push(note);
+    observation_notes.extend(gpu_window.notes.clone());
+
+    if gpu_window.sample_count > 0 {
+        observation_notes.push(format!(
+            "Post-shutdown GPU inspection collected {} sample(s) over the {} ms verification window; {} sample(s) observed a matching GPU PID.",
+            gpu_window.sample_count,
+            POST_SHUTDOWN_VERIFICATION_WINDOW_MS,
+            gpu_window.samples_with_pid_observed
+        ));
     }
 
     RuntimePostShutdownObservation {
@@ -390,10 +460,26 @@ pub fn observe_post_shutdown(pid: u32) -> RuntimePostShutdownObservation {
             .map(|sample| sample.resident_regions.clone())
             .unwrap_or_default(),
         verification_window_ms: POST_SHUTDOWN_VERIFICATION_WINDOW_MS,
-        gpu_entry_present_after_shutdown,
-        gpu_memory_bytes_after_shutdown: gpu.memory_bytes,
-        gpu_check_backend: gpu.backend,
-        gpu_check_source: gpu.source,
+        gpu_entry_present_after_shutdown: if gpu_window.any_sample_collected {
+            Some(gpu_window.any_pid_observed)
+        } else {
+            None
+        },
+        gpu_memory_bytes_after_shutdown: gpu_window.last_memory_bytes,
+        gpu_peak_memory_bytes_after_shutdown: gpu_window.peak_memory_bytes,
+        gpu_samples_collected_after_shutdown: gpu_window.sample_count,
+        gpu_samples_with_pid_observed_after_shutdown: gpu_window.samples_with_pid_observed,
+        gpu_last_pid_observed_at_ms: gpu_window.last_pid_observed_at_ms,
+        gpu_check_backend: if gpu_window.backends.is_empty() {
+            None
+        } else {
+            Some(merge_observation_labels(&gpu_window.backends))
+        },
+        gpu_check_source: if gpu_window.sources.is_empty() {
+            None
+        } else {
+            Some(merge_observation_labels(&gpu_window.sources))
+        },
         observation_notes,
     }
 }

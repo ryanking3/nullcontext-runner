@@ -343,7 +343,7 @@ Before `v1.0`, this needs at least a lightweight harness:
 11. `[*] Add GPU inspection backend abstraction`
 12. `[*] Add CUDA or NVML inspection spike implementation`
 13. `[*] Report allocation visibility separately from PID visibility`
-14. `[ ] Improve Windows VRAM post-shutdown evidence reporting`
+14. `[*] Improve Windows VRAM post-shutdown evidence reporting`
 
 ### Track D: Experimental Sanitization
 
