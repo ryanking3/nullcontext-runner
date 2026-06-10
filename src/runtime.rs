@@ -6,6 +6,7 @@ use crate::runtime_introspection::{
 };
 use anyhow::{bail, Context, Result};
 use reqwest::blocking::Client;
+use serde::Serialize;
 #[cfg(target_os = "windows")]
 use serde_json::Value;
 use std::fmt;
@@ -135,7 +136,7 @@ const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
 const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
 const VRAM_CLEANUP_STRATEGY_ID: &str = "multi_stage_cooldown_and_relaunch_probe";
 const VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS: u64 = 1000;
-const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 3] = [
+const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 4] = [
     VramCleanupStrategyStagePlan {
         stage_id: "short_cooldown_recheck",
         stage_label: "Short Cooldown Recheck",
@@ -157,6 +158,13 @@ const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 3] = [
         cooldown_ms_before_stage: 500,
         perform_helper_relaunch_probe: true,
     },
+    VramCleanupStrategyStagePlan {
+        stage_id: "helper_runtime_allocation_churn_probe",
+        stage_label: "Helper Runtime Allocation Churn Probe",
+        stage_kind: "helper_runtime_allocation_churn_probe",
+        cooldown_ms_before_stage: 500,
+        perform_helper_relaunch_probe: true,
+    },
 ];
 
 #[derive(Clone, Copy)]
@@ -166,6 +174,12 @@ struct VramCleanupStrategyStagePlan {
     stage_kind: &'static str,
     cooldown_ms_before_stage: u64,
     perform_helper_relaunch_probe: bool,
+}
+
+#[derive(Serialize)]
+struct HelperProbeCompletionRequest {
+    prompt: String,
+    n_predict: u32,
 }
 
 impl RuntimePostShutdownGpuWindowObservation {
@@ -533,9 +547,9 @@ pub fn observe_post_shutdown(
             thread::sleep(Duration::from_millis(stage_plan.cooldown_ms_before_stage));
             let (action_status, action_notes) = if stage_plan.perform_helper_relaunch_probe {
                 match strategy_config {
-                    Some(config) => execute_helper_runtime_relaunch_probe(config),
+                    Some(config) => execute_helper_runtime_probe_stage(config, stage_plan),
                     None => (
-                        "helper_runtime_relaunch_probe_unavailable".to_string(),
+                        format!("{}_unavailable", stage_plan.stage_id),
                         vec![
                             "Helper runtime relaunch probe was skipped because no session configuration was available during this shutdown observation."
                                 .to_string(),
@@ -657,22 +671,47 @@ fn observe_gpu_window(
     collector.finalize(verification_window_ms)
 }
 
-fn execute_helper_runtime_relaunch_probe(config: &SessionConfig) -> (String, Vec<String>) {
+fn execute_helper_runtime_probe_stage(
+    config: &SessionConfig,
+    stage_plan: VramCleanupStrategyStagePlan,
+) -> (String, Vec<String>) {
     match ManagedRuntime::launch(config) {
         Ok(mut helper_runtime) => {
             let helper_pid = helper_runtime.pid();
             let helper_endpoint = helper_runtime.endpoint_url().to_string();
-            let shutdown_result = helper_runtime.shutdown();
-
             let mut notes = vec![format!(
-                "Helper runtime relaunch probe started a temporary llama-server at {} with pid {}.",
-                helper_endpoint, helper_pid
+                "Helper runtime probe stage {} started a temporary llama-server at {} with pid {}.",
+                stage_plan.stage_id, helper_endpoint, helper_pid
             )];
+
+            let action_status = if stage_plan.stage_kind == "helper_runtime_allocation_churn_probe"
+            {
+                match run_helper_runtime_completion_probe(&helper_runtime) {
+                    Ok(()) => {
+                        notes.push(
+                            "Helper runtime allocation churn probe completed a tiny completion request to exercise model/KV/GPU allocation paths before shutdown."
+                                .to_string(),
+                        );
+                        "helper_runtime_allocation_churn_probe_completed".to_string()
+                    }
+                    Err(error) => {
+                        notes.push(format!(
+                            "Helper runtime allocation churn probe failed during completion request: {error}."
+                        ));
+                        "helper_runtime_allocation_churn_probe_request_failed".to_string()
+                    }
+                }
+            } else {
+                "helper_runtime_relaunch_probe_completed".to_string()
+            };
+
+            let shutdown_result = helper_runtime.shutdown();
 
             match shutdown_result {
                 Ok(outcome) => {
                     notes.push(format!(
-                        "Helper runtime relaunch probe shut the temporary runtime down using {} (exit code {}).",
+                        "Helper runtime probe stage {} shut the temporary runtime down using {} (exit code {}).",
+                        stage_plan.stage_id,
                         outcome.shutdown_method,
                         outcome
                             .exit_code
@@ -680,27 +719,47 @@ fn execute_helper_runtime_relaunch_probe(config: &SessionConfig) -> (String, Vec
                             .unwrap_or_else(|| "unknown".to_string())
                     ));
 
-                    ("helper_runtime_relaunch_probe_completed".to_string(), notes)
+                    (action_status, notes)
                 }
                 Err(error) => {
                     notes.push(format!(
-                        "Helper runtime relaunch probe started successfully but cleanup failed: {error}."
+                        "Helper runtime probe stage {} started successfully but cleanup failed: {error}.",
+                        stage_plan.stage_id
                     ));
 
-                    (
-                        "helper_runtime_relaunch_probe_cleanup_failed".to_string(),
-                        notes,
-                    )
+                    (format!("{}_cleanup_failed", stage_plan.stage_id), notes)
                 }
             }
         }
         Err(error) => (
-            "helper_runtime_relaunch_probe_failed".to_string(),
+            format!("{}_failed", stage_plan.stage_id),
             vec![format!(
-                "Helper runtime relaunch probe could not start a temporary runtime: {error}."
+                "Helper runtime probe stage {} could not start a temporary runtime: {error}.",
+                stage_plan.stage_id
             )],
         ),
     }
+}
+
+fn run_helper_runtime_completion_probe(helper_runtime: &ManagedRuntime) -> Result<()> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .context("failed to build helper runtime probe HTTP client")?;
+    let request = HelperProbeCompletionRequest {
+        prompt: "NullContext helper allocation churn probe.".to_string(),
+        n_predict: 8,
+    };
+
+    client
+        .post(helper_runtime.completion_url())
+        .json(&request)
+        .send()
+        .context("failed to send helper runtime completion probe request")?
+        .error_for_status()
+        .context("helper runtime completion probe returned an error status")?;
+
+    Ok(())
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
