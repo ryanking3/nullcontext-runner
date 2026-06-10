@@ -790,8 +790,10 @@ export function PrivacyReportViewer({
                       </div>
                       <div className="report-path-list">
                         <div>stage id: {stage.stage_id}</div>
+                        <div>kind: {humanizeSnakeCase(stage.stage_kind)}</div>
                         <div>cooldown: {stage.cooldown_ms_before_stage} ms</div>
                         <div>window: {stage.verification_window_ms} ms</div>
+                        <div>action: {humanizeSnakeCase(stage.action_status)}</div>
                         <div>
                           peak gpu bytes:{" "}
                           {stage.evidence_snapshot.gpu_peak_memory_bytes
@@ -803,6 +805,9 @@ export function PrivacyReportViewer({
                           {stage.evidence_snapshot.gpu_samples_with_pid_observed}
                         </div>
                         <div>{stage.summary}</div>
+                        {stage.notes.map((note) => (
+                          <div key={note}>{note}</div>
+                        ))}
                       </div>
                     </div>
                   ))}

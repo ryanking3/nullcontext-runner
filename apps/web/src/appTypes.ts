@@ -309,8 +309,10 @@ export type VramCleanupEvidenceSnapshot = {
 export type VramCleanupStrategyStageReport = {
   stage_id: string;
   stage_label: string;
+  stage_kind: string;
   cooldown_ms_before_stage: number;
   verification_window_ms: number;
+  action_status: string;
   evidence_improvement_status: string;
   evidence_snapshot: VramCleanupEvidenceSnapshot;
   summary: string;

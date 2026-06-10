@@ -226,8 +226,10 @@ pub struct VramCleanupEvidenceSnapshot {
 pub struct VramCleanupStrategyStageReport {
     pub stage_id: String,
     pub stage_label: String,
+    pub stage_kind: String,
     pub cooldown_ms_before_stage: u64,
     pub verification_window_ms: u64,
+    pub action_status: String,
     pub evidence_improvement_status: String,
     pub evidence_snapshot: VramCleanupEvidenceSnapshot,
     pub summary: String,
@@ -1416,16 +1418,26 @@ fn build_vram_cleanup_stage_report(
     VramCleanupStrategyStageReport {
         stage_id: strategy_stage.stage_id.clone(),
         stage_label: strategy_stage.stage_label.clone(),
+        stage_kind: strategy_stage.stage_kind.clone(),
         cooldown_ms_before_stage: strategy_stage.cooldown_ms_before_stage,
         verification_window_ms: strategy_stage.window.verification_window_ms,
+        action_status: strategy_stage.action_status.clone(),
         summary: format!(
-            "{} waited {} ms before collecting a {} ms GPU recheck window. {}",
+            "{} ({}) waited {} ms before collecting a {} ms GPU recheck window. {}",
             strategy_stage.stage_label,
+            strategy_stage.action_status,
             strategy_stage.cooldown_ms_before_stage,
             strategy_stage.window.verification_window_ms,
             vram_cleanup_comparison_summary(&evidence_improvement_status)
         ),
-        notes: vram_cleanup_comparison_notes(baseline_snapshot, &evidence_snapshot),
+        notes: {
+            let mut notes = strategy_stage.action_notes.clone();
+            notes.extend(vram_cleanup_comparison_notes(
+                baseline_snapshot,
+                &evidence_snapshot,
+            ));
+            notes
+        },
         evidence_improvement_status,
         evidence_snapshot,
     }

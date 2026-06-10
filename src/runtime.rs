@@ -95,7 +95,10 @@ pub struct RuntimeGpuObservationWindow {
 pub struct RuntimeGpuObservationStrategyStage {
     pub stage_id: String,
     pub stage_label: String,
+    pub stage_kind: String,
     pub cooldown_ms_before_stage: u64,
+    pub action_status: String,
+    pub action_notes: Vec<String>,
     pub window: RuntimeGpuObservationWindow,
 }
 
@@ -130,16 +133,40 @@ pub struct RuntimeLaunchFailure {
 
 const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
 const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
-const VRAM_CLEANUP_STRATEGY_ID: &str = "multi_stage_cooldown_recheck";
+const VRAM_CLEANUP_STRATEGY_ID: &str = "multi_stage_cooldown_and_relaunch_probe";
 const VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS: u64 = 1000;
-const VRAM_CLEANUP_STRATEGY_STAGES: [(&str, &str, u64); 2] = [
-    ("short_cooldown_recheck", "Short Cooldown Recheck", 1500),
-    (
-        "extended_cooldown_recheck",
-        "Extended Cooldown Recheck",
-        3000,
-    ),
+const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 3] = [
+    VramCleanupStrategyStagePlan {
+        stage_id: "short_cooldown_recheck",
+        stage_label: "Short Cooldown Recheck",
+        stage_kind: "cooldown_recheck",
+        cooldown_ms_before_stage: 1500,
+        perform_helper_relaunch_probe: false,
+    },
+    VramCleanupStrategyStagePlan {
+        stage_id: "extended_cooldown_recheck",
+        stage_label: "Extended Cooldown Recheck",
+        stage_kind: "cooldown_recheck",
+        cooldown_ms_before_stage: 3000,
+        perform_helper_relaunch_probe: false,
+    },
+    VramCleanupStrategyStagePlan {
+        stage_id: "helper_runtime_relaunch_probe",
+        stage_label: "Helper Runtime Relaunch Probe",
+        stage_kind: "helper_runtime_relaunch_probe",
+        cooldown_ms_before_stage: 500,
+        perform_helper_relaunch_probe: true,
+    },
 ];
+
+#[derive(Clone, Copy)]
+struct VramCleanupStrategyStagePlan {
+    stage_id: &'static str,
+    stage_label: &'static str,
+    stage_kind: &'static str,
+    cooldown_ms_before_stage: u64,
+    perform_helper_relaunch_probe: bool,
+}
 
 impl RuntimePostShutdownGpuWindowObservation {
     fn record_sample(
@@ -248,7 +275,7 @@ impl ManagedRuntime {
         let mut runtime = Self { child, base_url };
 
         if let Err(error) = runtime.wait_until_ready(Duration::from_secs(60)) {
-            return Err(runtime.build_failed_launch_error(error, gpu_offload_requested(config)));
+            return Err(runtime.build_failed_launch_error(error, config));
         }
 
         stdout_line(format!("Runtime endpoint: {}", runtime.base_url));
@@ -368,11 +395,12 @@ impl ManagedRuntime {
     fn build_failed_launch_error(
         &mut self,
         startup_error: anyhow::Error,
-        gpu_offload_requested: bool,
+        config: &SessionConfig,
     ) -> anyhow::Error {
         let pid = self.pid();
         let cleanup_result = self.shutdown();
-        let post_cleanup_observation = observe_post_shutdown(pid, gpu_offload_requested);
+        let post_cleanup_observation =
+            observe_post_shutdown(pid, gpu_offload_requested(config), None);
         let stdout = read_child_stdout(&mut self.child);
         let stderr = read_child_stderr(&mut self.child);
         let introspection_signals = parse_runtime_introspection_signals(&stdout, &stderr);
@@ -465,6 +493,7 @@ fn reserve_local_runtime_port() -> Result<u16> {
 pub fn observe_post_shutdown(
     pid: u32,
     gpu_offload_requested: bool,
+    strategy_config: Option<&SessionConfig>,
 ) -> RuntimePostShutdownObservation {
     let started_at = Instant::now();
     let verification_window = Duration::from_millis(POST_SHUTDOWN_VERIFICATION_WINDOW_MS);
@@ -500,12 +529,30 @@ pub fn observe_post_shutdown(
     let vram_cleanup_strategy_windows = if gpu_offload_requested {
         let mut stages = Vec::new();
 
-        for (stage_id, stage_label, cooldown_ms_before_stage) in VRAM_CLEANUP_STRATEGY_STAGES {
-            thread::sleep(Duration::from_millis(cooldown_ms_before_stage));
+        for stage_plan in VRAM_CLEANUP_STRATEGY_STAGES {
+            thread::sleep(Duration::from_millis(stage_plan.cooldown_ms_before_stage));
+            let (action_status, action_notes) = if stage_plan.perform_helper_relaunch_probe {
+                match strategy_config {
+                    Some(config) => execute_helper_runtime_relaunch_probe(config),
+                    None => (
+                        "helper_runtime_relaunch_probe_unavailable".to_string(),
+                        vec![
+                            "Helper runtime relaunch probe was skipped because no session configuration was available during this shutdown observation."
+                                .to_string(),
+                        ],
+                    ),
+                }
+            } else {
+                ("cooldown_recheck_completed".to_string(), vec![])
+            };
+
             stages.push(RuntimeGpuObservationStrategyStage {
-                stage_id: stage_id.to_string(),
-                stage_label: stage_label.to_string(),
-                cooldown_ms_before_stage,
+                stage_id: stage_plan.stage_id.to_string(),
+                stage_label: stage_plan.stage_label.to_string(),
+                stage_kind: stage_plan.stage_kind.to_string(),
+                cooldown_ms_before_stage: stage_plan.cooldown_ms_before_stage,
+                action_status,
+                action_notes,
                 window: observe_gpu_window(
                     pid,
                     VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS,
@@ -535,13 +582,15 @@ pub fn observe_post_shutdown(
 
     for strategy_stage in &vram_cleanup_strategy_windows {
         observation_notes.push(format!(
-            "Experimental VRAM cleanup stage {} ({}) waited {} ms, then collected {} GPU sample(s) over a {} ms recheck window.",
+            "Experimental VRAM cleanup stage {} ({}) waited {} ms, completed action status {}, then collected {} GPU sample(s) over a {} ms recheck window.",
             strategy_stage.stage_id,
             strategy_stage.stage_label,
             strategy_stage.cooldown_ms_before_stage,
+            strategy_stage.action_status,
             strategy_stage.window.gpu_samples_collected,
             strategy_stage.window.verification_window_ms
         ));
+        observation_notes.extend(strategy_stage.action_notes.clone());
         observation_notes.extend(strategy_stage.window.observation_notes.clone());
     }
 
@@ -606,6 +655,52 @@ fn observe_gpu_window(
     }
 
     collector.finalize(verification_window_ms)
+}
+
+fn execute_helper_runtime_relaunch_probe(config: &SessionConfig) -> (String, Vec<String>) {
+    match ManagedRuntime::launch(config) {
+        Ok(mut helper_runtime) => {
+            let helper_pid = helper_runtime.pid();
+            let helper_endpoint = helper_runtime.endpoint_url().to_string();
+            let shutdown_result = helper_runtime.shutdown();
+
+            let mut notes = vec![format!(
+                "Helper runtime relaunch probe started a temporary llama-server at {} with pid {}.",
+                helper_endpoint, helper_pid
+            )];
+
+            match shutdown_result {
+                Ok(outcome) => {
+                    notes.push(format!(
+                        "Helper runtime relaunch probe shut the temporary runtime down using {} (exit code {}).",
+                        outcome.shutdown_method,
+                        outcome
+                            .exit_code
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "unknown".to_string())
+                    ));
+
+                    ("helper_runtime_relaunch_probe_completed".to_string(), notes)
+                }
+                Err(error) => {
+                    notes.push(format!(
+                        "Helper runtime relaunch probe started successfully but cleanup failed: {error}."
+                    ));
+
+                    (
+                        "helper_runtime_relaunch_probe_cleanup_failed".to_string(),
+                        notes,
+                    )
+                }
+            }
+        }
+        Err(error) => (
+            "helper_runtime_relaunch_probe_failed".to_string(),
+            vec![format!(
+                "Helper runtime relaunch probe could not start a temporary runtime: {error}."
+            )],
+        ),
+    }
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]

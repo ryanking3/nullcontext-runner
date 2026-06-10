@@ -704,6 +704,7 @@ impl ChatSessionManager {
         let post_shutdown_observation = observe_post_shutdown(
             runtime_pid,
             active.config.gpu_layers.parse::<u32>().unwrap_or(0) > 0,
+            Some(&active.config),
         );
         let process_scan_report = if process_scan_markers.is_empty() {
             build_skipped_process_scan_report(
