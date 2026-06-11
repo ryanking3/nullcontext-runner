@@ -245,7 +245,9 @@ This phase is explicitly experimental. Test strategies like:
 
 - process termination alone
 - different shutdown timing
+- self-owned host RAM pressure / overwrite probes
 - forced context teardown if feasible
+- self-owned CUDA VRAM pressure / overwrite probes
 - allocator churn / overwrite experiments if feasible
 - device reset only if safe and realistic
 
@@ -350,7 +352,9 @@ Before `v1.0`, this needs at least a lightweight harness:
 15. `[*] Add VRAM cleanup strategy model`
 16. `[*] Add baseline versus strategy comparison reporting`
 17. `[*] Implement first experimental VRAM cleanup strategy`
-18. `[ ] Report VRAM cleanup outcome evidence`
+18. `[*] Report VRAM cleanup outcome evidence`
+
+Current experimental stages in-tree now include cooldown rechecks, host RAM pressure, CUDA memory pressure, and helper-runtime relaunch/churn probes.
 
 ### Track E: Validation and Release Gating
 

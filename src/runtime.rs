@@ -1,6 +1,8 @@
 use crate::config::SessionConfig;
+use crate::cuda_pressure::run_cuda_memory_pressure_probe;
 use crate::gpu_inspection::observe_gpu_process;
 use crate::logging::stdout_line;
+use crate::ram_pressure::run_host_ram_pressure_probe;
 use crate::runtime_introspection::{
     parse_runtime_introspection_signals, RuntimeIntrospectionSignal,
 };
@@ -134,9 +136,9 @@ pub struct RuntimeLaunchFailure {
 
 const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
 const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
-const VRAM_CLEANUP_STRATEGY_ID: &str = "multi_stage_cooldown_and_relaunch_probe";
+const VRAM_CLEANUP_STRATEGY_ID: &str = "multi_stage_cleanup_experiments";
 const VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS: u64 = 1000;
-const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 4] = [
+const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 6] = [
     VramCleanupStrategyStagePlan {
         stage_id: "short_cooldown_recheck",
         stage_label: "Short Cooldown Recheck",
@@ -164,6 +166,20 @@ const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 4] = [
         stage_kind: "helper_runtime_allocation_churn_probe",
         cooldown_ms_before_stage: 500,
         perform_helper_relaunch_probe: true,
+    },
+    VramCleanupStrategyStagePlan {
+        stage_id: "host_ram_pressure_probe",
+        stage_label: "Host RAM Pressure Probe",
+        stage_kind: "host_ram_pressure_probe",
+        cooldown_ms_before_stage: 250,
+        perform_helper_relaunch_probe: false,
+    },
+    VramCleanupStrategyStagePlan {
+        stage_id: "cuda_memory_pressure_probe",
+        stage_label: "CUDA Memory Pressure Probe",
+        stage_kind: "cuda_memory_pressure_probe",
+        cooldown_ms_before_stage: 250,
+        perform_helper_relaunch_probe: false,
     },
 ];
 
@@ -545,20 +561,8 @@ pub fn observe_post_shutdown(
 
         for stage_plan in VRAM_CLEANUP_STRATEGY_STAGES {
             thread::sleep(Duration::from_millis(stage_plan.cooldown_ms_before_stage));
-            let (action_status, action_notes) = if stage_plan.perform_helper_relaunch_probe {
-                match strategy_config {
-                    Some(config) => execute_helper_runtime_probe_stage(config, stage_plan),
-                    None => (
-                        format!("{}_unavailable", stage_plan.stage_id),
-                        vec![
-                            "Helper runtime relaunch probe was skipped because no session configuration was available during this shutdown observation."
-                                .to_string(),
-                        ],
-                    ),
-                }
-            } else {
-                ("cooldown_recheck_completed".to_string(), vec![])
-            };
+            let (action_status, action_notes) =
+                execute_vram_cleanup_strategy_stage(stage_plan, strategy_config);
 
             stages.push(RuntimeGpuObservationStrategyStage {
                 stage_id: stage_plan.stage_id.to_string(),
@@ -644,6 +648,33 @@ pub fn observe_post_shutdown(
             .then(|| VRAM_CLEANUP_STRATEGY_ID.to_string()),
         vram_cleanup_strategy_windows,
         observation_notes,
+    }
+}
+
+fn execute_vram_cleanup_strategy_stage(
+    stage_plan: VramCleanupStrategyStagePlan,
+    strategy_config: Option<&SessionConfig>,
+) -> (String, Vec<String>) {
+    match stage_plan.stage_kind {
+        "host_ram_pressure_probe" => {
+            let report = run_host_ram_pressure_probe();
+            (report.status, report.notes)
+        }
+        "cuda_memory_pressure_probe" => {
+            let report = run_cuda_memory_pressure_probe();
+            (report.status, report.notes)
+        }
+        _ if stage_plan.perform_helper_relaunch_probe => match strategy_config {
+            Some(config) => execute_helper_runtime_probe_stage(config, stage_plan),
+            None => (
+                format!("{}_unavailable", stage_plan.stage_id),
+                vec![
+                    "Helper runtime relaunch probe was skipped because no session configuration was available during this shutdown observation."
+                        .to_string(),
+                ],
+            ),
+        },
+        _ => ("cooldown_recheck_completed".to_string(), vec![]),
     }
 }
 

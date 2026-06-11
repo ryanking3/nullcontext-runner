@@ -1186,9 +1186,9 @@ fn build_vram_cleanup_strategy_report(
             strategy_id: post_shutdown
                 .vram_cleanup_strategy_id
                 .clone()
-                .unwrap_or_else(|| "multi_stage_cooldown_recheck".to_string()),
-            strategy_label: "Multi-Stage Cooldown Recheck".to_string(),
-            strategy_kind: "experimental_multi_stage_timing_recheck".to_string(),
+                .unwrap_or_else(|| "multi_stage_cleanup_experiments".to_string()),
+            strategy_label: "Multi-Stage Cleanup Experiments".to_string(),
+            strategy_kind: "experimental_multi_stage_cleanup".to_string(),
             implementation_status: "experimental_strategy_implemented".to_string(),
             support_status: "supported".to_string(),
             attempt_status: "strategy_attempted".to_string(),
@@ -1196,23 +1196,25 @@ fn build_vram_cleanup_strategy_report(
                 .to_string(),
             evidence_outcome,
             expected_effect_scope:
-                "This experimental strategy runs multiple post-shutdown cooldown rechecks to see whether driver-visible GPU residency decays over time without a more invasive cleanup action."
+                "This experimental strategy runs multiple post-shutdown stages, including cooldown rechecks, self-owned host-RAM pressure, self-owned CUDA memory pressure, and helper-runtime probes, to see whether driver-visible GPU residency changes after more invasive cleanup attempts."
                     .to_string(),
             summary: format!(
-                "NullContext ran experimental VRAM cleanup strategy {} with {} staged recheck(s) after the baseline window. Final-stage comparison: {}",
+                "NullContext ran experimental VRAM cleanup strategy {} with {} staged cleanup experiment(s) after the baseline window. Final-stage comparison: {}",
                 post_shutdown
                     .vram_cleanup_strategy_id
                     .as_deref()
-                    .unwrap_or("multi_stage_cooldown_recheck"),
+                    .unwrap_or("multi_stage_cleanup_experiments"),
                 stage_reports.len(),
                 comparison.summary.as_str()
             ),
             comparison,
             stages: stage_reports,
             notes: vec![
-                "These are timing-based experimental stages, not proof of allocator- or driver-level VRAM sanitization."
+                "These are experimental cleanup stages, not proof of allocator- or driver-level VRAM sanitization."
                     .to_string(),
-                "A stronger future strategy may need explicit context teardown, allocator churn, or lower-level CUDA/NVML control."
+                "Host-RAM and CUDA pressure probes do real overwrite pressure in memory owned by NullContext, but they still do not prove that the exact prior llama.cpp pages or VRAM allocations were reclaimed and overwritten."
+                    .to_string(),
+                "A stronger future strategy may need explicit context teardown, allocator churn, direct process-memory evidence, or lower-level CUDA/NVML control."
                     .to_string(),
             ],
         };
