@@ -672,6 +672,12 @@ export function PrivacyReportViewer({
                   ),
                 },
                 {
+                  label: "selected stage",
+                  value:
+                    currentReport.llama_runtime.vram_cleanup.comparison.selected_stage_label ??
+                    "none",
+                },
+                {
                   label: "improvement status",
                   value: humanizeSnakeCase(
                     currentReport.llama_runtime.vram_cleanup.comparison
@@ -681,9 +687,16 @@ export function PrivacyReportViewer({
               ]}
             />
 
+            <div className="report-risk-block">
+              <p>
+                <strong>selection reason:</strong>{" "}
+                {currentReport.llama_runtime.vram_cleanup.comparison.selection_reason}
+              </p>
+            </div>
+
             <details className="report-detail" open>
               <summary>
-                <span>baseline vs current evidence</span>
+                <span>baseline vs selected evidence</span>
                 <span className="pill neutral">
                   {humanizeSnakeCase(
                     currentReport.llama_runtime.vram_cleanup.comparison
@@ -721,6 +734,21 @@ export function PrivacyReportViewer({
                       currentReport.llama_runtime.vram_cleanup.comparison.current_snapshot
                         .post_shutdown_gpu_visibility_status
                     ),
+                  },
+                  {
+                    label: "selected stage id",
+                    value:
+                      currentReport.llama_runtime.vram_cleanup.comparison.selected_stage_id ??
+                      "none",
+                  },
+                  {
+                    label: "selected stage kind",
+                    value: currentReport.llama_runtime.vram_cleanup.comparison.selected_stage_kind
+                      ? humanizeSnakeCase(
+                          currentReport.llama_runtime.vram_cleanup.comparison
+                            .selected_stage_kind
+                        )
+                      : "none",
                   },
                   {
                     label: "baseline peak bytes",

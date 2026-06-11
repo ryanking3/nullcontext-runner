@@ -258,6 +258,18 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.llama_runtime.vram_cleanup.stages = [];
     }
 
+    if (
+      parsed.llama_runtime &&
+      parsed.llama_runtime.vram_cleanup?.comparison &&
+      parsed.llama_runtime.vram_cleanup.comparison.selection_reason === undefined
+    ) {
+      parsed.llama_runtime.vram_cleanup.comparison.selection_reason =
+        legacyVramCleanupComparisonReport().selection_reason;
+      parsed.llama_runtime.vram_cleanup.comparison.selected_stage_id ??= null;
+      parsed.llama_runtime.vram_cleanup.comparison.selected_stage_label ??= null;
+      parsed.llama_runtime.vram_cleanup.comparison.selected_stage_kind ??= null;
+    }
+
     return parsed;
   } catch {
     return null;
@@ -311,6 +323,10 @@ function legacyVramCleanupComparisonReport() {
       gpu_samples_with_pid_observed: 0,
       gpu_last_pid_observed_at_ms: null,
     },
+    selected_stage_id: null,
+    selected_stage_label: null,
+    selected_stage_kind: null,
+    selection_reason: "This older report did not record stage-selection metadata.",
     summary:
       "This older report did not include structured baseline-versus-strategy VRAM comparison data.",
     notes: [

@@ -291,6 +291,10 @@ export type VramCleanupComparisonReport = {
   evidence_improvement_status: string;
   baseline_snapshot: VramCleanupEvidenceSnapshot;
   current_snapshot: VramCleanupEvidenceSnapshot;
+  selected_stage_id?: string | null;
+  selected_stage_label?: string | null;
+  selected_stage_kind?: string | null;
+  selection_reason: string;
   summary: string;
   notes: string[];
 };

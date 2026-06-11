@@ -206,6 +206,13 @@ pub struct VramCleanupComparisonReport {
     pub evidence_improvement_status: String,
     pub baseline_snapshot: VramCleanupEvidenceSnapshot,
     pub current_snapshot: VramCleanupEvidenceSnapshot,
+    #[serde(default)]
+    pub selected_stage_id: Option<String>,
+    #[serde(default)]
+    pub selected_stage_label: Option<String>,
+    #[serde(default)]
+    pub selected_stage_kind: Option<String>,
+    pub selection_reason: String,
     pub summary: String,
     pub notes: Vec<String>,
 }
@@ -1172,13 +1179,13 @@ fn build_vram_cleanup_strategy_report(
             ));
         }
 
-        let final_stage = stage_reports
-            .last()
+        let selected_stage = select_best_vram_cleanup_stage_report(&stage_reports)
             .cloned()
             .expect("strategy stages should exist when reporting experimental cleanup");
         let comparison = build_experimental_vram_cleanup_comparison_report(
             baseline_snapshot.clone(),
-            final_stage.evidence_snapshot.clone(),
+            &selected_stage,
+            stage_reports.len(),
         );
         let evidence_outcome = strategy_evidence_outcome(&comparison.evidence_improvement_status);
 
@@ -1199,12 +1206,13 @@ fn build_vram_cleanup_strategy_report(
                 "This experimental strategy runs multiple post-shutdown stages, including cooldown rechecks, self-owned host-RAM pressure, explicit host page discard/decommit pressure, self-owned CUDA memory pressure, and helper-runtime probes, to see whether driver-visible GPU residency changes after more invasive cleanup attempts."
                     .to_string(),
             summary: format!(
-                "NullContext ran experimental VRAM cleanup strategy {} with {} staged cleanup experiment(s) after the baseline window. Final-stage comparison: {}",
+                "NullContext ran experimental VRAM cleanup strategy {} with {} staged cleanup experiment(s) after the baseline window. Selected strongest stage: {}. {}",
                 post_shutdown
                     .vram_cleanup_strategy_id
                     .as_deref()
                     .unwrap_or("multi_stage_cleanup_experiments"),
                 stage_reports.len(),
+                selected_stage.stage_label,
                 comparison.summary.as_str()
             ),
             comparison,
@@ -1454,6 +1462,11 @@ fn build_baseline_only_vram_cleanup_comparison_report(
         evidence_improvement_status: "baseline_only_no_strategy_delta".to_string(),
         baseline_snapshot: baseline_snapshot.clone(),
         current_snapshot: baseline_snapshot,
+        selected_stage_id: None,
+        selected_stage_label: None,
+        selected_stage_kind: None,
+        selection_reason: "No experimental cleanup stage was selected because this run only recorded the baseline reference path."
+            .to_string(),
         summary:
             "This run establishes the baseline VRAM evidence reference. No experimental cleanup strategy was applied yet, so there is no strategy delta to compare."
                 .to_string(),
@@ -1508,6 +1521,84 @@ fn compare_vram_cleanup_snapshots(
     }
 
     "evidence_inconclusive".to_string()
+}
+
+fn select_best_vram_cleanup_stage_report(
+    stage_reports: &[VramCleanupStrategyStageReport],
+) -> Option<&VramCleanupStrategyStageReport> {
+    stage_reports
+        .iter()
+        .max_by_key(|stage| vram_cleanup_stage_preference_key(stage))
+}
+
+fn vram_cleanup_stage_preference_key(stage: &VramCleanupStrategyStageReport) -> (u8, u8, u32, u64) {
+    (
+        vram_cleanup_stage_status_rank(&stage.evidence_improvement_status),
+        vram_cleanup_stage_visibility_rank(&stage.evidence_snapshot),
+        u32::MAX.saturating_sub(stage.evidence_snapshot.gpu_samples_with_pid_observed),
+        stage
+            .evidence_snapshot
+            .gpu_peak_memory_bytes
+            .map(|value| u64::MAX.saturating_sub(value))
+            .unwrap_or(u64::MAX),
+    )
+}
+
+fn vram_cleanup_stage_status_rank(evidence_improvement_status: &str) -> u8 {
+    match evidence_improvement_status {
+        "evidence_improved_pid_no_longer_observed_after_strategy" => 8,
+        "evidence_unchanged_not_observed" => 7,
+        "evidence_improved_bytes_no_longer_visible_but_pid_still_observed" => 6,
+        "evidence_improved_peak_bytes_lower_but_residency_still_observed" => 5,
+        "evidence_unchanged_pid_still_observed" => 4,
+        "evidence_worsened_peak_bytes_higher_after_strategy" => 3,
+        "evidence_worsened_gpu_visibility_increased_after_strategy" => 2,
+        "evidence_inconclusive_visibility_limited_or_unavailable" | "evidence_inconclusive" => 1,
+        _ => 0,
+    }
+}
+
+fn vram_cleanup_stage_visibility_rank(snapshot: &VramCleanupEvidenceSnapshot) -> u8 {
+    match (snapshot.gpu_entry_observed, snapshot.gpu_memory_bytes) {
+        (Some(false), _) => 3,
+        (Some(true), None) => 2,
+        (Some(true), Some(_)) => 1,
+        (None, _) => 0,
+    }
+}
+
+fn vram_cleanup_stage_selection_reason(stage: &VramCleanupStrategyStageReport) -> String {
+    match stage.evidence_improvement_status.as_str() {
+        "evidence_improved_pid_no_longer_observed_after_strategy" => {
+            "This stage was selected because its recheck no longer observed a matching GPU PID, which is the strongest driver-visible outcome currently available."
+                .to_string()
+        }
+        "evidence_unchanged_not_observed" => {
+            "This stage was selected because its recheck also showed no matching GPU PID, preserving the clearest observed post-shutdown visibility state."
+                .to_string()
+        }
+        "evidence_improved_bytes_no_longer_visible_but_pid_still_observed" => {
+            "This stage was selected because it still observed the GPU PID but no longer surfaced per-process GPU memory bytes."
+                .to_string()
+        }
+        "evidence_improved_peak_bytes_lower_but_residency_still_observed" => {
+            "This stage was selected because GPU residency was still visible, but with lower peak byte visibility than stronger competing stages."
+                .to_string()
+        }
+        "evidence_unchanged_pid_still_observed" => {
+            "This stage was selected because no stage produced a cleaner outcome, so this was the best available observed result among still-visible GPU residency states."
+                .to_string()
+        }
+        "evidence_worsened_peak_bytes_higher_after_strategy"
+        | "evidence_worsened_gpu_visibility_increased_after_strategy" => {
+            "This stage was selected only because no stage produced a better observed outcome; the recorded evidence remained worsened or noisier than the baseline."
+                .to_string()
+        }
+        _ => {
+            "This stage was selected as the best available comparison point, but the evidence remained visibility-limited or inconclusive."
+                .to_string()
+        }
+    }
 }
 
 fn snapshot_is_inconclusive(snapshot: &VramCleanupEvidenceSnapshot) -> bool {
@@ -1587,19 +1678,46 @@ fn vram_cleanup_comparison_notes(
 
 fn build_experimental_vram_cleanup_comparison_report(
     baseline_snapshot: VramCleanupEvidenceSnapshot,
-    current_snapshot: VramCleanupEvidenceSnapshot,
+    selected_stage: &VramCleanupStrategyStageReport,
+    total_stage_count: usize,
 ) -> VramCleanupComparisonReport {
+    let current_snapshot = selected_stage.evidence_snapshot.clone();
     let evidence_improvement_status =
         compare_vram_cleanup_snapshots(&baseline_snapshot, &current_snapshot);
 
     VramCleanupComparisonReport {
-        comparison_status: "baseline_compared_to_experimental_strategy".to_string(),
-        current_run_role: "experimental_strategy_result".to_string(),
-        summary: vram_cleanup_comparison_summary(&evidence_improvement_status),
-        notes: vram_cleanup_comparison_notes(&baseline_snapshot, &current_snapshot),
+        comparison_status: "baseline_compared_to_selected_experimental_stage".to_string(),
+        current_run_role: "selected_experimental_strategy_stage_result".to_string(),
+        summary: format!(
+            "Selected stage {} ({}). {}",
+            selected_stage.stage_label,
+            selected_stage.action_status,
+            vram_cleanup_comparison_summary(&evidence_improvement_status)
+        ),
+        notes: {
+            let mut notes = vec![
+                format!(
+                    "Selected stage {} ({}) was chosen as the strongest observed cleanup outcome from {} recorded stage(s).",
+                    selected_stage.stage_label, selected_stage.stage_id, total_stage_count
+                ),
+                format!(
+                    "Selection reason: {}",
+                    vram_cleanup_stage_selection_reason(selected_stage)
+                ),
+            ];
+            notes.extend(vram_cleanup_comparison_notes(
+                &baseline_snapshot,
+                &current_snapshot,
+            ));
+            notes
+        },
         evidence_improvement_status,
         baseline_snapshot,
         current_snapshot,
+        selected_stage_id: Some(selected_stage.stage_id.clone()),
+        selected_stage_label: Some(selected_stage.stage_label.clone()),
+        selected_stage_kind: Some(selected_stage.stage_kind.clone()),
+        selection_reason: vram_cleanup_stage_selection_reason(selected_stage),
     }
 }
 
@@ -1621,6 +1739,11 @@ fn build_not_applicable_vram_cleanup_comparison_report() -> VramCleanupCompariso
         evidence_improvement_status: "not_applicable".to_string(),
         baseline_snapshot: snapshot.clone(),
         current_snapshot: snapshot,
+        selected_stage_id: None,
+        selected_stage_label: None,
+        selected_stage_kind: None,
+        selection_reason:
+            "No cleanup stage was selected because GPU offload was not requested.".to_string(),
         summary:
             "No baseline-versus-strategy comparison was relevant because GPU offload was not requested."
                 .to_string(),
@@ -1647,6 +1770,12 @@ fn build_startup_failed_vram_cleanup_comparison_report() -> VramCleanupCompariso
         evidence_improvement_status: "inconclusive_due_to_startup_failure".to_string(),
         baseline_snapshot: snapshot.clone(),
         current_snapshot: snapshot,
+        selected_stage_id: None,
+        selected_stage_label: None,
+        selected_stage_kind: None,
+        selection_reason:
+            "No cleanup stage was selected because startup failed before the experimental strategy could run."
+                .to_string(),
         summary:
             "No baseline-versus-strategy comparison was available because startup failed before NullContext could complete a normal VRAM observation baseline."
                 .to_string(),
@@ -1675,6 +1804,11 @@ fn default_vram_cleanup_comparison_report() -> VramCleanupComparisonReport {
         evidence_improvement_status: "legacy_report_unavailable".to_string(),
         baseline_snapshot: snapshot.clone(),
         current_snapshot: snapshot,
+        selected_stage_id: None,
+        selected_stage_label: None,
+        selected_stage_kind: None,
+        selection_reason:
+            "This older report did not record stage-selection metadata.".to_string(),
         summary:
             "This older report did not include structured baseline-versus-strategy VRAM comparison data."
                 .to_string(),
