@@ -2,7 +2,7 @@ use crate::config::SessionConfig;
 use crate::cuda_pressure::run_cuda_memory_pressure_probe;
 use crate::gpu_inspection::observe_gpu_process;
 use crate::logging::stdout_line;
-use crate::ram_pressure::run_host_ram_pressure_probe;
+use crate::ram_pressure::{run_host_page_discard_probe, run_host_ram_pressure_probe};
 use crate::runtime_introspection::{
     parse_runtime_introspection_signals, RuntimeIntrospectionSignal,
 };
@@ -138,7 +138,7 @@ const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
 const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
 const VRAM_CLEANUP_STRATEGY_ID: &str = "multi_stage_cleanup_experiments";
 const VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS: u64 = 1000;
-const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 6] = [
+const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 7] = [
     VramCleanupStrategyStagePlan {
         stage_id: "short_cooldown_recheck",
         stage_label: "Short Cooldown Recheck",
@@ -171,6 +171,13 @@ const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 6] = [
         stage_id: "host_ram_pressure_probe",
         stage_label: "Host RAM Pressure Probe",
         stage_kind: "host_ram_pressure_probe",
+        cooldown_ms_before_stage: 250,
+        perform_helper_relaunch_probe: false,
+    },
+    VramCleanupStrategyStagePlan {
+        stage_id: "host_page_discard_probe",
+        stage_label: "Host Page Discard Probe",
+        stage_kind: "host_page_discard_probe",
         cooldown_ms_before_stage: 250,
         perform_helper_relaunch_probe: false,
     },
@@ -658,6 +665,10 @@ fn execute_vram_cleanup_strategy_stage(
     match stage_plan.stage_kind {
         "host_ram_pressure_probe" => {
             let report = run_host_ram_pressure_probe();
+            (report.status, report.notes)
+        }
+        "host_page_discard_probe" => {
+            let report = run_host_page_discard_probe();
             (report.status, report.notes)
         }
         "cuda_memory_pressure_probe" => {

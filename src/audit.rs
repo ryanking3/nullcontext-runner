@@ -1196,7 +1196,7 @@ fn build_vram_cleanup_strategy_report(
                 .to_string(),
             evidence_outcome,
             expected_effect_scope:
-                "This experimental strategy runs multiple post-shutdown stages, including cooldown rechecks, self-owned host-RAM pressure, self-owned CUDA memory pressure, and helper-runtime probes, to see whether driver-visible GPU residency changes after more invasive cleanup attempts."
+                "This experimental strategy runs multiple post-shutdown stages, including cooldown rechecks, self-owned host-RAM pressure, explicit host page discard/decommit pressure, self-owned CUDA memory pressure, and helper-runtime probes, to see whether driver-visible GPU residency changes after more invasive cleanup attempts."
                     .to_string(),
             summary: format!(
                 "NullContext ran experimental VRAM cleanup strategy {} with {} staged cleanup experiment(s) after the baseline window. Final-stage comparison: {}",
@@ -1212,7 +1212,7 @@ fn build_vram_cleanup_strategy_report(
             notes: vec![
                 "These are experimental cleanup stages, not proof of allocator- or driver-level VRAM sanitization."
                     .to_string(),
-                "Host-RAM and CUDA pressure probes do real overwrite pressure in memory owned by NullContext, but they still do not prove that the exact prior llama.cpp pages or VRAM allocations were reclaimed and overwritten."
+                "Host-RAM pressure, host page discard/decommit pressure, and CUDA pressure stages do real overwrite/discard work in memory owned by NullContext, but they still do not prove that the exact prior llama.cpp pages or VRAM allocations were reclaimed and overwritten."
                     .to_string(),
                 "A stronger future strategy may need explicit context teardown, allocator churn, direct process-memory evidence, or lower-level CUDA/NVML control."
                     .to_string(),

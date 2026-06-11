@@ -1,6 +1,8 @@
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+use core::ffi::c_void;
 #[cfg(target_os = "linux")]
 use std::fs;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::process::Command;
 
 pub struct HostRamPressureProbeReport {
@@ -12,6 +14,10 @@ const HOST_RAM_PRESSURE_TARGET_FRACTION: u64 = 8;
 const HOST_RAM_PRESSURE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 const HOST_RAM_PRESSURE_MIN_BYTES: u64 = 64 * 1024 * 1024;
 const HOST_RAM_PRESSURE_CHUNK_BYTES: usize = 32 * 1024 * 1024;
+const HOST_PAGE_DISCARD_TARGET_FRACTION: u64 = 8;
+const HOST_PAGE_DISCARD_MAX_BYTES: u64 = 512 * 1024 * 1024;
+const HOST_PAGE_DISCARD_MIN_BYTES: u64 = 64 * 1024 * 1024;
+const HOST_PAGE_DISCARD_CHUNK_BYTES: usize = 32 * 1024 * 1024;
 
 pub fn run_host_ram_pressure_probe() -> HostRamPressureProbeReport {
     let budget = detect_host_memory_budget();
@@ -116,11 +122,163 @@ pub fn run_host_ram_pressure_probe() -> HostRamPressureProbeReport {
     HostRamPressureProbeReport { status, notes }
 }
 
+pub fn run_host_page_discard_probe() -> HostRamPressureProbeReport {
+    let budget = detect_host_memory_budget();
+    let mut notes = vec![format!(
+        "Host page discard probe memory budget source: {}.",
+        budget.source
+    )];
+
+    if let Some(total_bytes) = budget.total_bytes {
+        notes.push(format!(
+            "Host page discard probe observed total physical memory: {total_bytes} bytes."
+        ));
+    }
+
+    if let Some(available_bytes) = budget.available_bytes {
+        notes.push(format!(
+            "Host page discard probe observed available physical memory: {available_bytes} bytes."
+        ));
+    }
+
+    if let Some(note) = budget.note {
+        notes.push(note);
+    }
+
+    let page_size = detect_host_page_size();
+    notes.push(format!(
+        "Host page discard probe page-size source: {}.",
+        page_size.source
+    ));
+
+    if let Some(note) = page_size.note {
+        notes.push(note);
+    }
+
+    let Some(available_bytes) = budget.available_bytes else {
+        notes.push(
+            "Host page discard probe could not determine available physical memory, so it skipped page mapping pressure."
+                .to_string(),
+        );
+        return HostRamPressureProbeReport {
+            status: "host_page_discard_probe_unavailable".to_string(),
+            notes,
+        };
+    };
+
+    let Some(page_bytes) = page_size.bytes else {
+        notes.push(
+            "Host page discard probe could not determine the host page size, so it skipped page mapping pressure."
+                .to_string(),
+        );
+        return HostRamPressureProbeReport {
+            status: "host_page_discard_probe_unavailable".to_string(),
+            notes,
+        };
+    };
+
+    notes.push(format!(
+        "Host page discard probe observed page size: {page_bytes} bytes."
+    ));
+
+    let target_bytes = align_down_u64(
+        (available_bytes / HOST_PAGE_DISCARD_TARGET_FRACTION).min(HOST_PAGE_DISCARD_MAX_BYTES),
+        page_bytes as u64,
+    );
+
+    if target_bytes < HOST_PAGE_DISCARD_MIN_BYTES {
+        notes.push(format!(
+            "Host page discard probe skipped because the computed target ({} bytes) was below the {}-byte minimum.",
+            target_bytes, HOST_PAGE_DISCARD_MIN_BYTES
+        ));
+        return HostRamPressureProbeReport {
+            status: "host_page_discard_probe_skipped_low_available_memory".to_string(),
+            notes,
+        };
+    }
+
+    let chunk_bytes = align_down_u64(HOST_PAGE_DISCARD_CHUNK_BYTES as u64, page_bytes as u64)
+        .max(page_bytes as u64) as usize;
+    let mut remaining = target_bytes;
+    let mut total_mapped = 0_u64;
+    let mut warnings = Vec::new();
+
+    while remaining > 0 {
+        let mapping_bytes = remaining.min(chunk_bytes as u64) as usize;
+        let mapping_result = unsafe { allocate_page_probe_mapping(mapping_bytes) };
+
+        let mapping = match mapping_result {
+            Ok(mapping) => mapping,
+            Err(error) => {
+                warnings.push(format!(
+                    "Host page discard probe failed to map a {}-byte region: {error}.",
+                    mapping_bytes
+                ));
+                break;
+            }
+        };
+
+        let fill_result = unsafe { fill_page_probe_mapping(mapping.ptr, mapping_bytes) };
+        if let Err(error) = fill_result {
+            warnings.push(format!(
+                "Host page discard probe failed while writing a {}-byte region: {error}.",
+                mapping_bytes
+            ));
+        } else {
+            total_mapped = total_mapped.saturating_add(mapping_bytes as u64);
+        }
+
+        if let Some(error) = unsafe { discard_page_probe_mapping(mapping.ptr, mapping_bytes) } {
+            warnings.push(error);
+        }
+
+        if let Some(error) = unsafe { release_page_probe_mapping(mapping.ptr, mapping_bytes) } {
+            warnings.push(error);
+        }
+
+        remaining = remaining.saturating_sub(mapping_bytes as u64);
+    }
+
+    notes.push(format!(
+        "Host page discard probe targeted {} bytes and mapped/touched {} bytes.",
+        target_bytes, total_mapped
+    ));
+    notes.push(
+        "Each mapped region was filled with 0xA5, overwritten with 0x00, then explicitly discarded/decommitted before release."
+            .to_string(),
+    );
+    notes.push(
+        "This moves closer to OS-page-level cleanup behavior than allocator-only churn, but it still does not prove that the exact prior llama.cpp pages were reclaimed and overwritten."
+            .to_string(),
+    );
+    notes.extend(warnings);
+
+    let status = if total_mapped == 0 {
+        "host_page_discard_probe_no_mappings_completed".to_string()
+    } else if notes.iter().any(|note| note.contains("failed")) {
+        "host_page_discard_probe_completed_with_warnings".to_string()
+    } else {
+        "host_page_discard_probe_completed".to_string()
+    };
+
+    HostRamPressureProbeReport { status, notes }
+}
+
 struct HostMemoryBudget {
     total_bytes: Option<u64>,
     available_bytes: Option<u64>,
     source: String,
     note: Option<String>,
+}
+
+struct HostPageSize {
+    bytes: Option<usize>,
+    source: String,
+    note: Option<String>,
+}
+
+struct PageProbeMapping {
+    ptr: *mut u8,
 }
 
 #[cfg(target_os = "windows")]
@@ -151,6 +309,230 @@ fn detect_host_memory_budget() -> HostMemoryBudget {
         source: "GlobalMemoryStatusEx".to_string(),
         note: None,
     }
+}
+
+#[cfg(target_os = "windows")]
+fn detect_host_page_size() -> HostPageSize {
+    use windows_sys::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
+
+    let mut system_info = unsafe { std::mem::zeroed::<SYSTEM_INFO>() };
+    unsafe { GetSystemInfo(&mut system_info as *mut SYSTEM_INFO) };
+
+    HostPageSize {
+        bytes: Some(system_info.dwPageSize as usize),
+        source: "GetSystemInfo".to_string(),
+        note: None,
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn detect_host_page_size() -> HostPageSize {
+    match Command::new("getconf").arg("PAGESIZE").output() {
+        Ok(output) if output.status.success() => {
+            let page_size = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<usize>()
+                .ok();
+
+            HostPageSize {
+                bytes: page_size,
+                source: "getconf PAGESIZE".to_string(),
+                note: if page_size.is_some() {
+                    None
+                } else {
+                    Some(
+                        "getconf PAGESIZE succeeded, but the page size output could not be parsed."
+                            .to_string(),
+                    )
+                },
+            }
+        }
+        Ok(output) => HostPageSize {
+            bytes: None,
+            source: "getconf PAGESIZE".to_string(),
+            note: Some(format!(
+                "getconf PAGESIZE returned non-zero status {} during page-size detection.",
+                output.status
+            )),
+        },
+        Err(error) => HostPageSize {
+            bytes: None,
+            source: "getconf PAGESIZE".to_string(),
+            note: Some(format!(
+                "getconf PAGESIZE was unavailable during page-size detection: {error}."
+            )),
+        },
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn allocate_page_probe_mapping(size: usize) -> Result<PageProbeMapping, String> {
+    use windows_sys::Win32::System::Memory::{
+        VirtualAlloc, MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE,
+    };
+
+    let ptr = unsafe {
+        VirtualAlloc(
+            std::ptr::null(),
+            size,
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_READWRITE,
+        )
+    };
+
+    if ptr.is_null() {
+        Err("VirtualAlloc returned a null pointer".to_string())
+    } else {
+        Ok(PageProbeMapping { ptr: ptr.cast() })
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+unsafe fn allocate_page_probe_mapping(size: usize) -> Result<PageProbeMapping, String> {
+    let ptr = unsafe {
+        mmap(
+            std::ptr::null_mut(),
+            size,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANON,
+            -1,
+            0,
+        )
+    };
+
+    if ptr == map_failed() {
+        Err("mmap returned MAP_FAILED".to_string())
+    } else {
+        Ok(PageProbeMapping { ptr: ptr.cast() })
+    }
+}
+
+unsafe fn fill_page_probe_mapping(ptr: *mut u8, size: usize) -> Result<(), String> {
+    if ptr.is_null() {
+        return Err("page probe mapping pointer was null".to_string());
+    }
+
+    let buffer = unsafe { std::slice::from_raw_parts_mut(ptr, size) };
+    buffer.fill(0xA5);
+    buffer.fill(0x00);
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn discard_page_probe_mapping(ptr: *mut u8, size: usize) -> Option<String> {
+    use windows_sys::Win32::System::Memory::{VirtualFree, MEM_DECOMMIT};
+
+    let ok = unsafe { VirtualFree(ptr.cast::<c_void>(), size, MEM_DECOMMIT) };
+    if ok == 0 {
+        Some(format!(
+            "Host page discard probe VirtualFree(MEM_DECOMMIT) failed for a {}-byte region.",
+            size
+        ))
+    } else {
+        None
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+unsafe fn discard_page_probe_mapping(ptr: *mut u8, size: usize) -> Option<String> {
+    let advice = unix_page_discard_advice();
+    let advice_label = unix_page_discard_advice_label();
+    let ok = unsafe { madvise(ptr.cast::<c_void>(), size, advice) };
+    if ok != 0 {
+        Some(format!(
+            "Host page discard probe madvise({advice_label}) failed for a {}-byte region.",
+            size
+        ))
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn release_page_probe_mapping(ptr: *mut u8, _size: usize) -> Option<String> {
+    use windows_sys::Win32::System::Memory::{VirtualFree, MEM_RELEASE};
+
+    let ok = unsafe { VirtualFree(ptr.cast::<c_void>(), 0, MEM_RELEASE) };
+    if ok == 0 {
+        Some("Host page discard probe VirtualFree(MEM_RELEASE) failed.".to_string())
+    } else {
+        None
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+unsafe fn release_page_probe_mapping(ptr: *mut u8, size: usize) -> Option<String> {
+    let ok = unsafe { munmap(ptr.cast::<c_void>(), size) };
+    if ok != 0 {
+        Some(format!(
+            "Host page discard probe munmap failed for a {}-byte region.",
+            size
+        ))
+    } else {
+        None
+    }
+}
+
+fn align_down_u64(value: u64, alignment: u64) -> u64 {
+    if alignment == 0 {
+        value
+    } else {
+        value - (value % alignment)
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const PROT_READ: i32 = 0x01;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const PROT_WRITE: i32 = 0x02;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const MAP_PRIVATE: i32 = 0x02;
+#[cfg(target_os = "linux")]
+const MAP_ANON: i32 = 0x20;
+#[cfg(target_os = "macos")]
+const MAP_ANON: i32 = 0x1000;
+#[cfg(target_os = "linux")]
+const MADV_DONTNEED: i32 = 4;
+#[cfg(target_os = "macos")]
+const MADV_FREE: i32 = 5;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+unsafe extern "C" {
+    fn mmap(
+        addr: *mut c_void,
+        len: usize,
+        prot: i32,
+        flags: i32,
+        fd: i32,
+        offset: i64,
+    ) -> *mut c_void;
+    fn munmap(addr: *mut c_void, len: usize) -> i32;
+    fn madvise(addr: *mut c_void, len: usize, advice: i32) -> i32;
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn map_failed() -> *mut c_void {
+    (-1_isize) as *mut c_void
+}
+
+#[cfg(target_os = "linux")]
+fn unix_page_discard_advice() -> i32 {
+    MADV_DONTNEED
+}
+
+#[cfg(target_os = "linux")]
+fn unix_page_discard_advice_label() -> &'static str {
+    "MADV_DONTNEED"
+}
+
+#[cfg(target_os = "macos")]
+fn unix_page_discard_advice() -> i32 {
+    MADV_FREE
+}
+
+#[cfg(target_os = "macos")]
+fn unix_page_discard_advice_label() -> &'static str {
+    "MADV_FREE"
 }
 
 #[cfg(target_os = "linux")]
