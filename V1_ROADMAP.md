@@ -363,6 +363,23 @@ Current experimental stages in-tree now include cooldown rechecks, host RAM pres
 20. `[ ] Document platform security capability matrix`
 21. `[ ] Freeze security claim wording for v1`
 
+Current Track E progress: a structured session-evidence validation scorecard is now in-tree, but the dedicated controlled-canary harness is still pending.
+
+
+also (please clean below up and tie into tracks if you see this mr codex):
+
+
+Tie process-memory scan evidence into the cleanup-stage comparison.
+This lets us compare not just GPU visibility, but whether prompt/response markers persist in RAM across stages.
+
+Push deeper into allocator/KV introspection.
+That gives us internal llama-specific evidence to explain why some stages help and others don’t.
+
+Add a platform capability matrix report.
+That makes the v1 security story honest and crisp per platform.
+
+
+
 ---
 
 ## V1 Gates for This Security Program

@@ -15,6 +15,25 @@ export function statusClass(status: string): string {
 }
 
 export function inspectionStatusClass(status: string): string {
+  if (
+    status.includes("strong_improvement_signal") ||
+    status.includes("moderate_improvement_signal")
+  ) {
+    return "pill success";
+  }
+
+  if (status.includes("mixed_signal") || status.includes("limited_signal")) {
+    return "pill warning";
+  }
+
+  if (status.includes("negative_or_inconclusive_signal")) {
+    return "pill failed";
+  }
+
+  if (status.includes("canary_not_run")) {
+    return "pill warning";
+  }
+
   if (status === "markers_detected_in_scanned_memory") {
     return "pill failed";
   }
@@ -258,6 +277,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.llama_runtime.vram_cleanup.stages = [];
     }
 
+    if (!parsed.memory_validation) {
+      parsed.memory_validation = legacyMemoryValidationReport();
+    }
+
     if (
       parsed.llama_runtime &&
       parsed.llama_runtime.vram_cleanup?.comparison &&
@@ -331,6 +354,26 @@ function legacyVramCleanupComparisonReport() {
       "This older report did not include structured baseline-versus-strategy VRAM comparison data.",
     notes: [
       "Open a newer report to inspect comparison snapshots and evidence-improvement status.",
+    ],
+  };
+}
+
+function legacyMemoryValidationReport() {
+  return {
+    validation_status: "validation_not_derived",
+    harness_scope: "session_evidence_scorecard",
+    canary_execution_status: "controlled_canary_not_run_yet",
+    process_scan_signal_status: "process_scan_context_unavailable",
+    best_stage_id: null,
+    best_stage_label: null,
+    best_stage_kind: null,
+    best_stage_score: 0,
+    best_stage_verdict: "validation_not_derived",
+    summary:
+      "This older report did not include the derived memory-validation harness section.",
+    stage_scorecards: [],
+    notes: [
+      "Open a newer report to inspect stage scorecards and memory-validation evidence summaries.",
     ],
   };
 }

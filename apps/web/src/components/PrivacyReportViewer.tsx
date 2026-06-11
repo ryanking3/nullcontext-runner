@@ -1245,6 +1245,141 @@ export function PrivacyReportViewer({
         </section>
       )}
 
+      {currentReport.memory_validation && (
+        <section className="report-section">
+          <div className="panel-title">memory validation harness</div>
+
+          <div className="report-risk-block">
+            <p>{currentReport.memory_validation.summary}</p>
+          </div>
+
+          <div className="registry-lifecycle-summary">
+            <span className={inspectionStatusClass(currentReport.memory_validation.validation_status)}>
+              status {humanizeSnakeCase(currentReport.memory_validation.validation_status)}
+            </span>
+            <span
+              className={inspectionStatusClass(
+                currentReport.memory_validation.canary_execution_status
+              )}
+            >
+              canary {humanizeSnakeCase(currentReport.memory_validation.canary_execution_status)}
+            </span>
+            <span
+              className={inspectionStatusClass(
+                currentReport.memory_validation.process_scan_signal_status
+              )}
+            >
+              process scan{" "}
+              {humanizeSnakeCase(currentReport.memory_validation.process_scan_signal_status)}
+            </span>
+          </div>
+
+          <ReportGrid
+            entries={[
+              {
+                label: "scope",
+                value: humanizeSnakeCase(currentReport.memory_validation.harness_scope),
+              },
+              {
+                label: "best stage",
+                value: currentReport.memory_validation.best_stage_label || "none",
+              },
+              {
+                label: "best stage id",
+                value: currentReport.memory_validation.best_stage_id || "none",
+              },
+              {
+                label: "best stage kind",
+                value: currentReport.memory_validation.best_stage_kind
+                  ? humanizeSnakeCase(currentReport.memory_validation.best_stage_kind)
+                  : "none",
+              },
+              {
+                label: "best stage score",
+                value: `${currentReport.memory_validation.best_stage_score}/100`,
+              },
+              {
+                label: "best verdict",
+                value: humanizeSnakeCase(currentReport.memory_validation.best_stage_verdict),
+              },
+            ]}
+          />
+
+          <details className="report-detail" open>
+            <summary>
+              memory validation stage scorecards (
+              {currentReport.memory_validation.stage_scorecards.length})
+            </summary>
+            {currentReport.memory_validation.stage_scorecards.length === 0 ? (
+              <p className="muted-text">no validation stage scorecards available</p>
+            ) : (
+              <div className="report-list">
+                {currentReport.memory_validation.stage_scorecards.map((scorecard) => (
+                  <div className="report-item" key={`validation-${scorecard.stage_id}`}>
+                    <div className="report-item-header">
+                      <strong>{scorecard.stage_label}</strong>
+                      <span className={inspectionStatusClass(scorecard.validation_verdict)}>
+                        {scorecard.validation_score}/100
+                      </span>
+                    </div>
+
+                    <div className="report-path-list">
+                      <div>verdict: {humanizeSnakeCase(scorecard.validation_verdict)}</div>
+                      <div>stage id: {scorecard.stage_id}</div>
+                      <div>kind: {humanizeSnakeCase(scorecard.stage_kind)}</div>
+                      <div>action: {humanizeSnakeCase(scorecard.action_status)}</div>
+                      <div>
+                        vram evidence: {humanizeSnakeCase(scorecard.vram_evidence_status)}
+                      </div>
+                      <div>
+                        process scan context:{" "}
+                        {humanizeSnakeCase(scorecard.process_scan_context_status)}
+                      </div>
+                      <div>{scorecard.summary}</div>
+                    </div>
+
+                    {scorecard.strengths.length > 0 && (
+                      <details className="report-detail">
+                        <summary>strengths ({scorecard.strengths.length})</summary>
+                        <ul className="report-note-list">
+                          {scorecard.strengths.map((strength, index) => (
+                            <li key={`${scorecard.stage_id}-strength-${index}`}>{strength}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+
+                    {scorecard.gaps.length > 0 && (
+                      <details className="report-detail">
+                        <summary>gaps ({scorecard.gaps.length})</summary>
+                        <ul className="report-note-list">
+                          {scorecard.gaps.map((gap, index) => (
+                            <li key={`${scorecard.stage_id}-gap-${index}`}>{gap}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </details>
+
+          {currentReport.memory_validation.notes.length > 0 && (
+            <details className="report-detail">
+              <summary>
+                memory validation notes ({currentReport.memory_validation.notes.length})
+              </summary>
+              <ul className="report-note-list">
+                {currentReport.memory_validation.notes.map((note, index) => (
+                  <li key={`memory-validation-note-${index}`}>{note}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </section>
+      )}
+
       {currentReport.retrieval && (
         <section className="report-section">
           <div className="panel-title">retrieval provenance</div>

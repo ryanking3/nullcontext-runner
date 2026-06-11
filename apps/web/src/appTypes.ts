@@ -220,6 +220,35 @@ export type ProcessScanReportData = {
   notes: string[];
 };
 
+export type MemoryValidationStageScorecard = {
+  stage_id: string;
+  stage_label: string;
+  stage_kind: string;
+  action_status: string;
+  vram_evidence_status: string;
+  process_scan_context_status: string;
+  validation_score: number;
+  validation_verdict: string;
+  summary: string;
+  strengths: string[];
+  gaps: string[];
+};
+
+export type MemoryValidationReportData = {
+  validation_status: string;
+  harness_scope: string;
+  canary_execution_status: string;
+  process_scan_signal_status: string;
+  best_stage_id?: string | null;
+  best_stage_label?: string | null;
+  best_stage_kind?: string | null;
+  best_stage_score: number;
+  best_stage_verdict: string;
+  summary: string;
+  stage_scorecards: MemoryValidationStageScorecard[];
+  notes: string[];
+};
+
 export type LlamaMemoryDomainReport = {
   domain: string;
   exposure_scope: string;
@@ -392,6 +421,7 @@ export type PrivacyReportData = {
   lifecycle?: LifecycleReport | null;
   llama_runtime?: LlamaRuntimeReportData | null;
   process_scan?: ProcessScanReportData | null;
+  memory_validation: MemoryValidationReportData;
   retrieval?: RetrievalReportData | null;
   residual_risk: string;
 };

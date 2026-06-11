@@ -1,5 +1,6 @@
 use crate::cleanup::CleanupReport;
 use crate::config::SessionConfig;
+use crate::memory_validation::build_memory_validation_report;
 use crate::registry::{
     CleanupReason, RetentionPolicy, SessionLifecycleMetadata, SessionLifecycleState,
 };
@@ -30,6 +31,8 @@ pub struct PrivacyReport {
     pub lifecycle: Option<LifecycleReport>,
     pub llama_runtime: Option<LlamaRuntimeReport>,
     pub process_scan: Option<ProcessScanReport>,
+    #[serde(default = "default_memory_validation_report")]
+    pub memory_validation: MemoryValidationReport,
     pub retrieval: Option<RetrievalReport>,
     pub residual_risk: String,
 }
@@ -120,6 +123,38 @@ pub struct ProcessScanPatternReport {
     pub status: String,
     pub matches_found: Option<u64>,
     pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryValidationReport {
+    pub validation_status: String,
+    pub harness_scope: String,
+    pub canary_execution_status: String,
+    pub process_scan_signal_status: String,
+    pub best_stage_id: Option<String>,
+    pub best_stage_label: Option<String>,
+    pub best_stage_kind: Option<String>,
+    pub best_stage_score: u32,
+    pub best_stage_verdict: String,
+    pub summary: String,
+    #[serde(default)]
+    pub stage_scorecards: Vec<MemoryValidationStageScorecard>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryValidationStageScorecard {
+    pub stage_id: String,
+    pub stage_label: String,
+    pub stage_kind: String,
+    pub action_status: String,
+    pub vram_evidence_status: String,
+    pub process_scan_context_status: String,
+    pub validation_score: u32,
+    pub validation_verdict: String,
+    pub summary: String,
+    pub strengths: Vec<String>,
+    pub gaps: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -321,6 +356,7 @@ impl PrivacyReport {
             lifecycle: None,
             llama_runtime: None,
             process_scan: None,
+            memory_validation: default_memory_validation_report(),
             retrieval: None,
             residual_risk:
                 "OS memory, swap, shell history, and llama.cpp internal allocations are not yet sanitized."
@@ -340,11 +376,13 @@ impl PrivacyReport {
 
     pub fn with_llama_runtime(mut self, llama_runtime: LlamaRuntimeReport) -> Self {
         self.llama_runtime = Some(llama_runtime);
+        self.memory_validation = build_memory_validation_report(&self);
         self
     }
 
     pub fn with_process_scan(mut self, process_scan: ProcessScanReport) -> Self {
         self.process_scan = Some(process_scan);
+        self.memory_validation = build_memory_validation_report(&self);
         self
     }
 
@@ -389,6 +427,7 @@ pub fn sync_report_lifecycle(
     let raw = fs::read_to_string(report_path)?;
     let mut report: PrivacyReport = serde_json::from_str(&raw)?;
     report.lifecycle = Some(LifecycleReport::from_metadata(lifecycle));
+    report.memory_validation = build_memory_validation_report(&report);
     fs::write(report_path, report.to_pretty_json()?)?;
 
     Ok(())
@@ -1277,6 +1316,28 @@ fn default_vram_cleanup_strategy_report() -> VramCleanupStrategyReport {
         stages: vec![],
         notes: vec![
             "Open a newer session report to compare baseline or experimental VRAM cleanup outcomes."
+                .to_string(),
+        ],
+    }
+}
+
+fn default_memory_validation_report() -> MemoryValidationReport {
+    MemoryValidationReport {
+        validation_status: "validation_not_derived".to_string(),
+        harness_scope: "session_evidence_scorecard".to_string(),
+        canary_execution_status: "controlled_canary_not_run_yet".to_string(),
+        process_scan_signal_status: "process_scan_context_unavailable".to_string(),
+        best_stage_id: None,
+        best_stage_label: None,
+        best_stage_kind: None,
+        best_stage_score: 0,
+        best_stage_verdict: "validation_not_derived".to_string(),
+        summary:
+            "NullContext had not yet derived a structured memory-validation scorecard for this report."
+                .to_string(),
+        stage_scorecards: vec![],
+        notes: vec![
+            "Older reports may not include the derived memory-validation harness section."
                 .to_string(),
         ],
     }

@@ -12,6 +12,7 @@ mod inference;
 mod llama_stream;
 mod logging;
 mod memory_scan;
+mod memory_validation;
 mod process_scan;
 mod ram_pressure;
 mod registry;
