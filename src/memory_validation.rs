@@ -1,17 +1,20 @@
 use crate::audit::{
-    MemoryValidationReport, MemoryValidationStageScorecard, PrivacyReport, ProcessScanReport,
-    VramCleanupStrategyStageReport,
+    ControlledCanaryValidationRunReport, MemoryValidationReport, MemoryValidationStageScorecard,
+    PrivacyReport, ProcessScanReport, VramCleanupStrategyStageReport,
 };
 
 pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidationReport {
     let process_scan_signal_status =
         derive_process_scan_signal_status(report.process_scan.as_ref());
+    let controlled_canary_run = report.memory_validation.controlled_canary_run.clone();
+    let controlled_canary_signal_status =
+        derive_controlled_canary_signal_status(&controlled_canary_run);
 
     let Some(llama_runtime) = report.llama_runtime.as_ref() else {
         return MemoryValidationReport {
             validation_status: "runtime_report_unavailable".to_string(),
             harness_scope: "session_evidence_scorecard".to_string(),
-            canary_execution_status: "controlled_canary_not_run_yet".to_string(),
+            canary_execution_status: controlled_canary_run.execution_status.clone(),
             process_scan_signal_status,
             best_stage_id: None,
             best_stage_label: None,
@@ -21,9 +24,10 @@ pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidatio
             summary:
                 "NullContext could not derive a memory-validation scorecard because no llama runtime report was present."
                     .to_string(),
+            controlled_canary_run,
             stage_scorecards: vec![],
             notes: vec![
-                "This validation section scores already-collected runtime/process evidence. A fuller Track E harness will later add controlled canary execution."
+                "This validation section scores runtime/process evidence and canary-helper status when available. A fuller Track E harness will later add repeated and more deeply instrumented canary execution."
                     .to_string(),
             ],
         };
@@ -37,7 +41,7 @@ pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidatio
                 "not_applicable_gpu_offload_not_requested".to_string()
             },
             harness_scope: "session_evidence_scorecard".to_string(),
-            canary_execution_status: "controlled_canary_not_run_yet".to_string(),
+            canary_execution_status: controlled_canary_run.execution_status.clone(),
             process_scan_signal_status: process_scan_signal_status.clone(),
             best_stage_id: None,
             best_stage_label: None,
@@ -55,9 +59,10 @@ pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidatio
                 "NullContext did not score cleanup stages because GPU offload was not requested for this run."
                     .to_string()
             },
+            controlled_canary_run,
             stage_scorecards: vec![],
             notes: vec![
-                "This validation section does not yet run a controlled canary harness. It currently scores the evidence already captured during a normal session."
+                "This validation section can record dedicated canary-helper runs, but this specific report did not have cleanup stages available to score."
                     .to_string(),
             ],
         };
@@ -67,7 +72,13 @@ pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidatio
         .vram_cleanup
         .stages
         .iter()
-        .map(|stage| build_stage_scorecard(stage, &process_scan_signal_status))
+        .map(|stage| {
+            build_stage_scorecard(
+                stage,
+                &process_scan_signal_status,
+                &controlled_canary_signal_status,
+            )
+        })
         .collect::<Vec<_>>();
 
     let best_stage = stage_scorecards
@@ -76,31 +87,37 @@ pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidatio
         .cloned()
         .expect("stage scorecards should exist when cleanup stages exist");
 
-    let validation_status = if process_scan_signal_status == "marker_persistence_detected" {
+    let validation_status = if process_scan_signal_status == "marker_persistence_detected"
+        || controlled_canary_signal_status == "controlled_canary_markers_detected"
+    {
         "stage_scoring_ready_marker_risk_still_present".to_string()
     } else {
         "stage_scoring_ready".to_string()
     };
 
     let summary = format!(
-        "NullContext scored {} experimental cleanup stage(s) using current session evidence. Best stage: {} with score {} and verdict {}. Controlled canary execution is not wired in yet.",
+        "NullContext scored {} experimental cleanup stage(s) using session evidence plus controlled canary status {}. Best stage: {} with score {} and verdict {}.",
         stage_scorecards.len(),
+        controlled_canary_run.execution_status,
         best_stage.stage_label,
         best_stage.validation_score,
         best_stage.validation_verdict
     );
 
     let mut notes = vec![
-        "This is the first validation-harness slice: it scores the session's recorded cleanup evidence, but it does not yet launch a separate controlled canary run."
+        "This validation harness slice combines session cleanup evidence with a dedicated helper-runtime canary run when available."
             .to_string(),
         "Stage scores are comparative operator guidance, not proof of full RAM or VRAM sanitization."
             .to_string(),
         process_scan_validation_note(&process_scan_signal_status),
+        controlled_canary_validation_note(&controlled_canary_signal_status),
     ];
 
-    if process_scan_signal_status == "marker_persistence_detected" {
+    if process_scan_signal_status == "marker_persistence_detected"
+        || controlled_canary_signal_status == "controlled_canary_markers_detected"
+    {
         notes.push(
-            "Because direct process scanning still detected configured markers, even strong VRAM-stage scores should be treated as incomplete memory-clearing evidence."
+            "Because direct scanning still detected configured markers either in the user session or the dedicated canary helper, even strong VRAM-stage scores should be treated as incomplete memory-clearing evidence."
                 .to_string(),
         );
     }
@@ -108,7 +125,7 @@ pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidatio
     MemoryValidationReport {
         validation_status,
         harness_scope: "session_evidence_scorecard".to_string(),
-        canary_execution_status: "controlled_canary_not_run_yet".to_string(),
+        canary_execution_status: controlled_canary_run.execution_status.clone(),
         process_scan_signal_status,
         best_stage_id: Some(best_stage.stage_id.clone()),
         best_stage_label: Some(best_stage.stage_label.clone()),
@@ -116,6 +133,7 @@ pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidatio
         best_stage_score: best_stage.validation_score,
         best_stage_verdict: best_stage.validation_verdict.clone(),
         summary,
+        controlled_canary_run,
         stage_scorecards,
         notes,
     }
@@ -168,9 +186,65 @@ fn process_scan_validation_note(process_scan_signal_status: &str) -> String {
     }
 }
 
+fn derive_controlled_canary_signal_status(
+    controlled_canary_run: &ControlledCanaryValidationRunReport,
+) -> String {
+    match controlled_canary_run.execution_status.as_str() {
+        "controlled_canary_completed" => {
+            match derive_process_scan_signal_status(Some(&controlled_canary_run.process_scan))
+                .as_str()
+            {
+                "marker_persistence_detected" => "controlled_canary_markers_detected".to_string(),
+                "marker_scan_clear_in_scanned_regions" => {
+                    "controlled_canary_scan_clear_in_scanned_regions".to_string()
+                }
+                "marker_scan_inconclusive" => "controlled_canary_scan_inconclusive".to_string(),
+                "marker_scan_backend_unsupported" => {
+                    "controlled_canary_scan_backend_unsupported".to_string()
+                }
+                "marker_scan_not_completed" => "controlled_canary_scan_not_completed".to_string(),
+                _ => "controlled_canary_scan_context_mixed".to_string(),
+            }
+        }
+        "controlled_canary_not_run_yet" => "controlled_canary_not_run_yet".to_string(),
+        "controlled_canary_helper_failed" => "controlled_canary_helper_failed".to_string(),
+        _ => "controlled_canary_inconclusive".to_string(),
+    }
+}
+
+fn controlled_canary_validation_note(controlled_canary_signal_status: &str) -> String {
+    match controlled_canary_signal_status {
+        "controlled_canary_markers_detected" => {
+            "The dedicated controlled canary helper still found its prompt or response markers in readable llama-server memory, which is a strong negative validation signal."
+                .to_string()
+        }
+        "controlled_canary_scan_clear_in_scanned_regions" => {
+            "The dedicated controlled canary helper did not find its markers in scanned readable regions. That is a stronger validation signal than passive session evidence alone."
+                .to_string()
+        }
+        "controlled_canary_scan_backend_unsupported" => {
+            "The dedicated controlled canary helper ran, but direct process-scan support is still missing on this platform build."
+                .to_string()
+        }
+        "controlled_canary_helper_failed" => {
+            "The dedicated controlled canary helper did not complete successfully, so validation still relies primarily on passive session evidence."
+                .to_string()
+        }
+        "controlled_canary_not_run_yet" => {
+            "No dedicated controlled canary helper run was available for this report."
+                .to_string()
+        }
+        _ => {
+            "The dedicated controlled canary helper completed with limited or inconclusive direct-scan evidence."
+                .to_string()
+        }
+    }
+}
+
 fn build_stage_scorecard(
     stage: &VramCleanupStrategyStageReport,
     process_scan_signal_status: &str,
+    controlled_canary_signal_status: &str,
 ) -> MemoryValidationStageScorecard {
     let mut score = 0_u32;
     let mut strengths = Vec::new();
@@ -293,6 +367,33 @@ fn build_stage_scorecard(
         _ => {}
     }
 
+    match controlled_canary_signal_status {
+        "controlled_canary_scan_clear_in_scanned_regions" => {
+            score += 12;
+            strengths.push(
+                "The dedicated controlled canary helper did not find its markers in scanned readable regions."
+                    .to_string(),
+            );
+        }
+        "controlled_canary_markers_detected" => {
+            gaps.push(
+                "The dedicated controlled canary helper still detected its markers in readable llama-server memory."
+                    .to_string(),
+            );
+        }
+        "controlled_canary_scan_backend_unsupported"
+        | "controlled_canary_scan_not_completed"
+        | "controlled_canary_helper_failed"
+        | "controlled_canary_inconclusive"
+        | "controlled_canary_not_run_yet" => {
+            gaps.push(
+                "Dedicated controlled canary evidence was limited, unavailable, or inconclusive for this report."
+                    .to_string(),
+            );
+        }
+        _ => {}
+    }
+
     let validation_score = score.min(100);
     let validation_verdict = validation_verdict_for_score(validation_score);
     let summary = format!(
@@ -307,6 +408,7 @@ fn build_stage_scorecard(
         action_status: stage.action_status.clone(),
         vram_evidence_status: stage.evidence_improvement_status.clone(),
         process_scan_context_status: process_scan_signal_status.to_string(),
+        controlled_canary_signal_status: controlled_canary_signal_status.to_string(),
         validation_score,
         validation_verdict,
         summary,

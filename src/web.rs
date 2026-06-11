@@ -38,6 +38,7 @@ use crate::retrieval::{
 use crate::runtime::{observe_post_shutdown, ManagedRuntime, RuntimeLaunchFailure};
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
+use crate::validation_harness::run_controlled_canary_validation;
 use anyhow::Result;
 use axum::extract::{Multipart, Path, State};
 use axum::http::StatusCode;
@@ -1210,7 +1211,8 @@ fn run_direct_streaming_session(
         &runtime_shutdown,
         &runtime_usage,
         &post_shutdown_observation,
-    ));
+    ))
+    .with_controlled_canary_run(run_controlled_canary_validation(&config));
     let report = if let Some(retrieval_report) = retrieval_report {
         report.with_retrieval(retrieval_report)
     } else {

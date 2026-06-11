@@ -137,8 +137,22 @@ pub struct MemoryValidationReport {
     pub best_stage_score: u32,
     pub best_stage_verdict: String,
     pub summary: String,
+    #[serde(default = "default_controlled_canary_validation_run_report")]
+    pub controlled_canary_run: ControlledCanaryValidationRunReport,
     #[serde(default)]
     pub stage_scorecards: Vec<MemoryValidationStageScorecard>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlledCanaryValidationRunReport {
+    pub execution_status: String,
+    pub canary_id: String,
+    pub runtime_pid: Option<u32>,
+    pub runtime_endpoint: Option<String>,
+    pub response_bytes: Option<usize>,
+    pub summary: String,
+    pub process_scan: ProcessScanReport,
     pub notes: Vec<String>,
 }
 
@@ -150,6 +164,8 @@ pub struct MemoryValidationStageScorecard {
     pub action_status: String,
     pub vram_evidence_status: String,
     pub process_scan_context_status: String,
+    #[serde(default = "default_controlled_canary_signal_status")]
+    pub controlled_canary_signal_status: String,
     pub validation_score: u32,
     pub validation_verdict: String,
     pub summary: String,
@@ -247,6 +263,7 @@ pub struct VramCleanupComparisonReport {
     pub selected_stage_label: Option<String>,
     #[serde(default)]
     pub selected_stage_kind: Option<String>,
+    #[serde(default = "default_vram_cleanup_selection_reason")]
     pub selection_reason: String,
     pub summary: String,
     pub notes: Vec<String>,
@@ -382,6 +399,15 @@ impl PrivacyReport {
 
     pub fn with_process_scan(mut self, process_scan: ProcessScanReport) -> Self {
         self.process_scan = Some(process_scan);
+        self.memory_validation = build_memory_validation_report(&self);
+        self
+    }
+
+    pub fn with_controlled_canary_run(
+        mut self,
+        controlled_canary_run: ControlledCanaryValidationRunReport,
+    ) -> Self {
+        self.memory_validation.controlled_canary_run = controlled_canary_run;
         self.memory_validation = build_memory_validation_report(&self);
         self
     }
@@ -1335,9 +1361,58 @@ fn default_memory_validation_report() -> MemoryValidationReport {
         summary:
             "NullContext had not yet derived a structured memory-validation scorecard for this report."
                 .to_string(),
+        controlled_canary_run: default_controlled_canary_validation_run_report(),
         stage_scorecards: vec![],
         notes: vec![
             "Older reports may not include the derived memory-validation harness section."
+                .to_string(),
+        ],
+    }
+}
+
+fn default_controlled_canary_signal_status() -> String {
+    "controlled_canary_not_run_yet".to_string()
+}
+
+fn default_vram_cleanup_selection_reason() -> String {
+    "This older report did not record stage-selection metadata.".to_string()
+}
+
+fn default_controlled_canary_validation_run_report() -> ControlledCanaryValidationRunReport {
+    ControlledCanaryValidationRunReport {
+        execution_status: "controlled_canary_not_run_yet".to_string(),
+        canary_id: "none".to_string(),
+        runtime_pid: None,
+        runtime_endpoint: None,
+        response_bytes: None,
+        summary:
+            "NullContext did not run the dedicated controlled canary validation helper for this report."
+                .to_string(),
+        process_scan: ProcessScanReport {
+            overall_status: "scan_not_completed".to_string(),
+            implementation_status: "controlled_canary_not_run_yet".to_string(),
+            platform: std::env::consts::OS.to_string(),
+            target_process_kind: "llama-server".to_string(),
+            target_runtime_pid: None,
+            planned_platforms: vec![
+                "windows".to_string(),
+                "linux".to_string(),
+                "macos".to_string(),
+            ],
+            summary:
+                "No controlled canary helper run was executed, so no dedicated canary process scan was recorded."
+                    .to_string(),
+            residual_risk_summary:
+                "Without a controlled canary helper run, this report cannot compare dedicated canary marker persistence against the session's cleanup evidence."
+                    .to_string(),
+            phases: vec![],
+            notes: vec![
+                "The dedicated controlled canary validation helper had not run for this report."
+                    .to_string(),
+            ],
+        },
+        notes: vec![
+            "Future Track E slices will execute a dedicated helper runtime with known canary markers."
                 .to_string(),
         ],
     }

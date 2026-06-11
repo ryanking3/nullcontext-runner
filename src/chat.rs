@@ -23,6 +23,7 @@ use crate::retrieval::{
 use crate::runtime::{observe_post_shutdown, ManagedRuntime};
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
+use crate::validation_harness::run_controlled_canary_validation;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -837,7 +838,8 @@ impl ChatSessionManager {
             &runtime_shutdown,
             &runtime_usage,
             &post_shutdown_observation,
-        ));
+        ))
+        .with_controlled_canary_run(run_controlled_canary_validation(&active.config));
 
         let report = if let (Some(corpus_id), Some(corpus_name)) = (
             active.bound_corpus_id.as_deref(),

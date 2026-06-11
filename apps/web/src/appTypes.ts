@@ -227,11 +227,23 @@ export type MemoryValidationStageScorecard = {
   action_status: string;
   vram_evidence_status: string;
   process_scan_context_status: string;
+  controlled_canary_signal_status: string;
   validation_score: number;
   validation_verdict: string;
   summary: string;
   strengths: string[];
   gaps: string[];
+};
+
+export type ControlledCanaryValidationRunReportData = {
+  execution_status: string;
+  canary_id: string;
+  runtime_pid?: number | null;
+  runtime_endpoint?: string | null;
+  response_bytes?: number | null;
+  summary: string;
+  process_scan: ProcessScanReportData;
+  notes: string[];
 };
 
 export type MemoryValidationReportData = {
@@ -245,6 +257,7 @@ export type MemoryValidationReportData = {
   best_stage_score: number;
   best_stage_verdict: string;
   summary: string;
+  controlled_canary_run: ControlledCanaryValidationRunReportData;
   stage_scorecards: MemoryValidationStageScorecard[];
   notes: string[];
 };

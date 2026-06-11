@@ -281,6 +281,19 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.memory_validation = legacyMemoryValidationReport();
     }
 
+    if (parsed.memory_validation && !parsed.memory_validation.controlled_canary_run) {
+      parsed.memory_validation.controlled_canary_run =
+        legacyMemoryValidationReport().controlled_canary_run;
+    }
+
+    if (parsed.memory_validation?.stage_scorecards) {
+      for (const scorecard of parsed.memory_validation.stage_scorecards) {
+        if (scorecard.controlled_canary_signal_status === undefined) {
+          scorecard.controlled_canary_signal_status = "controlled_canary_not_run_yet";
+        }
+      }
+    }
+
     if (
       parsed.llama_runtime &&
       parsed.llama_runtime.vram_cleanup?.comparison &&
@@ -371,6 +384,34 @@ function legacyMemoryValidationReport() {
     best_stage_verdict: "validation_not_derived",
     summary:
       "This older report did not include the derived memory-validation harness section.",
+    controlled_canary_run: {
+      execution_status: "controlled_canary_not_run_yet",
+      canary_id: "none",
+      runtime_pid: null,
+      runtime_endpoint: null,
+      response_bytes: null,
+      summary:
+        "This older report did not include a dedicated controlled canary helper run.",
+      process_scan: {
+        overall_status: "scan_not_completed",
+        implementation_status: "controlled_canary_not_run_yet",
+        platform: "unknown",
+        target_process_kind: "llama-server",
+        target_runtime_pid: null,
+        planned_platforms: ["windows", "linux", "macos"],
+        summary:
+          "No controlled canary helper run was recorded in this older report.",
+        residual_risk_summary:
+          "Without a dedicated canary helper run, this report cannot compare known canary marker persistence against the session evidence.",
+        phases: [],
+        notes: [
+          "Open a newer report to inspect dedicated controlled canary validation results.",
+        ],
+      },
+      notes: [
+        "This older report predates the dedicated controlled canary helper validation slice.",
+      ],
+    },
     stage_scorecards: [],
     notes: [
       "Open a newer report to inspect stage scorecards and memory-validation evidence summaries.",

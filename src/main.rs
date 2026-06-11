@@ -22,6 +22,7 @@ mod runtime_capabilities;
 mod runtime_introspection;
 mod sensitive;
 mod session;
+mod validation_harness;
 mod web;
 
 use crate::logging::stdout_line;
@@ -38,6 +39,7 @@ use process_scan::{build_process_scan_report, scan_failed_start_cleanup_phase, P
 use registry::{list_sessions, register_persistent_session, show_report, SessionLifecycleMetadata};
 use runtime::RuntimeLaunchFailure;
 use session::Session;
+use validation_harness::run_controlled_canary_validation;
 
 fn main() -> Result<()> {
     match AppCommand::from_env()? {
@@ -208,7 +210,8 @@ fn run_session(mut config: SessionConfig) -> Result<()> {
         &inference_result.runtime_shutdown,
         &inference_result.runtime_usage,
         &inference_result.post_shutdown_observation,
-    ));
+    ))
+    .with_controlled_canary_run(run_controlled_canary_validation(&config));
 
     let report_json = report.to_pretty_json()?;
 

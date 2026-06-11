@@ -1307,6 +1307,114 @@ export function PrivacyReportViewer({
 
           <details className="report-detail" open>
             <summary>
+              controlled canary helper
+              <span
+                className={inspectionStatusClass(
+                  currentReport.memory_validation.controlled_canary_run.execution_status
+                )}
+              >
+                {humanizeSnakeCase(
+                  currentReport.memory_validation.controlled_canary_run.execution_status
+                )}
+              </span>
+            </summary>
+
+            <div className="report-risk-block">
+              <p>{currentReport.memory_validation.controlled_canary_run.summary}</p>
+            </div>
+
+            <ReportGrid
+              entries={[
+                {
+                  label: "canary id",
+                  value: currentReport.memory_validation.controlled_canary_run.canary_id,
+                },
+                {
+                  label: "runtime pid",
+                  value:
+                    currentReport.memory_validation.controlled_canary_run.runtime_pid?.toString() ||
+                    "none",
+                },
+                {
+                  label: "runtime endpoint",
+                  value:
+                    currentReport.memory_validation.controlled_canary_run.runtime_endpoint ||
+                    "none",
+                },
+                {
+                  label: "response bytes",
+                  value:
+                    currentReport.memory_validation.controlled_canary_run.response_bytes ===
+                      undefined ||
+                    currentReport.memory_validation.controlled_canary_run.response_bytes === null
+                      ? "none"
+                      : String(
+                          currentReport.memory_validation.controlled_canary_run.response_bytes
+                        ),
+                },
+                {
+                  label: "scan status",
+                  value: humanizeSnakeCase(
+                    currentReport.memory_validation.controlled_canary_run.process_scan
+                      .overall_status
+                  ),
+                },
+              ]}
+            />
+
+            <details className="report-detail">
+              <summary>
+                canary process scan phases (
+                {
+                  currentReport.memory_validation.controlled_canary_run.process_scan.phases.length
+                }
+                )
+              </summary>
+              {currentReport.memory_validation.controlled_canary_run.process_scan.phases.length ===
+              0 ? (
+                <p className="muted-text">no canary process scan phases available</p>
+              ) : (
+                <div className="report-list">
+                  {currentReport.memory_validation.controlled_canary_run.process_scan.phases.map(
+                    (phase) => (
+                      <div className="report-item" key={`canary-phase-${phase.phase}`}>
+                        <div className="report-item-header">
+                          <strong>{humanizeSnakeCase(phase.phase)}</strong>
+                          <span className={inspectionStatusClass(phase.status)}>
+                            {humanizeSnakeCase(phase.status)}
+                          </span>
+                        </div>
+                        <div className="report-path-list">
+                          <div>method: {humanizeSnakeCase(phase.method)}</div>
+                          <div>scope: {phase.scope_summary}</div>
+                          <div>target pid: {phase.target_pid?.toString() || "none"}</div>
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+            </details>
+
+            {currentReport.memory_validation.controlled_canary_run.notes.length > 0 && (
+              <details className="report-detail">
+                <summary>
+                  canary notes (
+                  {currentReport.memory_validation.controlled_canary_run.notes.length})
+                </summary>
+                <ul className="report-note-list">
+                  {currentReport.memory_validation.controlled_canary_run.notes.map(
+                    (note, index) => (
+                      <li key={`controlled-canary-note-${index}`}>{note}</li>
+                    )
+                  )}
+                </ul>
+              </details>
+            )}
+          </details>
+
+          <details className="report-detail" open>
+            <summary>
               memory validation stage scorecards (
               {currentReport.memory_validation.stage_scorecards.length})
             </summary>
@@ -1334,6 +1442,10 @@ export function PrivacyReportViewer({
                       <div>
                         process scan context:{" "}
                         {humanizeSnakeCase(scorecard.process_scan_context_status)}
+                      </div>
+                      <div>
+                        controlled canary:{" "}
+                        {humanizeSnakeCase(scorecard.controlled_canary_signal_status)}
                       </div>
                       <div>{scorecard.summary}</div>
                     </div>

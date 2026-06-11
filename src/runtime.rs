@@ -532,6 +532,22 @@ pub fn observe_post_shutdown(
     gpu_offload_requested: bool,
     strategy_config: Option<&SessionConfig>,
 ) -> RuntimePostShutdownObservation {
+    observe_post_shutdown_internal(pid, gpu_offload_requested, strategy_config, true)
+}
+
+pub fn observe_post_shutdown_baseline(
+    pid: u32,
+    gpu_offload_requested: bool,
+) -> RuntimePostShutdownObservation {
+    observe_post_shutdown_internal(pid, gpu_offload_requested, None, false)
+}
+
+fn observe_post_shutdown_internal(
+    pid: u32,
+    gpu_offload_requested: bool,
+    strategy_config: Option<&SessionConfig>,
+    include_strategy_stages: bool,
+) -> RuntimePostShutdownObservation {
     let started_at = Instant::now();
     let verification_window = Duration::from_millis(POST_SHUTDOWN_VERIFICATION_WINDOW_MS);
     let mut process_present_after_shutdown = None;
@@ -563,7 +579,7 @@ pub fn observe_post_shutdown(
 
     let baseline_gpu_window = gpu_window.finalize(POST_SHUTDOWN_VERIFICATION_WINDOW_MS);
 
-    let vram_cleanup_strategy_windows = if gpu_offload_requested {
+    let vram_cleanup_strategy_windows = if gpu_offload_requested && include_strategy_stages {
         let mut stages = Vec::new();
 
         for stage_plan in VRAM_CLEANUP_STRATEGY_STAGES {
