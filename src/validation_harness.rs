@@ -1,4 +1,4 @@
-use crate::audit::ControlledCanaryValidationRunReport;
+use crate::audit::{ControlledCanaryValidationPassReport, ControlledCanaryValidationRunReport};
 use crate::config::SessionConfig;
 use crate::process_scan::{
     build_process_scan_report, build_skipped_process_scan_report, scan_live_process_phase,
@@ -10,6 +10,8 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zeroize::Zeroize;
+
+const CONTROLLED_CANARY_PASS_COUNT: u32 = 3;
 
 #[derive(Serialize)]
 struct CanaryCompletionRequest {
@@ -31,41 +33,60 @@ struct CanaryCompletionResponse {
 pub fn run_controlled_canary_validation(
     config: &SessionConfig,
 ) -> ControlledCanaryValidationRunReport {
-    let canary_id = format!("nc-canary-{}", Uuid::new_v4().simple());
+    let mut passes = Vec::new();
+
+    for pass_index in 1..=CONTROLLED_CANARY_PASS_COUNT {
+        passes.push(run_controlled_canary_validation_pass(config, pass_index));
+    }
+
+    build_controlled_canary_validation_run_report(passes)
+}
+
+fn run_controlled_canary_validation_pass(
+    config: &SessionConfig,
+    pass_index: u32,
+) -> ControlledCanaryValidationPassReport {
+    let canary_id = format!("nc-canary-p{}-{}", pass_index, Uuid::new_v4().simple());
     let canary_prompt = format!(
         "NullContext controlled memory-validation canary {canary_id}. Reply in one short sentence that includes the token NC-RESP-{canary_id} exactly once."
     );
 
-    match run_controlled_canary_validation_impl(config, &canary_id, &canary_prompt) {
+    match run_controlled_canary_validation_pass_impl(config, pass_index, &canary_id, &canary_prompt)
+    {
         Ok(report) => report,
-        Err(error) => ControlledCanaryValidationRunReport {
+        Err(error) => ControlledCanaryValidationPassReport {
+            pass_index,
             execution_status: "controlled_canary_helper_failed".to_string(),
             canary_id,
             runtime_pid: None,
             runtime_endpoint: None,
             response_bytes: None,
             summary:
-                "NullContext attempted the controlled canary validation helper, but it did not complete successfully."
+                "NullContext attempted this controlled canary validation pass, but it did not complete successfully."
                     .to_string(),
             process_scan: build_skipped_process_scan_report(
                 None,
-                "The controlled canary helper did not complete, so no dedicated canary process scan report was produced.",
-                "Without a completed controlled canary helper run, NullContext cannot compare dedicated canary marker persistence against the session cleanup evidence.",
-                vec![format!("Controlled canary helper failed: {error}.")],
+                "The controlled canary helper pass did not complete, so no dedicated canary process scan report was produced.",
+                "Without a completed controlled canary helper pass, NullContext cannot compare dedicated canary marker persistence against the session cleanup evidence for this pass.",
+                vec![format!(
+                    "Controlled canary helper pass {} failed: {error}.",
+                    pass_index
+                )],
             ),
             notes: vec![
-                "This failure only affects the dedicated validation helper. The main session report still reflects the user session's own cleanup evidence."
+                "This failure only affects one dedicated validation pass. The main session report still reflects the user session's own cleanup evidence."
                     .to_string(),
             ],
         },
     }
 }
 
-fn run_controlled_canary_validation_impl(
+fn run_controlled_canary_validation_pass_impl(
     config: &SessionConfig,
+    pass_index: u32,
     canary_id: &str,
     canary_prompt: &str,
-) -> Result<ControlledCanaryValidationRunReport> {
+) -> Result<ControlledCanaryValidationPassReport> {
     let mut runtime = ManagedRuntime::launch(config)
         .context("failed to launch helper runtime for controlled canary validation")?;
     let runtime_pid = runtime.pid();
@@ -81,7 +102,8 @@ fn run_controlled_canary_validation_impl(
         Ok(response) => response,
         Err(error) => {
             let shutdown_note = best_effort_shutdown_canary_runtime(&mut runtime);
-            return Ok(ControlledCanaryValidationRunReport {
+            return Ok(ControlledCanaryValidationPassReport {
+                pass_index,
                 execution_status: "controlled_canary_request_failed".to_string(),
                 canary_id: canary_id.to_string(),
                 runtime_pid: Some(runtime_pid),
@@ -121,7 +143,8 @@ fn run_controlled_canary_validation_impl(
     {
         Ok(shutdown) => shutdown,
         Err(error) => {
-            return Ok(ControlledCanaryValidationRunReport {
+            return Ok(ControlledCanaryValidationPassReport {
+                pass_index,
                 execution_status: "controlled_canary_shutdown_failed".to_string(),
                 canary_id: canary_id.to_string(),
                 runtime_pid: Some(runtime_pid),
@@ -162,6 +185,7 @@ fn run_controlled_canary_validation_impl(
     );
 
     let mut notes = vec![
+        format!("Controlled canary validation pass {pass_index} completed."),
         format!(
             "Controlled canary helper runtime shut down using {} (exit code {}).",
             shutdown.shutdown_method,
@@ -180,7 +204,8 @@ fn run_controlled_canary_validation_impl(
 
     notes.extend(post_shutdown.observation_notes.clone());
 
-    Ok(ControlledCanaryValidationRunReport {
+    Ok(ControlledCanaryValidationPassReport {
+        pass_index,
         execution_status: "controlled_canary_completed".to_string(),
         canary_id: canary_id.to_string(),
         runtime_pid: Some(runtime_pid),
@@ -193,6 +218,246 @@ fn run_controlled_canary_validation_impl(
         process_scan,
         notes,
     })
+}
+
+fn build_controlled_canary_validation_run_report(
+    passes: Vec<ControlledCanaryValidationPassReport>,
+) -> ControlledCanaryValidationRunReport {
+    let requested_passes = CONTROLLED_CANARY_PASS_COUNT;
+    let completed_passes = passes
+        .iter()
+        .filter(|pass| pass.execution_status == "controlled_canary_completed")
+        .count() as u32;
+    let failed_passes = requested_passes.saturating_sub(completed_passes);
+    let aggregate_signal_status = aggregate_controlled_canary_signal_status(&passes);
+    let aggregate_process_scan_status = aggregate_controlled_canary_process_scan_status(&passes);
+    let selected_pass = select_representative_canary_pass(&passes);
+
+    let (execution_status, summary, selection_reason) = if let Some(selected_pass) = selected_pass {
+        (
+            aggregate_controlled_canary_execution_status(&passes),
+            format!(
+                "NullContext ran {} controlled canary helper pass(es), completed {}, failed {}, and recorded aggregate signal status {}. Representative pass: {} with scan status {}.",
+                requested_passes,
+                completed_passes,
+                failed_passes,
+                aggregate_signal_status,
+                selected_pass.pass_index,
+                selected_pass.process_scan.overall_status
+            ),
+            representative_canary_selection_reason(selected_pass, &aggregate_signal_status),
+        )
+    } else {
+        (
+            "controlled_canary_not_run_yet".to_string(),
+            "NullContext did not run any controlled canary helper passes for this report."
+                .to_string(),
+            "No representative controlled canary pass was selected because no passes were available."
+                .to_string(),
+        )
+    };
+
+    ControlledCanaryValidationRunReport {
+        execution_status,
+        requested_passes,
+        completed_passes,
+        failed_passes,
+        aggregate_signal_status: aggregate_signal_status.clone(),
+        aggregate_process_scan_status,
+        canary_id: selected_pass
+            .map(|pass| pass.canary_id.clone())
+            .unwrap_or_else(|| "none".to_string()),
+        selected_pass_index: selected_pass.map(|pass| pass.pass_index),
+        selected_pass_canary_id: selected_pass.map(|pass| pass.canary_id.clone()),
+        selection_reason,
+        runtime_pid: selected_pass.and_then(|pass| pass.runtime_pid),
+        runtime_endpoint: selected_pass.and_then(|pass| pass.runtime_endpoint.clone()),
+        response_bytes: selected_pass.and_then(|pass| pass.response_bytes),
+        summary,
+        process_scan: selected_pass
+            .map(|pass| pass.process_scan.clone())
+            .unwrap_or_else(|| {
+                build_skipped_process_scan_report(
+                    None,
+                    "No controlled canary helper passes were available, so no representative canary process scan report was selected.",
+                    "Without any controlled canary helper passes, NullContext cannot compare dedicated canary marker persistence against the session cleanup evidence.",
+                    vec!["No controlled canary helper passes were recorded.".to_string()],
+                )
+            }),
+        passes,
+        notes: vec![
+            "Aggregate canary status is pessimistic: any pass that still detects markers outweighs cleaner passes."
+                .to_string(),
+            "The top-level process scan shown here is the representative pass selected for inspection, while the aggregate signal summarizes all passes."
+                .to_string(),
+        ],
+    }
+}
+
+fn aggregate_controlled_canary_execution_status(
+    passes: &[ControlledCanaryValidationPassReport],
+) -> String {
+    if passes.is_empty() {
+        return "controlled_canary_not_run_yet".to_string();
+    }
+
+    if passes
+        .iter()
+        .any(|pass| pass.execution_status == "controlled_canary_completed")
+    {
+        if passes
+            .iter()
+            .all(|pass| pass.execution_status == "controlled_canary_completed")
+        {
+            "controlled_canary_completed".to_string()
+        } else {
+            "controlled_canary_completed_with_failures".to_string()
+        }
+    } else {
+        "controlled_canary_all_passes_failed".to_string()
+    }
+}
+
+fn aggregate_controlled_canary_signal_status(
+    passes: &[ControlledCanaryValidationPassReport],
+) -> String {
+    if passes.is_empty() {
+        return "controlled_canary_not_run_yet".to_string();
+    }
+
+    let statuses = passes
+        .iter()
+        .map(controlled_canary_pass_signal_status)
+        .collect::<Vec<_>>();
+
+    if statuses
+        .iter()
+        .any(|status| status == "controlled_canary_markers_detected")
+    {
+        return "controlled_canary_markers_detected_across_passes".to_string();
+    }
+
+    if statuses
+        .iter()
+        .all(|status| status == "controlled_canary_scan_clear_in_scanned_regions")
+    {
+        return "controlled_canary_all_completed_passes_clear".to_string();
+    }
+
+    if statuses.iter().any(|status| {
+        status == "controlled_canary_scan_clear_in_scanned_regions"
+            && statuses.iter().any(|other| other != status)
+    }) {
+        return "controlled_canary_mixed_clear_and_inconclusive".to_string();
+    }
+
+    if statuses.iter().all(|status| {
+        status == "controlled_canary_scan_backend_unsupported"
+            || status == "controlled_canary_not_run_yet"
+    }) {
+        return "controlled_canary_backend_unsupported_across_passes".to_string();
+    }
+
+    "controlled_canary_inconclusive_across_passes".to_string()
+}
+
+fn aggregate_controlled_canary_process_scan_status(
+    passes: &[ControlledCanaryValidationPassReport],
+) -> String {
+    if passes.is_empty() {
+        return "scan_not_completed".to_string();
+    }
+
+    if passes
+        .iter()
+        .any(|pass| pass.process_scan.overall_status == "markers_detected_in_scanned_memory")
+    {
+        return "markers_detected_in_scanned_memory".to_string();
+    }
+
+    if passes
+        .iter()
+        .all(|pass| pass.process_scan.overall_status == "no_markers_detected_in_scanned_regions")
+    {
+        return "no_markers_detected_in_scanned_regions".to_string();
+    }
+
+    if passes
+        .iter()
+        .all(|pass| pass.process_scan.overall_status == "scan_backend_unsupported_on_platform")
+    {
+        return "scan_backend_unsupported_on_platform".to_string();
+    }
+
+    "scan_attempt_incomplete".to_string()
+}
+
+fn select_representative_canary_pass(
+    passes: &[ControlledCanaryValidationPassReport],
+) -> Option<&ControlledCanaryValidationPassReport> {
+    passes
+        .iter()
+        .max_by_key(|pass| representative_canary_pass_rank(pass))
+}
+
+fn representative_canary_pass_rank(pass: &ControlledCanaryValidationPassReport) -> (u8, u32) {
+    (
+        match controlled_canary_pass_signal_status(pass).as_str() {
+            "controlled_canary_markers_detected" => 7,
+            "controlled_canary_request_failed" => 6,
+            "controlled_canary_shutdown_failed" => 5,
+            "controlled_canary_scan_inconclusive" => 4,
+            "controlled_canary_scan_not_completed" => 3,
+            "controlled_canary_scan_backend_unsupported" => 2,
+            "controlled_canary_scan_clear_in_scanned_regions" => 1,
+            _ => 0,
+        },
+        u32::MAX.saturating_sub(pass.pass_index),
+    )
+}
+
+fn representative_canary_selection_reason(
+    pass: &ControlledCanaryValidationPassReport,
+    aggregate_signal_status: &str,
+) -> String {
+    match aggregate_signal_status {
+        "controlled_canary_markers_detected_across_passes" => {
+            format!(
+                "Pass {} was selected because it still detected controlled canary markers, which is the most security-relevant outcome across the repeated helper runs.",
+                pass.pass_index
+            )
+        }
+        "controlled_canary_all_completed_passes_clear" => {
+            format!(
+                "Pass {} was selected as a representative clear pass because every completed canary pass missed the markers in scanned readable regions.",
+                pass.pass_index
+            )
+        }
+        _ => format!(
+            "Pass {} was selected as the most representative pessimistic pass for inspection because the repeated helper runs produced mixed or inconclusive outcomes.",
+            pass.pass_index
+        ),
+    }
+}
+
+fn controlled_canary_pass_signal_status(pass: &ControlledCanaryValidationPassReport) -> String {
+    match pass.execution_status.as_str() {
+        "controlled_canary_completed" => match pass.process_scan.overall_status.as_str() {
+            "markers_detected_in_scanned_memory" => "controlled_canary_markers_detected",
+            "no_markers_detected_in_scanned_regions" => {
+                "controlled_canary_scan_clear_in_scanned_regions"
+            }
+            "scan_backend_unsupported_on_platform" => "controlled_canary_scan_backend_unsupported",
+            "scan_attempt_failed" => "controlled_canary_scan_inconclusive",
+            "scan_not_completed" => "controlled_canary_scan_not_completed",
+            _ => "controlled_canary_scan_inconclusive",
+        },
+        "controlled_canary_request_failed" => "controlled_canary_request_failed",
+        "controlled_canary_shutdown_failed" => "controlled_canary_shutdown_failed",
+        "controlled_canary_helper_failed" => "controlled_canary_helper_failed",
+        _ => "controlled_canary_inconclusive",
+    }
+    .to_string()
 }
 
 fn best_effort_shutdown_canary_runtime(runtime: &mut ManagedRuntime) -> String {

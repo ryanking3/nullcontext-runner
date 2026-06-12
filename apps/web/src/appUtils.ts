@@ -38,6 +38,18 @@ export function inspectionStatusClass(status: string): string {
     return "pill failed";
   }
 
+  if (status.includes("markers_detected_across_passes")) {
+    return "pill failed";
+  }
+
+  if (status.includes("all_completed_passes_clear")) {
+    return "pill success";
+  }
+
+  if (status.includes("mixed_clear_and_inconclusive")) {
+    return "pill warning";
+  }
+
   if (status === "no_markers_detected_in_scanned_regions") {
     return "pill success";
   }
@@ -286,6 +298,27 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         legacyMemoryValidationReport().controlled_canary_run;
     }
 
+    if (
+      parsed.memory_validation?.controlled_canary_run &&
+      parsed.memory_validation.controlled_canary_run.requested_passes === undefined
+    ) {
+      const legacy = legacyMemoryValidationReport().controlled_canary_run;
+      parsed.memory_validation.controlled_canary_run.requested_passes = legacy.requested_passes;
+      parsed.memory_validation.controlled_canary_run.completed_passes = legacy.completed_passes;
+      parsed.memory_validation.controlled_canary_run.failed_passes = legacy.failed_passes;
+      parsed.memory_validation.controlled_canary_run.aggregate_signal_status =
+        legacy.aggregate_signal_status;
+      parsed.memory_validation.controlled_canary_run.aggregate_process_scan_status =
+        legacy.aggregate_process_scan_status;
+      parsed.memory_validation.controlled_canary_run.selected_pass_index ??=
+        legacy.selected_pass_index;
+      parsed.memory_validation.controlled_canary_run.selected_pass_canary_id ??=
+        legacy.selected_pass_canary_id;
+      parsed.memory_validation.controlled_canary_run.selection_reason ??=
+        legacy.selection_reason;
+      parsed.memory_validation.controlled_canary_run.passes ??= legacy.passes;
+    }
+
     if (parsed.memory_validation?.stage_scorecards) {
       for (const scorecard of parsed.memory_validation.stage_scorecards) {
         if (scorecard.controlled_canary_signal_status === undefined) {
@@ -386,7 +419,15 @@ function legacyMemoryValidationReport() {
       "This older report did not include the derived memory-validation harness section.",
     controlled_canary_run: {
       execution_status: "controlled_canary_not_run_yet",
+      requested_passes: 0,
+      completed_passes: 0,
+      failed_passes: 0,
+      aggregate_signal_status: "controlled_canary_not_run_yet",
+      aggregate_process_scan_status: "scan_not_completed",
       canary_id: "none",
+      selected_pass_index: null,
+      selected_pass_canary_id: null,
+      selection_reason: "No representative controlled canary pass was selected.",
       runtime_pid: null,
       runtime_endpoint: null,
       response_bytes: null,
@@ -408,6 +449,7 @@ function legacyMemoryValidationReport() {
           "Open a newer report to inspect dedicated controlled canary validation results.",
         ],
       },
+      passes: [],
       notes: [
         "This older report predates the dedicated controlled canary helper validation slice.",
       ],

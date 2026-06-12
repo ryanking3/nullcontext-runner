@@ -235,7 +235,8 @@ export type MemoryValidationStageScorecard = {
   gaps: string[];
 };
 
-export type ControlledCanaryValidationRunReportData = {
+export type ControlledCanaryValidationPassReportData = {
+  pass_index: number;
   execution_status: string;
   canary_id: string;
   runtime_pid?: number | null;
@@ -243,6 +244,26 @@ export type ControlledCanaryValidationRunReportData = {
   response_bytes?: number | null;
   summary: string;
   process_scan: ProcessScanReportData;
+  notes: string[];
+};
+
+export type ControlledCanaryValidationRunReportData = {
+  execution_status: string;
+  requested_passes: number;
+  completed_passes: number;
+  failed_passes: number;
+  aggregate_signal_status: string;
+  aggregate_process_scan_status: string;
+  canary_id: string;
+  selected_pass_index?: number | null;
+  selected_pass_canary_id?: string | null;
+  selection_reason: string;
+  runtime_pid?: number | null;
+  runtime_endpoint?: string | null;
+  response_bytes?: number | null;
+  summary: string;
+  process_scan: ProcessScanReportData;
+  passes: ControlledCanaryValidationPassReportData[];
   notes: string[];
 };
 

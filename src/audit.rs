@@ -147,6 +147,30 @@ pub struct MemoryValidationReport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControlledCanaryValidationRunReport {
     pub execution_status: String,
+    pub requested_passes: u32,
+    pub completed_passes: u32,
+    pub failed_passes: u32,
+    pub aggregate_signal_status: String,
+    pub aggregate_process_scan_status: String,
+    pub canary_id: String,
+    pub selected_pass_index: Option<u32>,
+    pub selected_pass_canary_id: Option<String>,
+    #[serde(default = "default_controlled_canary_selection_reason")]
+    pub selection_reason: String,
+    pub runtime_pid: Option<u32>,
+    pub runtime_endpoint: Option<String>,
+    pub response_bytes: Option<usize>,
+    pub summary: String,
+    pub process_scan: ProcessScanReport,
+    #[serde(default)]
+    pub passes: Vec<ControlledCanaryValidationPassReport>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlledCanaryValidationPassReport {
+    pub pass_index: u32,
+    pub execution_status: String,
     pub canary_id: String,
     pub runtime_pid: Option<u32>,
     pub runtime_endpoint: Option<String>,
@@ -1374,6 +1398,10 @@ fn default_controlled_canary_signal_status() -> String {
     "controlled_canary_not_run_yet".to_string()
 }
 
+fn default_controlled_canary_selection_reason() -> String {
+    "No representative controlled canary pass was selected.".to_string()
+}
+
 fn default_vram_cleanup_selection_reason() -> String {
     "This older report did not record stage-selection metadata.".to_string()
 }
@@ -1381,7 +1409,15 @@ fn default_vram_cleanup_selection_reason() -> String {
 fn default_controlled_canary_validation_run_report() -> ControlledCanaryValidationRunReport {
     ControlledCanaryValidationRunReport {
         execution_status: "controlled_canary_not_run_yet".to_string(),
+        requested_passes: 0,
+        completed_passes: 0,
+        failed_passes: 0,
+        aggregate_signal_status: "controlled_canary_not_run_yet".to_string(),
+        aggregate_process_scan_status: "scan_not_completed".to_string(),
         canary_id: "none".to_string(),
+        selected_pass_index: None,
+        selected_pass_canary_id: None,
+        selection_reason: default_controlled_canary_selection_reason(),
         runtime_pid: None,
         runtime_endpoint: None,
         response_bytes: None,
@@ -1411,6 +1447,7 @@ fn default_controlled_canary_validation_run_report() -> ControlledCanaryValidati
                     .to_string(),
             ],
         },
+        passes: vec![],
         notes: vec![
             "Future Track E slices will execute a dedicated helper runtime with known canary markers."
                 .to_string(),

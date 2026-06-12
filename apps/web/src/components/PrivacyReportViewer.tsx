@@ -1326,8 +1326,53 @@ export function PrivacyReportViewer({
             <ReportGrid
               entries={[
                 {
+                  label: "requested passes",
+                  value: String(
+                    currentReport.memory_validation.controlled_canary_run.requested_passes
+                  ),
+                },
+                {
+                  label: "completed passes",
+                  value: String(
+                    currentReport.memory_validation.controlled_canary_run.completed_passes
+                  ),
+                },
+                {
+                  label: "failed passes",
+                  value: String(
+                    currentReport.memory_validation.controlled_canary_run.failed_passes
+                  ),
+                },
+                {
+                  label: "aggregate signal",
+                  value: humanizeSnakeCase(
+                    currentReport.memory_validation.controlled_canary_run
+                      .aggregate_signal_status
+                  ),
+                },
+                {
+                  label: "aggregate scan status",
+                  value: humanizeSnakeCase(
+                    currentReport.memory_validation.controlled_canary_run
+                      .aggregate_process_scan_status
+                  ),
+                },
+                {
                   label: "canary id",
                   value: currentReport.memory_validation.controlled_canary_run.canary_id,
+                },
+                {
+                  label: "selected pass",
+                  value:
+                    currentReport.memory_validation.controlled_canary_run.selected_pass_index ===
+                      undefined ||
+                    currentReport.memory_validation.controlled_canary_run.selected_pass_index ===
+                      null
+                      ? "none"
+                      : String(
+                          currentReport.memory_validation.controlled_canary_run
+                            .selected_pass_index
+                        ),
                 },
                 {
                   label: "runtime pid",
@@ -1361,6 +1406,51 @@ export function PrivacyReportViewer({
                 },
               ]}
             />
+
+            <div className="report-risk-block">
+              <p>
+                <strong>selection reason:</strong>{" "}
+                {currentReport.memory_validation.controlled_canary_run.selection_reason}
+              </p>
+            </div>
+
+            <details className="report-detail">
+              <summary>
+                canary passes (
+                {currentReport.memory_validation.controlled_canary_run.passes.length})
+              </summary>
+              {currentReport.memory_validation.controlled_canary_run.passes.length === 0 ? (
+                <p className="muted-text">no individual canary passes available</p>
+              ) : (
+                <div className="report-list">
+                  {currentReport.memory_validation.controlled_canary_run.passes.map((pass) => (
+                    <div className="report-item" key={`canary-pass-${pass.pass_index}`}>
+                      <div className="report-item-header">
+                        <strong>pass {pass.pass_index}</strong>
+                        <span className={inspectionStatusClass(pass.execution_status)}>
+                          {humanizeSnakeCase(pass.execution_status)}
+                        </span>
+                      </div>
+                      <div className="report-path-list">
+                        <div>canary id: {pass.canary_id}</div>
+                        <div>runtime pid: {pass.runtime_pid?.toString() || "none"}</div>
+                        <div>runtime endpoint: {pass.runtime_endpoint || "none"}</div>
+                        <div>
+                          response bytes:{" "}
+                          {pass.response_bytes === undefined || pass.response_bytes === null
+                            ? "none"
+                            : String(pass.response_bytes)}
+                        </div>
+                        <div>
+                          process scan: {humanizeSnakeCase(pass.process_scan.overall_status)}
+                        </div>
+                        <div>{pass.summary}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </details>
 
             <details className="report-detail">
               <summary>

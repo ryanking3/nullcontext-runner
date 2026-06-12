@@ -363,7 +363,7 @@ Current experimental stages in-tree now include cooldown rechecks, host RAM pres
 20. `[ ] Document platform security capability matrix`
 21. `[ ] Freeze security claim wording for v1`
 
-Current Track E progress: a structured session-evidence validation scorecard and first dedicated controlled-canary helper run are now in-tree, but the fuller repeated/automated harness is still pending.
+Current Track E progress: a structured session-evidence validation scorecard and repeated dedicated controlled-canary helper passes are now in-tree, but the fuller automated/repeated-results harness and release gating workflow are still pending.
 
 
 also (please clean below up and tie into tracks if you see this mr codex):

@@ -1,14 +1,13 @@
 use crate::audit::{
-    ControlledCanaryValidationRunReport, MemoryValidationReport, MemoryValidationStageScorecard,
-    PrivacyReport, ProcessScanReport, VramCleanupStrategyStageReport,
+    MemoryValidationReport, MemoryValidationStageScorecard, PrivacyReport, ProcessScanReport,
+    VramCleanupStrategyStageReport,
 };
 
 pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidationReport {
     let process_scan_signal_status =
         derive_process_scan_signal_status(report.process_scan.as_ref());
     let controlled_canary_run = report.memory_validation.controlled_canary_run.clone();
-    let controlled_canary_signal_status =
-        derive_controlled_canary_signal_status(&controlled_canary_run);
+    let controlled_canary_signal_status = controlled_canary_run.aggregate_signal_status.clone();
 
     let Some(llama_runtime) = report.llama_runtime.as_ref() else {
         return MemoryValidationReport {
@@ -88,7 +87,7 @@ pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidatio
         .expect("stage scorecards should exist when cleanup stages exist");
 
     let validation_status = if process_scan_signal_status == "marker_persistence_detected"
-        || controlled_canary_signal_status == "controlled_canary_markers_detected"
+        || controlled_canary_signal_status == "controlled_canary_markers_detected_across_passes"
     {
         "stage_scoring_ready_marker_risk_still_present".to_string()
     } else {
@@ -114,7 +113,7 @@ pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidatio
     ];
 
     if process_scan_signal_status == "marker_persistence_detected"
-        || controlled_canary_signal_status == "controlled_canary_markers_detected"
+        || controlled_canary_signal_status == "controlled_canary_markers_detected_across_passes"
     {
         notes.push(
             "Because direct scanning still detected configured markers either in the user session or the dedicated canary helper, even strong VRAM-stage scores should be treated as incomplete memory-clearing evidence."
@@ -186,48 +185,28 @@ fn process_scan_validation_note(process_scan_signal_status: &str) -> String {
     }
 }
 
-fn derive_controlled_canary_signal_status(
-    controlled_canary_run: &ControlledCanaryValidationRunReport,
-) -> String {
-    match controlled_canary_run.execution_status.as_str() {
-        "controlled_canary_completed" => {
-            match derive_process_scan_signal_status(Some(&controlled_canary_run.process_scan))
-                .as_str()
-            {
-                "marker_persistence_detected" => "controlled_canary_markers_detected".to_string(),
-                "marker_scan_clear_in_scanned_regions" => {
-                    "controlled_canary_scan_clear_in_scanned_regions".to_string()
-                }
-                "marker_scan_inconclusive" => "controlled_canary_scan_inconclusive".to_string(),
-                "marker_scan_backend_unsupported" => {
-                    "controlled_canary_scan_backend_unsupported".to_string()
-                }
-                "marker_scan_not_completed" => "controlled_canary_scan_not_completed".to_string(),
-                _ => "controlled_canary_scan_context_mixed".to_string(),
-            }
-        }
-        "controlled_canary_not_run_yet" => "controlled_canary_not_run_yet".to_string(),
-        "controlled_canary_helper_failed" => "controlled_canary_helper_failed".to_string(),
-        _ => "controlled_canary_inconclusive".to_string(),
-    }
-}
-
 fn controlled_canary_validation_note(controlled_canary_signal_status: &str) -> String {
     match controlled_canary_signal_status {
-        "controlled_canary_markers_detected" => {
-            "The dedicated controlled canary helper still found its prompt or response markers in readable llama-server memory, which is a strong negative validation signal."
+        "controlled_canary_markers_detected_across_passes" => {
+            "At least one dedicated controlled canary helper pass still found its prompt or response markers in readable llama-server memory, which is a strong negative validation signal."
                 .to_string()
         }
-        "controlled_canary_scan_clear_in_scanned_regions" => {
-            "The dedicated controlled canary helper did not find its markers in scanned readable regions. That is a stronger validation signal than passive session evidence alone."
+        "controlled_canary_all_completed_passes_clear" => {
+            "Every completed dedicated controlled canary helper pass missed its markers in scanned readable regions. That is a stronger validation signal than passive session evidence alone."
                 .to_string()
         }
-        "controlled_canary_scan_backend_unsupported" => {
-            "The dedicated controlled canary helper ran, but direct process-scan support is still missing on this platform build."
+        "controlled_canary_backend_unsupported_across_passes" => {
+            "The dedicated controlled canary helper passes ran, but direct process-scan support is still missing on this platform build."
                 .to_string()
         }
-        "controlled_canary_helper_failed" => {
-            "The dedicated controlled canary helper did not complete successfully, so validation still relies primarily on passive session evidence."
+        "controlled_canary_completed_with_failures"
+        | "controlled_canary_mixed_clear_and_inconclusive"
+        | "controlled_canary_inconclusive_across_passes"
+        | "controlled_canary_request_failed"
+        | "controlled_canary_shutdown_failed"
+        | "controlled_canary_helper_failed"
+        | "controlled_canary_all_passes_failed" => {
+            "The repeated dedicated controlled canary helper passes produced mixed, failed, or inconclusive outcomes, so validation still relies heavily on passive session evidence."
                 .to_string()
         }
         "controlled_canary_not_run_yet" => {
@@ -368,26 +347,30 @@ fn build_stage_scorecard(
     }
 
     match controlled_canary_signal_status {
-        "controlled_canary_scan_clear_in_scanned_regions" => {
+        "controlled_canary_all_completed_passes_clear" => {
             score += 12;
             strengths.push(
-                "The dedicated controlled canary helper did not find its markers in scanned readable regions."
+                "All completed dedicated controlled canary helper passes missed their markers in scanned readable regions."
                     .to_string(),
             );
         }
-        "controlled_canary_markers_detected" => {
+        "controlled_canary_markers_detected_across_passes" => {
             gaps.push(
-                "The dedicated controlled canary helper still detected its markers in readable llama-server memory."
+                "At least one dedicated controlled canary helper pass still detected its markers in readable llama-server memory."
                     .to_string(),
             );
         }
-        "controlled_canary_scan_backend_unsupported"
-        | "controlled_canary_scan_not_completed"
+        "controlled_canary_backend_unsupported_across_passes"
+        | "controlled_canary_mixed_clear_and_inconclusive"
+        | "controlled_canary_inconclusive_across_passes"
+        | "controlled_canary_completed_with_failures"
+        | "controlled_canary_request_failed"
+        | "controlled_canary_shutdown_failed"
         | "controlled_canary_helper_failed"
-        | "controlled_canary_inconclusive"
+        | "controlled_canary_all_passes_failed"
         | "controlled_canary_not_run_yet" => {
             gaps.push(
-                "Dedicated controlled canary evidence was limited, unavailable, or inconclusive for this report."
+                "Repeated dedicated controlled canary evidence was limited, unavailable, or inconclusive for this report."
                     .to_string(),
             );
         }
