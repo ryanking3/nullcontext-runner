@@ -283,6 +283,25 @@ export type MemoryValidationReportData = {
   notes: string[];
 };
 
+export type MemoryValidationHistoryReportData = {
+  history_status: string;
+  scope_key: string;
+  scope_model_id?: string | null;
+  scope_platform?: string | null;
+  scope_gpu_offload_requested?: boolean | null;
+  runs_recorded: number;
+  marker_detection_runs: number;
+  clear_canary_runs: number;
+  inconclusive_or_failed_runs: number;
+  strong_or_moderate_runs: number;
+  best_stage_score_min?: number | null;
+  best_stage_score_max?: number | null;
+  best_stage_score_avg?: number | null;
+  last_recorded_at?: string | null;
+  summary: string;
+  notes: string[];
+};
+
 export type LlamaMemoryDomainReport = {
   domain: string;
   exposure_scope: string;
@@ -456,6 +475,7 @@ export type PrivacyReportData = {
   llama_runtime?: LlamaRuntimeReportData | null;
   process_scan?: ProcessScanReportData | null;
   memory_validation: MemoryValidationReportData;
+  memory_validation_history: MemoryValidationHistoryReportData;
   retrieval?: RetrievalReportData | null;
   residual_risk: string;
 };

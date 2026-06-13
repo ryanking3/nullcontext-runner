@@ -293,6 +293,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.memory_validation = legacyMemoryValidationReport();
     }
 
+    if (!parsed.memory_validation_history) {
+      parsed.memory_validation_history = legacyMemoryValidationHistoryReport();
+    }
+
     if (parsed.memory_validation && !parsed.memory_validation.controlled_canary_run) {
       parsed.memory_validation.controlled_canary_run =
         legacyMemoryValidationReport().controlled_canary_run;
@@ -457,6 +461,30 @@ function legacyMemoryValidationReport() {
     stage_scorecards: [],
     notes: [
       "Open a newer report to inspect stage scorecards and memory-validation evidence summaries.",
+    ],
+  };
+}
+
+function legacyMemoryValidationHistoryReport() {
+  return {
+    history_status: "history_not_recorded_in_legacy_report",
+    scope_key: "legacy_report_scope_unknown",
+    scope_model_id: null,
+    scope_platform: null,
+    scope_gpu_offload_requested: null,
+    runs_recorded: 0,
+    marker_detection_runs: 0,
+    clear_canary_runs: 0,
+    inconclusive_or_failed_runs: 0,
+    strong_or_moderate_runs: 0,
+    best_stage_score_min: null,
+    best_stage_score_max: null,
+    best_stage_score_avg: null,
+    last_recorded_at: null,
+    summary:
+      "This older report did not include cross-session memory-validation history.",
+    notes: [
+      "Open a newer report to inspect locally persisted validation history for the current model/platform scope.",
     ],
   };
 }

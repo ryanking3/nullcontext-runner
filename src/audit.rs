@@ -33,6 +33,8 @@ pub struct PrivacyReport {
     pub process_scan: Option<ProcessScanReport>,
     #[serde(default = "default_memory_validation_report")]
     pub memory_validation: MemoryValidationReport,
+    #[serde(default = "default_memory_validation_history_report")]
+    pub memory_validation_history: MemoryValidationHistoryReport,
     pub retrieval: Option<RetrievalReport>,
     pub residual_risk: String,
 }
@@ -195,6 +197,26 @@ pub struct MemoryValidationStageScorecard {
     pub summary: String,
     pub strengths: Vec<String>,
     pub gaps: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryValidationHistoryReport {
+    pub history_status: String,
+    pub scope_key: String,
+    pub scope_model_id: Option<String>,
+    pub scope_platform: Option<String>,
+    pub scope_gpu_offload_requested: Option<bool>,
+    pub runs_recorded: u32,
+    pub marker_detection_runs: u32,
+    pub clear_canary_runs: u32,
+    pub inconclusive_or_failed_runs: u32,
+    pub strong_or_moderate_runs: u32,
+    pub best_stage_score_min: Option<u32>,
+    pub best_stage_score_max: Option<u32>,
+    pub best_stage_score_avg: Option<f64>,
+    pub last_recorded_at: Option<String>,
+    pub summary: String,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -398,6 +420,7 @@ impl PrivacyReport {
             llama_runtime: None,
             process_scan: None,
             memory_validation: default_memory_validation_report(),
+            memory_validation_history: default_memory_validation_history_report(),
             retrieval: None,
             residual_risk:
                 "OS memory, swap, shell history, and llama.cpp internal allocations are not yet sanitized."
@@ -433,6 +456,14 @@ impl PrivacyReport {
     ) -> Self {
         self.memory_validation.controlled_canary_run = controlled_canary_run;
         self.memory_validation = build_memory_validation_report(&self);
+        self
+    }
+
+    pub fn with_memory_validation_history(
+        mut self,
+        memory_validation_history: MemoryValidationHistoryReport,
+    ) -> Self {
+        self.memory_validation_history = memory_validation_history;
         self
     }
 
@@ -1389,6 +1420,32 @@ fn default_memory_validation_report() -> MemoryValidationReport {
         stage_scorecards: vec![],
         notes: vec![
             "Older reports may not include the derived memory-validation harness section."
+                .to_string(),
+        ],
+    }
+}
+
+fn default_memory_validation_history_report() -> MemoryValidationHistoryReport {
+    MemoryValidationHistoryReport {
+        history_status: "history_not_recorded".to_string(),
+        scope_key: "unavailable".to_string(),
+        scope_model_id: None,
+        scope_platform: None,
+        scope_gpu_offload_requested: None,
+        runs_recorded: 0,
+        marker_detection_runs: 0,
+        clear_canary_runs: 0,
+        inconclusive_or_failed_runs: 0,
+        strong_or_moderate_runs: 0,
+        best_stage_score_min: None,
+        best_stage_score_max: None,
+        best_stage_score_avg: None,
+        last_recorded_at: None,
+        summary:
+            "NullContext had not yet derived or persisted cross-session memory-validation history for this report."
+                .to_string(),
+        notes: vec![
+            "Older reports may not include the cross-session memory-validation history section."
                 .to_string(),
         ],
     }

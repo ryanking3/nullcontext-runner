@@ -1307,6 +1307,108 @@ export function PrivacyReportViewer({
 
           <details className="report-detail" open>
             <summary>
+              validation history
+              <span
+                className={inspectionStatusClass(
+                  currentReport.memory_validation_history.history_status
+                )}
+              >
+                {humanizeSnakeCase(currentReport.memory_validation_history.history_status)}
+              </span>
+            </summary>
+
+            <div className="report-risk-block">
+              <p>{currentReport.memory_validation_history.summary}</p>
+            </div>
+
+            <ReportGrid
+              entries={[
+                {
+                  label: "scope key",
+                  value: currentReport.memory_validation_history.scope_key,
+                },
+                {
+                  label: "model id",
+                  value: currentReport.memory_validation_history.scope_model_id || "unknown",
+                },
+                {
+                  label: "platform",
+                  value: currentReport.memory_validation_history.scope_platform || "unknown",
+                },
+                {
+                  label: "gpu offload requested",
+                  value:
+                    currentReport.memory_validation_history.scope_gpu_offload_requested ===
+                      undefined ||
+                    currentReport.memory_validation_history.scope_gpu_offload_requested === null
+                      ? "unknown"
+                      : currentReport.memory_validation_history.scope_gpu_offload_requested
+                        ? "true"
+                        : "false",
+                },
+                {
+                  label: "runs recorded",
+                  value: String(currentReport.memory_validation_history.runs_recorded),
+                },
+                {
+                  label: "marker-detection runs",
+                  value: String(currentReport.memory_validation_history.marker_detection_runs),
+                },
+                {
+                  label: "clear canary runs",
+                  value: String(currentReport.memory_validation_history.clear_canary_runs),
+                },
+                {
+                  label: "inconclusive or failed",
+                  value: String(
+                    currentReport.memory_validation_history.inconclusive_or_failed_runs
+                  ),
+                },
+                {
+                  label: "strong or moderate runs",
+                  value: String(currentReport.memory_validation_history.strong_or_moderate_runs),
+                },
+                {
+                  label: "best score range",
+                  value:
+                    currentReport.memory_validation_history.best_stage_score_min === undefined ||
+                    currentReport.memory_validation_history.best_stage_score_min === null ||
+                    currentReport.memory_validation_history.best_stage_score_max === undefined ||
+                    currentReport.memory_validation_history.best_stage_score_max === null
+                      ? "unavailable"
+                      : `${currentReport.memory_validation_history.best_stage_score_min}-${currentReport.memory_validation_history.best_stage_score_max}/100`,
+                },
+                {
+                  label: "best score avg",
+                  value:
+                    currentReport.memory_validation_history.best_stage_score_avg === undefined ||
+                    currentReport.memory_validation_history.best_stage_score_avg === null
+                      ? "unavailable"
+                      : `${currentReport.memory_validation_history.best_stage_score_avg.toFixed(1)}/100`,
+                },
+                {
+                  label: "last recorded",
+                  value: currentReport.memory_validation_history.last_recorded_at || "unknown",
+                },
+              ]}
+            />
+
+            {currentReport.memory_validation_history.notes.length > 0 && (
+              <details className="report-detail">
+                <summary>
+                  history notes ({currentReport.memory_validation_history.notes.length})
+                </summary>
+                <ul className="report-note-list">
+                  {currentReport.memory_validation_history.notes.map((note, index) => (
+                    <li key={`memory-validation-history-note-${index}`}>{note}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </details>
+
+          <details className="report-detail" open>
+            <summary>
               controlled canary helper
               <span
                 className={inspectionStatusClass(

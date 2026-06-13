@@ -39,6 +39,7 @@ use crate::runtime::{observe_post_shutdown, ManagedRuntime, RuntimeLaunchFailure
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
 use crate::validation_harness::run_controlled_canary_validation;
+use crate::validation_history::apply_and_record_memory_validation_history;
 use anyhow::Result;
 use axum::extract::{Multipart, Path, State};
 use axum::http::StatusCode;
@@ -1218,6 +1219,7 @@ fn run_direct_streaming_session(
     } else {
         report
     };
+    let report = apply_and_record_memory_validation_history(&config.home, report);
 
     let report_json = report.to_pretty_json()?;
 

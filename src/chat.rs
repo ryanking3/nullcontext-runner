@@ -24,6 +24,7 @@ use crate::runtime::{observe_post_shutdown, ManagedRuntime};
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
 use crate::validation_harness::run_controlled_canary_validation;
+use crate::validation_history::apply_and_record_memory_validation_history;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -857,6 +858,7 @@ impl ChatSessionManager {
         } else {
             report
         };
+        let report = apply_and_record_memory_validation_history(&active.config.home, report);
 
         let report_json = report.to_pretty_json()?;
         let parsed_report: serde_json::Value = serde_json::from_str(&report_json)?;
