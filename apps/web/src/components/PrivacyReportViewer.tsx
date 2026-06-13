@@ -736,6 +736,13 @@ export function PrivacyReportViewer({
                     ),
                   },
                   {
+                    label: "marker evidence",
+                    value: humanizeSnakeCase(
+                      currentReport.llama_runtime.vram_cleanup.comparison
+                        .marker_evidence_status
+                    ),
+                  },
+                  {
                     label: "selected stage id",
                     value:
                       currentReport.llama_runtime.vram_cleanup.comparison.selected_stage_id ??
@@ -791,6 +798,13 @@ export function PrivacyReportViewer({
 
               {currentReport.llama_runtime.vram_cleanup.comparison.notes.length > 0 && (
                 <div className="report-risk-block">
+                  <p>
+                    <strong>marker evidence summary:</strong>{" "}
+                    {
+                      currentReport.llama_runtime.vram_cleanup.comparison
+                        .marker_evidence_summary
+                    }
+                  </p>
                   {currentReport.llama_runtime.vram_cleanup.comparison.notes.map((note) => (
                     <p key={note}>{note}</p>
                   ))}
@@ -823,6 +837,9 @@ export function PrivacyReportViewer({
                         <div>window: {stage.verification_window_ms} ms</div>
                         <div>action: {humanizeSnakeCase(stage.action_status)}</div>
                         <div>
+                          marker evidence: {humanizeSnakeCase(stage.marker_evidence_status)}
+                        </div>
+                        <div>
                           peak gpu bytes:{" "}
                           {stage.evidence_snapshot.gpu_peak_memory_bytes
                             ? formatBytes(stage.evidence_snapshot.gpu_peak_memory_bytes)
@@ -832,6 +849,7 @@ export function PrivacyReportViewer({
                           gpu-positive samples:{" "}
                           {stage.evidence_snapshot.gpu_samples_with_pid_observed}
                         </div>
+                        <div>{stage.marker_evidence_summary}</div>
                         <div>{stage.summary}</div>
                         {stage.notes.map((note) => (
                           <div key={note}>{note}</div>
@@ -1728,6 +1746,9 @@ export function PrivacyReportViewer({
                       <div>action: {humanizeSnakeCase(scorecard.action_status)}</div>
                       <div>
                         vram evidence: {humanizeSnakeCase(scorecard.vram_evidence_status)}
+                      </div>
+                      <div>
+                        marker evidence: {humanizeSnakeCase(scorecard.marker_evidence_status)}
                       </div>
                       <div>
                         process scan context:{" "}

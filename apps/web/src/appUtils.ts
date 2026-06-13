@@ -16,6 +16,29 @@ export function statusClass(status: string): string {
 
 export function inspectionStatusClass(status: string): string {
   if (
+    status.includes("marker_persistence_detected") ||
+    status.includes("without_supporting_gpu_improvement")
+  ) {
+    return "pill failed";
+  }
+
+  if (
+    status.includes("supported_by_clear") ||
+    status.includes("direct_marker_miss_observed")
+  ) {
+    return "pill success";
+  }
+
+  if (
+    status.includes("partial_marker_clearance") ||
+    status.includes("without_clear_marker_confirmation") ||
+    status.includes("marker_evidence_context_mixed") ||
+    status.includes("not_yet_contextualized")
+  ) {
+    return "pill warning";
+  }
+
+  if (
     status.includes("unsupported") ||
     status.includes("unavailable") ||
     status.includes("partial") ||
@@ -349,6 +372,9 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         if (scorecard.controlled_canary_signal_status === undefined) {
           scorecard.controlled_canary_signal_status = "controlled_canary_not_run_yet";
         }
+        if (scorecard.marker_evidence_status === undefined) {
+          scorecard.marker_evidence_status = "marker_evidence_not_yet_contextualized";
+        }
       }
     }
 
@@ -362,6 +388,22 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.llama_runtime.vram_cleanup.comparison.selected_stage_id ??= null;
       parsed.llama_runtime.vram_cleanup.comparison.selected_stage_label ??= null;
       parsed.llama_runtime.vram_cleanup.comparison.selected_stage_kind ??= null;
+    }
+
+    if (parsed.llama_runtime?.vram_cleanup?.comparison) {
+      const legacy = legacyVramCleanupComparisonReport();
+      parsed.llama_runtime.vram_cleanup.comparison.marker_evidence_status ??=
+        legacy.marker_evidence_status;
+      parsed.llama_runtime.vram_cleanup.comparison.marker_evidence_summary ??=
+        legacy.marker_evidence_summary;
+    }
+
+    if (parsed.llama_runtime?.vram_cleanup?.stages) {
+      for (const stage of parsed.llama_runtime.vram_cleanup.stages) {
+        stage.marker_evidence_status ??= "marker_evidence_not_yet_contextualized";
+        stage.marker_evidence_summary ??=
+          "This older report did not attach RAM-side marker context to this cleanup stage.";
+      }
     }
 
     return parsed;
@@ -397,6 +439,9 @@ function legacyVramCleanupComparisonReport() {
     comparison_status: "legacy_report_unavailable",
     current_run_role: "legacy_report_unavailable",
     evidence_improvement_status: "legacy_report_unavailable",
+    marker_evidence_status: "marker_evidence_not_yet_contextualized",
+    marker_evidence_summary:
+      "This older report did not attach RAM-side marker context to the VRAM cleanup comparison.",
     baseline_snapshot: {
       vram_inspection_status: "legacy_report_unavailable",
       post_shutdown_gpu_visibility_status: "legacy_report_unavailable",

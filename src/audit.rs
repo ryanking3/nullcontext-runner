@@ -191,6 +191,8 @@ pub struct MemoryValidationStageScorecard {
     pub stage_kind: String,
     pub action_status: String,
     pub vram_evidence_status: String,
+    #[serde(default = "default_vram_cleanup_marker_evidence_status")]
+    pub marker_evidence_status: String,
     pub process_scan_context_status: String,
     #[serde(default = "default_controlled_canary_signal_status")]
     pub controlled_canary_signal_status: String,
@@ -329,6 +331,10 @@ pub struct VramCleanupComparisonReport {
     pub comparison_status: String,
     pub current_run_role: String,
     pub evidence_improvement_status: String,
+    #[serde(default = "default_vram_cleanup_marker_evidence_status")]
+    pub marker_evidence_status: String,
+    #[serde(default = "default_vram_cleanup_marker_evidence_summary")]
+    pub marker_evidence_summary: String,
     pub baseline_snapshot: VramCleanupEvidenceSnapshot,
     pub current_snapshot: VramCleanupEvidenceSnapshot,
     #[serde(default)]
@@ -364,6 +370,10 @@ pub struct VramCleanupStrategyStageReport {
     pub verification_window_ms: u64,
     pub action_status: String,
     pub evidence_improvement_status: String,
+    #[serde(default = "default_vram_cleanup_marker_evidence_status")]
+    pub marker_evidence_status: String,
+    #[serde(default = "default_vram_cleanup_marker_evidence_summary")]
+    pub marker_evidence_summary: String,
     pub evidence_snapshot: VramCleanupEvidenceSnapshot,
     pub summary: String,
     pub notes: Vec<String>,
@@ -507,6 +517,7 @@ impl PrivacyReport {
     }
 
     fn refresh_derived_sections(&mut self) {
+        contextualize_vram_cleanup_marker_evidence(self);
         self.memory_validation = build_memory_validation_report(self);
         self.platform_capability_matrix = build_platform_capability_matrix_report(self);
     }
@@ -661,6 +672,156 @@ fn build_platform_capability_matrix_report(
             "Track C remains intentionally platform-specific: Windows/NVIDIA API inspection work should not be overstated on macOS or non-CUDA paths."
                 .to_string(),
         ],
+    }
+}
+
+fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
+    let process_scan_signal_status = match report
+        .process_scan
+        .as_ref()
+        .map(|scan| scan.overall_status.as_str())
+    {
+        Some("markers_detected_in_scanned_memory") => "marker_persistence_detected",
+        Some("no_markers_detected_in_scanned_regions") => "marker_scan_clear_in_scanned_regions",
+        Some("scan_attempt_failed") => "marker_scan_inconclusive",
+        Some("scan_backend_unsupported_on_platform") => "marker_scan_backend_unsupported",
+        Some("scan_skipped") | Some("scan_not_completed") => "marker_scan_not_completed",
+        Some(_) => "marker_scan_context_mixed",
+        None => "process_scan_context_unavailable",
+    };
+    let controlled_canary_signal_status = report
+        .memory_validation
+        .controlled_canary_run
+        .aggregate_signal_status
+        .clone();
+
+    let Some(llama_runtime) = report.llama_runtime.as_mut() else {
+        return;
+    };
+
+    let comparison_marker_evidence_status = derive_vram_cleanup_marker_evidence_status(
+        &llama_runtime
+            .vram_cleanup
+            .comparison
+            .evidence_improvement_status,
+        process_scan_signal_status,
+        &controlled_canary_signal_status,
+    );
+    llama_runtime
+        .vram_cleanup
+        .comparison
+        .marker_evidence_summary = vram_cleanup_marker_evidence_summary(
+        &comparison_marker_evidence_status,
+        process_scan_signal_status,
+        &controlled_canary_signal_status,
+    );
+    llama_runtime.vram_cleanup.comparison.marker_evidence_status =
+        comparison_marker_evidence_status;
+
+    for stage in &mut llama_runtime.vram_cleanup.stages {
+        let marker_evidence_status = derive_vram_cleanup_marker_evidence_status(
+            &stage.evidence_improvement_status,
+            process_scan_signal_status,
+            &controlled_canary_signal_status,
+        );
+        stage.marker_evidence_summary = vram_cleanup_marker_evidence_summary(
+            &marker_evidence_status,
+            process_scan_signal_status,
+            &controlled_canary_signal_status,
+        );
+        stage.marker_evidence_status = marker_evidence_status;
+    }
+}
+
+fn derive_vram_cleanup_marker_evidence_status(
+    vram_evidence_status: &str,
+    process_scan_signal_status: &str,
+    controlled_canary_signal_status: &str,
+) -> String {
+    let has_strong_gpu_improvement = matches!(
+        vram_evidence_status,
+        "evidence_improved_pid_no_longer_observed_after_strategy"
+            | "evidence_unchanged_not_observed"
+            | "evidence_improved_bytes_no_longer_visible_but_pid_still_observed"
+            | "evidence_improved_peak_bytes_lower_but_residency_still_observed"
+    );
+    let session_clear = process_scan_signal_status == "marker_scan_clear_in_scanned_regions";
+    let canary_clear =
+        controlled_canary_signal_status == "controlled_canary_all_completed_passes_clear";
+    let marker_detected = process_scan_signal_status == "marker_persistence_detected"
+        || controlled_canary_signal_status == "controlled_canary_markers_detected_across_passes";
+    let marker_limited = matches!(
+        process_scan_signal_status,
+        "marker_scan_inconclusive"
+            | "marker_scan_backend_unsupported"
+            | "marker_scan_not_completed"
+            | "process_scan_context_unavailable"
+            | "marker_scan_context_mixed"
+    ) || matches!(
+        controlled_canary_signal_status,
+        "controlled_canary_backend_unsupported_across_passes"
+            | "controlled_canary_mixed_clear_and_inconclusive"
+            | "controlled_canary_inconclusive_across_passes"
+            | "controlled_canary_completed_with_failures"
+            | "controlled_canary_request_failed"
+            | "controlled_canary_shutdown_failed"
+            | "controlled_canary_helper_failed"
+            | "controlled_canary_all_passes_failed"
+            | "controlled_canary_not_run_yet"
+    );
+
+    if marker_detected {
+        if has_strong_gpu_improvement {
+            "gpu_evidence_improved_but_marker_persistence_detected".to_string()
+        } else {
+            "marker_persistence_detected_without_supporting_gpu_improvement".to_string()
+        }
+    } else if session_clear && canary_clear {
+        "gpu_evidence_supported_by_clear_session_and_canary_scans".to_string()
+    } else if session_clear || canary_clear {
+        "gpu_evidence_supported_by_partial_marker_clearance".to_string()
+    } else if marker_limited {
+        "gpu_evidence_without_clear_marker_confirmation".to_string()
+    } else {
+        "marker_evidence_context_mixed".to_string()
+    }
+}
+
+fn vram_cleanup_marker_evidence_summary(
+    marker_evidence_status: &str,
+    process_scan_signal_status: &str,
+    controlled_canary_signal_status: &str,
+) -> String {
+    match marker_evidence_status {
+        "gpu_evidence_improved_but_marker_persistence_detected" => format!(
+            "GPU visibility improved, but direct marker evidence still remained negative: session scan {}, controlled canary {}.",
+            process_scan_signal_status.replace('_', " "),
+            controlled_canary_signal_status.replace('_', " ")
+        ),
+        "marker_persistence_detected_without_supporting_gpu_improvement" => format!(
+            "Neither GPU visibility nor marker evidence produced a clean outcome: session scan {}, controlled canary {}.",
+            process_scan_signal_status.replace('_', " "),
+            controlled_canary_signal_status.replace('_', " ")
+        ),
+        "gpu_evidence_supported_by_clear_session_and_canary_scans" => {
+            "This GPU-evidence result is reinforced by both a clear session process scan and clear repeated controlled canary passes."
+                .to_string()
+        }
+        "gpu_evidence_supported_by_partial_marker_clearance" => format!(
+            "This GPU-evidence result has partial RAM-side support: session scan {}, controlled canary {}.",
+            process_scan_signal_status.replace('_', " "),
+            controlled_canary_signal_status.replace('_', " ")
+        ),
+        "gpu_evidence_without_clear_marker_confirmation" => format!(
+            "GPU visibility evidence exists, but RAM-side marker confirmation remained limited or unavailable: session scan {}, controlled canary {}.",
+            process_scan_signal_status.replace('_', " "),
+            controlled_canary_signal_status.replace('_', " ")
+        ),
+        _ => format!(
+            "Marker-evidence context remained mixed for this cleanup result: session scan {}, controlled canary {}.",
+            process_scan_signal_status.replace('_', " "),
+            controlled_canary_signal_status.replace('_', " ")
+        ),
     }
 }
 
@@ -1846,6 +2007,15 @@ fn default_vram_cleanup_selection_reason() -> String {
     "This older report did not record stage-selection metadata.".to_string()
 }
 
+fn default_vram_cleanup_marker_evidence_status() -> String {
+    "marker_evidence_not_yet_contextualized".to_string()
+}
+
+fn default_vram_cleanup_marker_evidence_summary() -> String {
+    "This report had not yet attached RAM-side marker-persistence context to the VRAM cleanup comparison."
+        .to_string()
+}
+
 fn default_controlled_canary_validation_run_report() -> ControlledCanaryValidationRunReport {
     ControlledCanaryValidationRunReport {
         execution_status: "controlled_canary_not_run_yet".to_string(),
@@ -2053,6 +2223,8 @@ fn build_vram_cleanup_stage_report(
             strategy_stage.window.verification_window_ms,
             vram_cleanup_comparison_summary(&evidence_improvement_status)
         ),
+        marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
+        marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
         notes: {
             let mut notes = strategy_stage.action_notes.clone();
             notes.extend(vram_cleanup_comparison_notes(
@@ -2073,6 +2245,8 @@ fn build_baseline_only_vram_cleanup_comparison_report(
         comparison_status: "baseline_reference_recorded_no_strategy_delta".to_string(),
         current_run_role: "baseline_reference".to_string(),
         evidence_improvement_status: "baseline_only_no_strategy_delta".to_string(),
+        marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
+        marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
         baseline_snapshot: baseline_snapshot.clone(),
         current_snapshot: baseline_snapshot,
         selected_stage_id: None,
@@ -2301,6 +2475,8 @@ fn build_experimental_vram_cleanup_comparison_report(
     VramCleanupComparisonReport {
         comparison_status: "baseline_compared_to_selected_experimental_stage".to_string(),
         current_run_role: "selected_experimental_strategy_stage_result".to_string(),
+        marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
+        marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
         summary: format!(
             "Selected stage {} ({}). {}",
             selected_stage.stage_label,
@@ -2350,6 +2526,8 @@ fn build_not_applicable_vram_cleanup_comparison_report() -> VramCleanupCompariso
         comparison_status: "not_applicable".to_string(),
         current_run_role: "not_applicable".to_string(),
         evidence_improvement_status: "not_applicable".to_string(),
+        marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
+        marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
         baseline_snapshot: snapshot.clone(),
         current_snapshot: snapshot,
         selected_stage_id: None,
@@ -2381,6 +2559,8 @@ fn build_startup_failed_vram_cleanup_comparison_report() -> VramCleanupCompariso
         comparison_status: "inconclusive_due_to_startup_failure".to_string(),
         current_run_role: "startup_failed_before_baseline".to_string(),
         evidence_improvement_status: "inconclusive_due_to_startup_failure".to_string(),
+        marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
+        marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
         baseline_snapshot: snapshot.clone(),
         current_snapshot: snapshot,
         selected_stage_id: None,
@@ -2415,6 +2595,8 @@ fn default_vram_cleanup_comparison_report() -> VramCleanupComparisonReport {
         comparison_status: "legacy_report_unavailable".to_string(),
         current_run_role: "legacy_report_unavailable".to_string(),
         evidence_improvement_status: "legacy_report_unavailable".to_string(),
+        marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
+        marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
         baseline_snapshot: snapshot.clone(),
         current_snapshot: snapshot,
         selected_stage_id: None,

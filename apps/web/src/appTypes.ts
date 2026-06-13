@@ -226,6 +226,7 @@ export type MemoryValidationStageScorecard = {
   stage_kind: string;
   action_status: string;
   vram_evidence_status: string;
+  marker_evidence_status: string;
   process_scan_context_status: string;
   controlled_canary_signal_status: string;
   validation_score: number;
@@ -394,6 +395,8 @@ export type VramCleanupComparisonReport = {
   comparison_status: string;
   current_run_role: string;
   evidence_improvement_status: string;
+  marker_evidence_status: string;
+  marker_evidence_summary: string;
   baseline_snapshot: VramCleanupEvidenceSnapshot;
   current_snapshot: VramCleanupEvidenceSnapshot;
   selected_stage_id?: string | null;
@@ -423,6 +426,8 @@ export type VramCleanupStrategyStageReport = {
   verification_window_ms: number;
   action_status: string;
   evidence_improvement_status: string;
+  marker_evidence_status: string;
+  marker_evidence_summary: string;
   evidence_snapshot: VramCleanupEvidenceSnapshot;
   summary: string;
   notes: string[];

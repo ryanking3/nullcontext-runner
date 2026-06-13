@@ -319,47 +319,70 @@ fn build_stage_scorecard(
         gaps.push("The stage snapshot still exposed peak GPU memory bytes.".to_string());
     }
 
-    match process_scan_signal_status {
-        "marker_scan_clear_in_scanned_regions" => {
-            score += 10;
+    match stage.marker_evidence_status.as_str() {
+        "gpu_evidence_supported_by_clear_session_and_canary_scans" => {
+            score += 18;
             strengths.push(
-                "Direct process scanning did not find configured markers in scanned readable regions."
+                "This stage's GPU outcome is reinforced by both clear session scanning and clear repeated canary passes."
                     .to_string(),
             );
         }
-        "marker_persistence_detected" => {
+        "gpu_evidence_supported_by_partial_marker_clearance" => {
+            score += 9;
+            strengths.push(
+                "This stage's GPU outcome has at least some supporting RAM-side marker-clearance evidence."
+                    .to_string(),
+            );
+        }
+        "gpu_evidence_improved_but_marker_persistence_detected" => {
             gaps.push(
-                "Direct process scanning still detected configured markers in readable llama-server memory."
+                "GPU visibility improved for this stage, but marker-persistence evidence still remained negative."
                     .to_string(),
             );
         }
+        "marker_persistence_detected_without_supporting_gpu_improvement" => {
+            gaps.push(
+                "This stage lacked both a clean GPU improvement signal and a clean marker-persistence outcome."
+                    .to_string(),
+            );
+        }
+        "gpu_evidence_without_clear_marker_confirmation"
+        | "marker_evidence_context_mixed"
+        | "marker_evidence_not_yet_contextualized" => {
+            gaps.push(
+                "This stage's GPU outcome was not backed by strong clear-marker confirmation."
+                    .to_string(),
+            );
+        }
+        _ => {
+            gaps.push(
+                "This stage recorded an unrecognized marker-evidence context, so RAM-side confirmation should be treated cautiously."
+                    .to_string(),
+            );
+        }
+    }
+
+    match process_scan_signal_status {
+        "marker_persistence_detected" => gaps.push(
+            "Session-scoped direct process scanning still detected configured markers in readable llama-server memory."
+                .to_string(),
+        ),
         "marker_scan_inconclusive"
         | "marker_scan_backend_unsupported"
         | "marker_scan_not_completed"
         | "process_scan_context_unavailable"
-        | "marker_scan_context_mixed" => {
-            gaps.push(
-                "Direct process-scan evidence was limited, incomplete, or unavailable for this run."
-                    .to_string(),
-            );
-        }
+        | "marker_scan_context_mixed" => gaps.push(
+            "Session-scoped direct process-scan evidence remained limited, incomplete, or unavailable."
+                .to_string(),
+        ),
         _ => {}
     }
 
     match controlled_canary_signal_status {
-        "controlled_canary_all_completed_passes_clear" => {
-            score += 12;
-            strengths.push(
-                "All completed dedicated controlled canary helper passes missed their markers in scanned readable regions."
-                    .to_string(),
-            );
-        }
-        "controlled_canary_markers_detected_across_passes" => {
-            gaps.push(
-                "At least one dedicated controlled canary helper pass still detected its markers in readable llama-server memory."
-                    .to_string(),
-            );
-        }
+        "controlled_canary_markers_detected_across_passes" => gaps.push(
+            "At least one dedicated controlled canary helper pass still detected its markers in readable llama-server memory."
+                .to_string(),
+        ),
         "controlled_canary_backend_unsupported_across_passes"
         | "controlled_canary_mixed_clear_and_inconclusive"
         | "controlled_canary_inconclusive_across_passes"
@@ -368,12 +391,10 @@ fn build_stage_scorecard(
         | "controlled_canary_shutdown_failed"
         | "controlled_canary_helper_failed"
         | "controlled_canary_all_passes_failed"
-        | "controlled_canary_not_run_yet" => {
-            gaps.push(
-                "Repeated dedicated controlled canary evidence was limited, unavailable, or inconclusive for this report."
-                    .to_string(),
-            );
-        }
+        | "controlled_canary_not_run_yet" => gaps.push(
+            "Repeated dedicated controlled canary evidence was limited, unavailable, or inconclusive for this report."
+                .to_string(),
+        ),
         _ => {}
     }
 
@@ -390,6 +411,7 @@ fn build_stage_scorecard(
         stage_kind: stage.stage_kind.clone(),
         action_status: stage.action_status.clone(),
         vram_evidence_status: stage.evidence_improvement_status.clone(),
+        marker_evidence_status: stage.marker_evidence_status.clone(),
         process_scan_context_status: process_scan_signal_status.to_string(),
         controlled_canary_signal_status: controlled_canary_signal_status.to_string(),
         validation_score,
