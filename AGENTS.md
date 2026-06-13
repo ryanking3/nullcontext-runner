@@ -41,6 +41,11 @@ The project currently supports:
 - workspace artifact scanning
 - cleanup reports
 - privacy reports
+- direct Windows process-memory scanning for configured llama-server markers
+- live/post-shutdown prompt and response marker scan reporting
+- repeated controlled canary validation passes
+- cross-session memory-validation history
+- platform capability matrix reporting
 - Rust-owned prompt/response buffer zeroization
 - llama runtime exposure reporting
 - live llama runtime RAM/VRAM usage snapshots
@@ -48,6 +53,8 @@ The project currently supports:
 - macOS vmmap-based RAM inspection and before/after region delta reporting
 - Windows PowerShell-based process memory observation
 - NVIDIA `nvidia-smi` compute-apps and `pmon` fallback inspection paths
+- allocator / KV lifecycle capability reporting
+- cleanup-stage VRAM comparison, marker-aware scorecards, and helper-stage canary scans
 - active chat final reporting
 
 The project is functional but still early-stage. It should not be described as a hardened secure inference system.
@@ -78,7 +85,7 @@ Important backend files:
   CLI parsing, config loading, security modes, prompt source handling, and `SessionConfig`.
 
 - `src/runtime.rs`  
-  Starts, checks, and stops `llama-server`, and performs best-effort runtime RAM/VRAM observation across macOS and Windows/NVIDIA host-tooling paths.
+  Starts, checks, and stops `llama-server`, performs best-effort runtime RAM/VRAM observation, runs cleanup stages, and captures helper-stage validation evidence across macOS and Windows/NVIDIA paths.
 
 - `src/inference.rs`  
   Blocking one-shot inference path used by CLI mode.
@@ -105,7 +112,25 @@ Important backend files:
   Corpus querying, prompt grounding, and retrieval provenance shaping.
 
 - `src/audit.rs`  
-  Privacy report structures including active chat `SessionProfile`, llama runtime exposure reporting, and inspection verdicts.
+  Privacy report structures including active chat `SessionProfile`, llama runtime exposure reporting, platform capability matrix data, cleanup-stage comparison reporting, and inspection verdicts.
+
+- `src/process_scan.rs`  
+  Direct llama-server marker scanning model and platform-specific scan phases.
+
+- `src/runtime_capabilities.rs`  
+  Declared runtime capability detection for instrumented llama builds.
+
+- `src/runtime_introspection.rs`  
+  Parsed allocator/KV/runtime lifecycle signals from llama runtime output.
+
+- `src/memory_validation.rs`  
+  Derived validation scorecards combining process-scan, cleanup-stage, and canary evidence.
+
+- `src/validation_harness.rs`  
+  Repeated controlled canary helper validation runs and representative-pass selection.
+
+- `src/validation_history.rs`  
+  Cross-session validation-history persistence and scope summaries.
 
 - `src/cleanup.rs`  
   Artifact scanning, cleanup reporting, sanitization operation records.
@@ -465,6 +490,11 @@ Manual verification should include:
 - active chat stop does not kill the session
 - active chat end generates report
 - llama runtime report shows shutdown method and inspection verdicts
+- process scan reports show live/post-shutdown scan state when markers are available
+- repeated controlled canary validation runs are attached to the report
+- platform capability matrix renders current track readiness truthfully
+- cleanup-stage reports show marker-aware evidence status and helper-stage scan summaries when available
+- cross-session validation history updates after repeated runs in the same scope
 - macOS runtime reports show vmmap footprint and resident-region evidence when available
 - Windows runtime reports show PowerShell process-memory evidence when available
 - NVIDIA-backed runs report either compute-apps VRAM bytes or `pmon` PID visibility notes when available
@@ -585,4 +615,7 @@ Do not commit:
 - No automated tests.
 - OCR currently relies on local CLI availability and does not implement full document-layout fidelity.
 - llama runtime RAM inspection is strongest on macOS right now and still relies on best-effort host tooling rather than direct allocator introspection.
+- Windows direct process scanning is currently the strongest platform-specific marker backend; broader parity is still incomplete.
+- cleanup-stage and helper-stage evidence now exists per report, but repeated cross-run stage effectiveness aggregation is still incomplete.
+- allocator / KV introspection is still only partial and needs deeper instrumented-runtime evidence.
 - Windows/NVIDIA runtime inspection needs live validation against real driver/runtime combinations, and current VRAM evidence is still host-tooling based rather than true allocator introspection or sanitization.

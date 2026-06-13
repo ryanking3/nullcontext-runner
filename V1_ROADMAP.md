@@ -1,431 +1,450 @@
-# NullContext Security-First Pre-v1 Roadmap
+# NullContext v1 Security Roadmap
 
-## Goal
+## Purpose
 
-Before `v1.0`, NullContext should make major progress on:
+This document defines what must be true before `v1.0`.
 
-1. direct process memory scanning
-2. llama.cpp allocator / KV introspection
-3. CUDA / NVIDIA API-level inspection
-4. experimental VRAM sanitization
+It is not a feature wishlist.
+It is not a packaging checklist.
+It is not a post-v1 ideas dump.
 
-This roadmap treats those as true release blockers rather than optional research.
+It is the security and evidence roadmap that must be completed before NullContext can honestly ship a `v1` with the intended product identity:
+
+- local-first
+- runtime-aware
+- audit-visible
+- explicit about retained risk
+- materially stronger than a thin chat wrapper around `llama-server`
 
 ---
 
-## Guiding Rules
+## Core v1 Standard
 
-- Never claim sanitization when we only have loss of observability.
-- Always distinguish:
-  - `not observed`
-  - `not scannable`
-  - `scan unavailable`
-  - `still found`
-- Treat platform support explicitly:
-  - `macos`
+Before `v1.0`, NullContext must be able to do all of the following with clear operator-visible evidence:
+
+1. scan at least one real target platform for prompt/response markers in `llama-server` process memory
+2. show meaningful llama.cpp allocator / KV lifecycle evidence, even if partial
+3. show better Windows/NVIDIA GPU evidence than raw `nvidia-smi` screenshots or hand-waving
+4. run experimental cleanup stages and compare their outcomes with structured evidence
+5. validate those outcomes with repeated canary-based runs instead of one-off anecdotes
+6. communicate exactly where evidence is strong, weak, unavailable, or unsupported
+
+If a capability cannot meet those bars yet, the report and UI must say so plainly.
+
+---
+
+## Non-Negotiable Rules
+
+- Never say `sanitized` when we only mean `not observed`.
+- Never let a stronger-sounding label hide weaker evidence.
+- Keep platform truth explicit:
   - `windows_nvidia`
+  - `macos`
   - `linux`
-- Every new security feature should produce:
-  - report data
-  - operator-visible UI
+- Every security feature must land with:
+  - backend report structure
+  - UI surface
   - residual-risk wording
-  - a validation procedure
+  - validation path
+- Evidence hierarchy matters:
+  - direct marker detection beats indirect memory summaries
+  - repeated canary evidence beats single-run optimism
+  - runtime-internal signals beat inference from process death alone
 
 ---
 
-## Phase 1: Direct Process Memory Scanning
+## Current Position
+
+NullContext already has meaningful foundations in-tree:
+
+- Windows direct process scan prototype
+- live and post-shutdown marker scanning
+- failed-start cleanup scanning
+- repeated controlled canary helper runs
+- cross-session validation history
+- platform capability matrix reporting
+- RAM/VRAM runtime observation
+- Windows PowerShell memory observation
+- NVIDIA compute-app / `pmon` visibility paths
+- VRAM cleanup strategy modeling
+- baseline versus cleanup-stage comparison
+- multiple cleanup stages:
+  - cooldown rechecks
+  - host RAM pressure
+  - host page discard/decommit pressure
+  - CUDA memory pressure
+  - helper-runtime relaunch probe
+  - helper-runtime allocation churn probe
+- stage-aware marker evidence in scoring
+- helper-stage dedicated canary scans
+- allocator / KV signal reporting through capability manifests and parsed runtime output
+
+That is strong progress.
+
+It is not yet enough to call the security program complete.
+
+---
+
+## What Still Blocks v1
+
+The main remaining blockers are:
+
+1. Track B still needs deeper allocator / KV introspection.
+2. Track C still needs stronger CUDA / NVIDIA API-level truth.
+3. Track D and Track E still need repeated-run aggregation that tells us which cleanup stages actually help.
+4. v1 claim wording still needs to be frozen around the real final evidence level.
+
+Those are the remaining hard blockers.
+
+---
+
+## Track Status
+
+### Track A: Direct Process Memory Scanning
 
 ### Goal
 
-Scan the `llama-server` process memory for known prompt/response markers and report whether they are still observable:
+Detect whether configured prompt/response markers remain observable in `llama-server` memory.
 
-- while runtime is alive
-- after shutdown
-- after failed startup cleanup
+### Current State
 
-### Why First
+Done or largely done:
 
-This is the first serious step beyond RSS / VRAM summaries into actual content persistence evidence.
+- process-scan report schema exists
+- process-scan UI exists
+- Windows direct process-scan prototype exists
+- live runtime marker scans exist
+- post-shutdown scans exist
+- failed-start cleanup scans exist
+- repeated controlled canary scans exist
+- cleanup-stage process scans exist where PID visibility still allows them
+- helper-stage canary scans exist for helper relaunch/churn stages
 
-### Scope
+### Remaining v1 Work
 
-Build a new module:
+- aggregate cleanup-stage scan outcomes across runs, not just per report
+- make stage-level evidence easier to compare over time
+- reduce places where fallback session-wide scan context is still used instead of truly stage-local evidence
+- expand beyond Windows when feasible, but only if it does not stall higher-priority truth work
 
-- `src/process_scan.rs`
+### v1 Exit Criteria
 
-Core concepts:
-
-- scan target = `llama-server` PID
-- scan patterns:
-  - prompt marker
-  - response marker
-  - optional synthetic canary marker
-- scan phases:
-  - `live_runtime`
-  - `post_shutdown`
-  - `failed_start_cleanup`
-
-### Data Model
-
-Add report structs for:
-
-- scan attempted
-- platform
-- method
-- scope summary
-- regions scanned
-- regions skipped
-- bytes scanned
-- patterns searched
-- pattern matches found / not found
-- errors / limitations
-
-Likely new report types:
-
-- `ProcessScanReport`
-- `ProcessScanPatternResult`
-- `ProcessScanRegionSummary`
-
-### Platform Order
-
-Recommended order:
-
-1. `windows_nvidia` first if that is the main dev/test environment
-2. `linux` second because it may be technically cleaner
-3. `macos` third if feasible
-
-### Implementation Slices
-
-1. Add process scan report model and report/UI placeholders
-2. Add first real process scan backend for one platform
-3. Scan live runtime for prompt marker
-4. Scan post-shutdown window for prompt marker
-5. Add response-marker scanning
-6. Add failed-start cleanup scan path
-
-### Acceptance Criteria
-
-- One platform can scan the target process for a known marker.
-- Reports distinguish:
+- at least one platform has real direct process scanning
+- reports clearly distinguish:
   - marker found
-  - marker not found
-  - scan unavailable
+  - marker not found in scanned regions
   - scan incomplete
-- UI displays the result clearly.
-- Live vs post-shutdown evidence can be compared.
+  - unsupported
+  - process not observable
+- cleanup stages can be compared not only by GPU visibility but by marker-persistence evidence
+
+### Honest Status
+
+Track A is the strongest of the five tracks and is close to v1-complete, but repeated evidence aggregation is still missing.
 
 ---
 
-## Phase 2: llama.cpp Allocator / KV Introspection
+### Track B: llama.cpp Allocator / KV Introspection
 
 ### Goal
 
-Understand and, where possible, expose internal llama.cpp memory lifecycle:
+Show meaningful internal lifecycle evidence for:
 
-- KV cache creation/lifetime
-- allocator arenas
-- model weight residency boundaries
-- teardown behavior
+- allocator initialization
+- allocator teardown
+- allocator reset
+- KV/cache initialization
+- KV/cache reuse
+- KV/cache clear
+- model unload behavior
 
-### Why Second
+### Current State
 
-External scanning tells us whether content persists. Allocator/KV introspection helps explain why.
+Done or partially done:
 
-### Scope
+- allocator / KV plan exists
+- runtime capability manifest path exists
+- runtime build profile reporting exists
+- parsed lifecycle signal reporting exists
+- allocator/KV summaries exist in reports
+- allocator reset / KV clear / model unload fields exist
 
-This phase is likely a mix of:
+### Remaining v1 Work
 
-- source research in llama.cpp
-- possible patching/forking
-- optional custom build path for introspection-enabled llama-server
+- push from “capability + observed output signal” toward stronger internal truth
+- improve instrumented-runtime path so this is not mostly manifest-driven
+- capture more allocator/KV events from real instrumented builds
+- reduce reliance on generic fallback wording like “not observed directly”
+- better tie allocator/KV evidence to cleanup-stage interpretation
 
-### Likely Outputs
+### v1 Exit Criteria
 
-- documented allocator/KV map
-- introspection-enabled build mode
-- report fields for:
-  - KV cache initialized
-  - KV cache reused
-  - KV/cache explicitly cleared or not
-  - allocator reset hooks available/unavailable
-  - model unload semantics observed/unobserved
-
-### Likely Implementation Shape
-
-Possibly:
-
-- a patched llama.cpp build under a documented fork/patch set
-- introspection hooks exposed via stdout/stderr parsing, local API, or patched endpoints
-- `src/runtime.rs` and `src/audit.rs` consuming those signals
-
-### Implementation Slices
-
-1. Research spike
-2. Add introspection capability flags
-3. Expose KV/cache lifecycle events
-4. Expose allocator teardown/reset signals
-5. Report model unload / allocator reset evidence
-6. Integrate with runtime memory-domain reporting
-
-### Acceptance Criteria
-
-- Reports can say more than “allocator unverified”.
-- Reports distinguish:
+- reports must say more than “allocator unknown”
+- NullContext must be able to distinguish:
   - stock runtime
   - instrumented runtime
-  - KV/cache clear observed
-  - allocator reset observed
-  - no allocator evidence available
+  - allocator lifecycle signals observed
+  - allocator reset observed or not
+  - KV lifecycle signals observed
+  - KV clear observed or not
+- allocator/KV evidence must materially influence the final security story
+
+### Honest Status
+
+Track B is not done.
+It has structure, but not enough depth yet.
+This remains one of the biggest true v1 blockers.
 
 ---
 
-## Phase 3: CUDA / NVIDIA API-Level Inspection
+### Track C: CUDA / NVIDIA Inspection
 
 ### Goal
 
-Move beyond `nvidia-smi` host-tool visibility into stronger GPU/runtime evidence.
+Move from host-tool visibility into stronger GPU evidence on `windows_nvidia`.
 
-### Why Third
+### Current State
 
-Without API-level inspection, VRAM claims stay too weak and WDDM ambiguity remains a ceiling.
+Done or partially done:
 
-### Scope
+- GPU inspection backend abstraction exists
+- Windows/NVIDIA report paths exist
+- allocation-byte visibility is separated from PID visibility
+- post-shutdown GPU evidence is more structured than before
+- capability matrix shows the current platform truth
 
-Investigate:
+### Remaining v1 Work
 
-- CUDA Driver API
-- CUDA Runtime API
-- NVML
-- whether per-process / per-context memory visibility is possible
-- what can be tied to llama-server PID or CUDA context
-
-### Likely Outputs
-
-- better GPU observation backend than `nvidia-smi` alone
-- clearer distinction between:
-  - PID visible
-  - context visible
-  - allocation bytes visible
-  - allocator state visible
-- platform caveat matrix for WDDM vs TCC if relevant
-
-### Implementation Slices
-
-1. Research spike
-2. Add backend abstraction for GPU inspection
-3. Add NVML/CUDA-backed observation path
-4. Report context/allocation visibility separately
-5. Improve post-shutdown GPU inspection
-6. Update UI/report semantics for richer GPU evidence
-
-### Acceptance Criteria
-
-- GPU evidence is no longer solely `nvidia-smi`-based on Windows/NVIDIA.
-- Reports distinguish:
-  - PID-only visibility
+- push beyond host-tool-only evidence where possible
+- improve truth around:
+  - per-process GPU visibility
   - allocation-byte visibility
   - context visibility
+  - what exactly remains unknown
+- investigate stronger CUDA / NVML / driver-level inspection APIs
+- reduce the gap between “driver-visible” and “allocator-visible”
+
+### v1 Exit Criteria
+
+- Windows/NVIDIA evidence must be better than plain `nvidia-smi` snapshots
+- reports must clearly distinguish:
+  - PID visible
+  - bytes visible
+  - visibility limited
   - inspection unavailable
+- the report must not imply allocator-level truth when only host-tool truth exists
+
+### Honest Status
+
+Track C is improved, but still only halfway to the bar you actually want.
+This remains a real blocker, especially for the Windows/NVIDIA v1 story.
 
 ---
 
-## Phase 4: Experimental VRAM Sanitization
+### Track D: Experimental Cleanup / Sanitization
 
 ### Goal
 
-Try real cleanup strategies and measure whether they improve VRAM evidence.
+Run real cleanup stages and measure whether they improve evidence.
 
-### Why Fourth
+### Current State
 
-Sanitization attempts without inspection are guesswork.
+Done or largely done:
 
-### Scope
+- cleanup strategy model exists
+- baseline versus strategy comparison exists
+- multiple cleanup stages exist
+- VRAM evidence scoring exists
+- stage-local marker context exists
+- helper-stage dedicated canary scans exist
 
-This phase is explicitly experimental. Test strategies like:
+Current in-tree cleanup stages:
 
-- process termination alone
-- different shutdown timing
-- self-owned host RAM pressure / overwrite probes
-- explicit host page discard / decommit probes
-- forced context teardown if feasible
-- self-owned CUDA VRAM pressure / overwrite probes
-- allocator churn / overwrite experiments if feasible
-- device reset only if safe and realistic
+- short cooldown recheck
+- extended cooldown recheck
+- helper runtime relaunch probe
+- helper runtime allocation churn probe
+- host RAM pressure probe
+- host page discard probe
+- CUDA memory pressure probe
 
-### Important Constraint
+### Remaining v1 Work
 
-The first goal is evidence of improvement, not immediate proof of full sanitization.
+- aggregate cleanup-stage outcomes across runs
+- determine which stages help consistently versus randomly
+- improve helper-stage interpretation using repeated results, not isolated wins
+- possibly add one or two stronger invasive stages only if they produce better evidence, not just more noise
 
-### Implementation Slices
+### v1 Exit Criteria
 
-1. Define cleanup strategy model
-2. Run baseline observation with no special strategy
-3. Add one experimental cleanup strategy
-4. Compare pre/post evidence
-5. Report strategy used and outcome
-6. Only elevate claims if repeatably justified
+- at least one cleanup stage must show measurable evidence value
+- reports must distinguish:
+  - improved
+  - unchanged
+  - worsened
+  - inconclusive
+- cleanup-stage evidence must be judged using both GPU visibility and marker persistence
 
-### Acceptance Criteria
+### Honest Status
 
-- At least one VRAM cleanup strategy is implemented experimentally.
-- Reports say:
-  - strategy attempted
-  - evidence improved
-  - evidence unchanged
-  - evidence inconclusive
-- No wording implies complete VRAM sanitization unless proven.
-
----
-
-## Cross-Cutting Work Required in Every Phase
-
-### 1. Report Model Expansion
-
-Every phase needs updates in:
-
-- `src/audit.rs`
-
-Add structured sections for:
-
-- process scan evidence
-- allocator/KV evidence
-- GPU API inspection evidence
-- VRAM cleanup strategy outcomes
-
-### 2. UI Surfaces
-
-Likely updates to:
-
-- `apps/web/src/components/PrivacyReportViewer.tsx`
-- compact summary cards in the inspector
-- per-platform capability notes
-
-### 3. Capability Matrix
-
-Add a per-platform capability model:
-
-- `supported`
-- `unsupported`
-- `unavailable`
-- `visibility_limited`
-
-This should affect both backend report fields and UI display.
-
-### 4. Validation Harness
-
-Before `v1.0`, this needs at least a lightweight harness:
-
-- known marker injection
-- controlled prompt canaries
-- scan before/after shutdown
-- repeated runs
-- recorded results by platform
+Track D is strong structurally.
+Its remaining blocker is not “more stages at any cost.”
+Its remaining blocker is proving which stages are actually useful.
 
 ---
-
-## Suggested Commit-Sized Roadmap
-
-### Track A: Process Scanning
-
-1. `[*] Add process memory scan report schema`
-2. `[*] Show process scan status in privacy reports`
-3. `[*] Add Windows process memory scan prototype`
-4. `[*] Scan live runtime for prompt markers`
-5. `[*] Scan post-shutdown runtime memory for prompt markers`
-6. `[*] Add response marker scanning and report comparison`
-
-### Track B: llama Allocator / KV Introspection
-
-7. `[*] Document llama allocator and KV introspection plan`
-8. `[*] Add runtime capability flags for instrumented llama builds`
-9. `[*] Expose KV cache lifecycle signals in reports`
-10. `[*] Expose allocator reset signals in reports`
-
-### Track C: CUDA / NVIDIA API Inspection
-
-11. `[*] Add GPU inspection backend abstraction`
-12. `[*] Add CUDA or NVML inspection spike implementation`
-13. `[*] Report allocation visibility separately from PID visibility`
-14. `[*] Improve Windows VRAM post-shutdown evidence reporting`
-
-### Track D: Experimental Sanitization
-
-15. `[*] Add VRAM cleanup strategy model`
-16. `[*] Add baseline versus strategy comparison reporting`
-17. `[*] Implement first experimental VRAM cleanup strategy`
-18. `[*] Report VRAM cleanup outcome evidence`
-
-Current experimental stages in-tree now include cooldown rechecks, host RAM pressure, host page discard/decommit pressure, CUDA memory pressure, and helper-runtime relaunch/churn probes.
 
 ### Track E: Validation and Release Gating
 
-19. `[*] Add memory inspection validation harness`
-20. `[*] Document platform security capability matrix`
-21. `[ ] Freeze security claim wording for v1`
+### Goal
 
-Current Track E progress: a structured session-evidence validation scorecard, repeated dedicated controlled-canary helper passes, local cross-session validation-history tracking, an operator-visible platform capability matrix, marker-contextualized VRAM cleanup comparison/scoring, per-cleanup-stage process-scan capture where the PID still remains observable, and dedicated helper-canary scans for the helper-relaunch cleanup stages are now in-tree, but the fuller automated/repeated-results harness and release gating workflow are still pending.
+Turn the security work above into repeatable evidence rather than isolated demos.
 
+### Current State
 
-also (please clean below up and tie into tracks if you see this mr codex):
+Done or largely done:
 
+- structured memory-validation scorecards
+- repeated controlled canary helper passes
+- cross-session validation history
+- platform capability matrix
+- marker-aware cleanup comparison/scoring
+- per-stage process-scan capture
+- helper-stage dedicated canary scans
 
-Tie process-memory scan evidence into the cleanup-stage comparison.
-This lets us compare not just GPU visibility, but whether prompt/response markers persist in RAM across stages.
+### Remaining v1 Work
 
-Push deeper into allocator/KV introspection.
-That gives us internal llama-specific evidence to explain why some stages help and others don’t.
+- aggregate cleanup-stage outcomes across reports
+- rank cleanup stages by repeated observed effectiveness
+- aggregate helper-stage dedicated canary outcomes across reports
+- define what counts as a meaningful pass versus weak/inconclusive evidence
+- freeze v1 security claim wording
 
-Add a platform capability matrix report.
-That makes the v1 security story honest and crisp per platform.
+### v1 Exit Criteria
 
+- validation is based on repeated results, not only single reports
+- the UI can show which cleanup stages have the best repeated evidence
+- the final wording for v1 claims is fixed and conservative
 
+### Honest Status
+
+Track E is advanced, but not finished.
+This is the track that turns the other work into a shippable v1 security story.
 
 ---
 
-## V1 Gates for This Security Program
+## True Remaining Work, In Order
 
-### Must Be True Before v1
+This is the order that best fits the actual blocker stack.
 
-- At least one platform has real process memory scanning.
-- NullContext can report whether prompt markers were found in scanned process memory.
-- NullContext has some allocator/KV evidence, even if partial.
-- NullContext has better-than-`nvidia-smi`-only GPU inspection on Windows/NVIDIA.
-- NullContext has at least one experimental VRAM cleanup strategy with measured outcomes.
-- Reports and UI clearly distinguish:
-  - observed cleared
-  - not found
-  - not scannable
-  - visibility limited
-  - unsupported
-  - inconclusive
+### 1. Finish Track E repeated-results aggregation
 
-### Does Not Have To Be True Before v1
+Must do:
 
-- perfect forensic-grade RAM scan coverage
+- persist cleanup-stage outcome history
+- persist helper-stage canary-scan outcome history
+- summarize repeated stage effectiveness by scope:
+  - model
+  - platform
+  - GPU offload requested
+- show which cleanup stages repeatedly:
+  - improved evidence
+  - stayed mixed
+  - still showed marker persistence
+
+Why first:
+
+- it upgrades Tracks A and D from interesting single-run evidence into operator-usable truth
+
+---
+
+### 2. Push Track B deeper
+
+Must do:
+
+- improve allocator/KV instrumentation path
+- capture stronger real allocator/KV signals from instrumented builds
+- reduce dependence on manifest-declared capability alone
+- tighten report semantics around observed versus merely supported
+
+Why second:
+
+- this is one of the biggest remaining truth gaps
+- it explains why cleanup stages may or may not help
+
+---
+
+### 3. Push Track C deeper
+
+Must do:
+
+- improve CUDA / NVIDIA inspection truth on Windows
+- investigate stronger API-level evidence paths
+- sharpen distinction between:
+  - host-tool evidence
+  - driver-level evidence
+  - allocator-level unknowns
+
+Why third:
+
+- this is the other major remaining truth gap
+- it is central to the Windows/NVIDIA v1 story
+
+---
+
+### 4. Freeze v1 claim wording
+
+Must do:
+
+- write final claim boundaries for:
+  - RAM scanning
+  - allocator/KV evidence
+  - GPU evidence
+  - VRAM cleanup evidence
+  - unsupported or limited platforms
+- ensure the report and UI language match those boundaries exactly
+
+Why last:
+
+- wording should be frozen only after the real evidence level is known
+
+---
+
+## What v1 Must Honestly Be Able To Say
+
+Before `v1`, NullContext should be able to say all of the following truthfully:
+
+- it can directly scan `llama-server` memory for configured markers on at least one real platform
+- it can compare live, post-shutdown, cleanup-stage, and helper-canary evidence
+- it can show partial allocator/KV lifecycle truth instead of only inferring from process exit
+- it can show structured Windows/NVIDIA GPU evidence that goes beyond a naive single-tool snapshot
+- it can compare multiple cleanup stages and show which ones repeatedly help
+- it still does not claim full RAM sanitization, full VRAM sanitization, or forensic completeness
+
+If we cannot say those things honestly, we are not done.
+
+---
+
+## What Is Not Required For v1
+
+- perfect forensic RAM coverage
 - universal cross-platform parity
-- full VRAM sanitization proof
+- proven full VRAM sanitization
 - deep allocator introspection on every platform
+- zero residual risk
+
+Those are not required.
+
+But the absence of those things must be visible and explicit.
 
 ---
 
-## Recommended Starting Point
+## Bottom Line
 
-Start with:
+The remaining v1 blocker stack is:
 
-### Track A, Commit 1
+1. repeated cleanup-stage and helper-stage history aggregation
+2. deeper allocator / KV introspection
+3. deeper CUDA / NVIDIA inspection truth
+4. frozen conservative v1 claim wording
 
-`Add process memory scan report schema`
-
-Then immediately:
-
-### Track A, Commit 2
-
-`Show process scan status in privacy reports`
-
-Then:
-
-### Track A, Commit 3
-
-`Add Windows process memory scan prototype`
-
-This sequence builds evidence before claims and creates the foundation for the deeper allocator and VRAM work.
+That is the real pre-v1 roadmap from here.
