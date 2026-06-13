@@ -20,7 +20,9 @@ use crate::retrieval::{
     build_active_chat_retrieval_report, build_grounded_prompt, build_retrieval_report,
     query_corpus, QueryCorpusRequest,
 };
-use crate::runtime::{observe_post_shutdown, ManagedRuntime};
+use crate::runtime::{
+    observe_post_shutdown_with_stage_process_scan, ManagedRuntime, RuntimeProcessScanMarker,
+};
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
 use crate::validation_harness::run_controlled_canary_validation;
@@ -703,10 +705,18 @@ impl ChatSessionManager {
         };
 
         let runtime_shutdown = active.runtime.shutdown()?;
-        let post_shutdown_observation = observe_post_shutdown(
+        let stage_process_scan_markers = process_scan_markers
+            .iter()
+            .map(|marker| RuntimeProcessScanMarker {
+                kind: marker.kind.to_string(),
+                bytes: marker.bytes.clone(),
+            })
+            .collect::<Vec<_>>();
+        let post_shutdown_observation = observe_post_shutdown_with_stage_process_scan(
             runtime_pid,
             active.config.gpu_layers.parse::<u32>().unwrap_or(0) > 0,
             Some(&active.config),
+            &stage_process_scan_markers,
         );
         let process_scan_report = if process_scan_markers.is_empty() {
             build_skipped_process_scan_report(

@@ -7,8 +7,8 @@ use crate::process_scan::{
     ProcessScanMarker,
 };
 use crate::runtime::{
-    observe_post_shutdown, ManagedRuntime, RuntimePostShutdownObservation, RuntimeShutdownOutcome,
-    RuntimeUsageSnapshot,
+    observe_post_shutdown_with_stage_process_scan, ManagedRuntime, RuntimePostShutdownObservation,
+    RuntimeProcessScanMarker, RuntimeShutdownOutcome, RuntimeUsageSnapshot,
 };
 use crate::sensitive::SensitiveBytes;
 use anyhow::Result;
@@ -73,10 +73,21 @@ pub fn run_inference(config: &SessionConfig) -> Result<InferenceResult> {
         ],
     );
     let runtime_shutdown = runtime.shutdown()?;
-    let post_shutdown_observation = observe_post_shutdown(
+    let stage_process_scan_markers = vec![
+        RuntimeProcessScanMarker {
+            kind: "prompt_marker".to_string(),
+            bytes: config.prompt.as_bytes().to_vec(),
+        },
+        RuntimeProcessScanMarker {
+            kind: "response_marker".to_string(),
+            bytes: response.as_bytes().to_vec(),
+        },
+    ];
+    let post_shutdown_observation = observe_post_shutdown_with_stage_process_scan(
         runtime_pid,
         config.gpu_layers.parse::<u32>().unwrap_or(0) > 0,
         Some(config),
+        &stage_process_scan_markers,
     );
     let post_shutdown_process_scan = scan_post_shutdown_process_phase(
         runtime_pid,

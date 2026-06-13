@@ -138,7 +138,12 @@ pub fn scan_post_shutdown_process_phase(
     post_shutdown: &RuntimePostShutdownObservation,
     markers: &[ProcessScanMarker<'_>],
 ) -> ProcessScanPhaseReport {
-    scan_conditional_process_phase("post_shutdown", pid, post_shutdown, markers)
+    scan_process_phase_with_presence(
+        "post_shutdown",
+        pid,
+        post_shutdown.process_present_after_shutdown,
+        markers,
+    )
 }
 
 pub fn scan_failed_start_cleanup_phase(
@@ -146,16 +151,21 @@ pub fn scan_failed_start_cleanup_phase(
     post_shutdown: &RuntimePostShutdownObservation,
     markers: &[ProcessScanMarker<'_>],
 ) -> ProcessScanPhaseReport {
-    scan_conditional_process_phase("failed_start_cleanup", pid, post_shutdown, markers)
+    scan_process_phase_with_presence(
+        "failed_start_cleanup",
+        pid,
+        post_shutdown.process_present_after_shutdown,
+        markers,
+    )
 }
 
-fn scan_conditional_process_phase(
+pub fn scan_process_phase_with_presence(
     phase_name: &str,
     pid: u32,
-    post_shutdown: &RuntimePostShutdownObservation,
+    process_present: Option<bool>,
     markers: &[ProcessScanMarker<'_>],
 ) -> ProcessScanPhaseReport {
-    match post_shutdown.process_present_after_shutdown {
+    match process_present {
         Some(true) => scan_process_phase(phase_name, pid, markers),
         Some(false) => ProcessScanPhaseReport {
             phase: phase_name.to_string(),

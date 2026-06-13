@@ -35,7 +35,10 @@ use crate::retrieval::{
     build_grounded_prompt, build_retrieval_report, query_corpus, QueryCorpusRequest,
     QueryCorpusResponse,
 };
-use crate::runtime::{observe_post_shutdown, ManagedRuntime, RuntimeLaunchFailure};
+use crate::runtime::{
+    observe_post_shutdown_with_stage_process_scan, ManagedRuntime, RuntimeLaunchFailure,
+    RuntimeProcessScanMarker,
+};
 use crate::sensitive::SensitiveBytes;
 use crate::session::Session;
 use crate::validation_harness::run_controlled_canary_validation;
@@ -1012,10 +1015,21 @@ fn run_direct_streaming_session(
     );
     let runtime_usage = runtime.observe_usage();
     let runtime_shutdown = runtime.shutdown()?;
-    let post_shutdown_observation = observe_post_shutdown(
+    let stage_process_scan_markers = vec![
+        RuntimeProcessScanMarker {
+            kind: "prompt_marker".to_string(),
+            bytes: config.prompt.as_bytes().to_vec(),
+        },
+        RuntimeProcessScanMarker {
+            kind: "response_marker".to_string(),
+            bytes: response_text.as_bytes().to_vec(),
+        },
+    ];
+    let post_shutdown_observation = observe_post_shutdown_with_stage_process_scan(
         runtime_pid,
         config.gpu_layers.parse::<u32>().unwrap_or(0) > 0,
         Some(&config),
+        &stage_process_scan_markers,
     );
     let post_shutdown_process_scan = scan_post_shutdown_process_phase(
         runtime_pid,

@@ -426,6 +426,7 @@ export type VramCleanupStrategyStageReport = {
   verification_window_ms: number;
   action_status: string;
   evidence_improvement_status: string;
+  process_scan_phase?: ProcessScanPhaseReportData | null;
   marker_evidence_status: string;
   marker_evidence_summary: string;
   evidence_snapshot: VramCleanupEvidenceSnapshot;

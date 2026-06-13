@@ -1,7 +1,9 @@
+use crate::audit::ProcessScanPhaseReport;
 use crate::config::SessionConfig;
 use crate::cuda_pressure::run_cuda_memory_pressure_probe;
 use crate::gpu_inspection::observe_gpu_process;
 use crate::logging::stdout_line;
+use crate::process_scan::{scan_process_phase_with_presence, ProcessScanMarker};
 use crate::ram_pressure::{run_host_page_discard_probe, run_host_ram_pressure_probe};
 use crate::runtime_introspection::{
     parse_runtime_introspection_signals, RuntimeIntrospectionSignal,
@@ -103,6 +105,13 @@ pub struct RuntimeGpuObservationStrategyStage {
     pub action_status: String,
     pub action_notes: Vec<String>,
     pub window: RuntimeGpuObservationWindow,
+    pub process_scan_phase: Option<ProcessScanPhaseReport>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeProcessScanMarker {
+    pub kind: String,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -532,14 +541,29 @@ pub fn observe_post_shutdown(
     gpu_offload_requested: bool,
     strategy_config: Option<&SessionConfig>,
 ) -> RuntimePostShutdownObservation {
-    observe_post_shutdown_internal(pid, gpu_offload_requested, strategy_config, true)
+    observe_post_shutdown_internal(pid, gpu_offload_requested, strategy_config, true, None)
+}
+
+pub fn observe_post_shutdown_with_stage_process_scan(
+    pid: u32,
+    gpu_offload_requested: bool,
+    strategy_config: Option<&SessionConfig>,
+    stage_process_scan_markers: &[RuntimeProcessScanMarker],
+) -> RuntimePostShutdownObservation {
+    observe_post_shutdown_internal(
+        pid,
+        gpu_offload_requested,
+        strategy_config,
+        true,
+        Some(stage_process_scan_markers),
+    )
 }
 
 pub fn observe_post_shutdown_baseline(
     pid: u32,
     gpu_offload_requested: bool,
 ) -> RuntimePostShutdownObservation {
-    observe_post_shutdown_internal(pid, gpu_offload_requested, None, false)
+    observe_post_shutdown_internal(pid, gpu_offload_requested, None, false, None)
 }
 
 fn observe_post_shutdown_internal(
@@ -547,6 +571,7 @@ fn observe_post_shutdown_internal(
     gpu_offload_requested: bool,
     strategy_config: Option<&SessionConfig>,
     include_strategy_stages: bool,
+    stage_process_scan_markers: Option<&[RuntimeProcessScanMarker]>,
 ) -> RuntimePostShutdownObservation {
     let started_at = Instant::now();
     let verification_window = Duration::from_millis(POST_SHUTDOWN_VERIFICATION_WINDOW_MS);
@@ -598,6 +623,11 @@ fn observe_post_shutdown_internal(
                     pid,
                     VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS,
                     POST_SHUTDOWN_VERIFICATION_INTERVAL_MS,
+                ),
+                process_scan_phase: build_stage_process_scan_phase(
+                    pid,
+                    stage_plan.stage_id,
+                    stage_process_scan_markers,
                 ),
             });
         }
@@ -672,6 +702,32 @@ fn observe_post_shutdown_internal(
         vram_cleanup_strategy_windows,
         observation_notes,
     }
+}
+
+fn build_stage_process_scan_phase(
+    pid: u32,
+    stage_id: &str,
+    stage_process_scan_markers: Option<&[RuntimeProcessScanMarker]>,
+) -> Option<ProcessScanPhaseReport> {
+    let markers = stage_process_scan_markers?;
+    if markers.is_empty() {
+        return None;
+    }
+    let borrowed_markers = markers
+        .iter()
+        .map(|marker| ProcessScanMarker {
+            kind: marker.kind.as_str(),
+            bytes: marker.bytes.as_slice(),
+        })
+        .collect::<Vec<_>>();
+    let (process_present, _, _) = observe_process_presence(pid);
+
+    Some(scan_process_phase_with_presence(
+        &format!("cleanup_stage_{stage_id}"),
+        pid,
+        process_present,
+        &borrowed_markers,
+    ))
 }
 
 fn execute_vram_cleanup_strategy_stage(

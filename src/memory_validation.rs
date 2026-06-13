@@ -222,12 +222,17 @@ fn controlled_canary_validation_note(controlled_canary_signal_status: &str) -> S
 
 fn build_stage_scorecard(
     stage: &VramCleanupStrategyStageReport,
-    process_scan_signal_status: &str,
+    fallback_process_scan_signal_status: &str,
     controlled_canary_signal_status: &str,
 ) -> MemoryValidationStageScorecard {
     let mut score = 0_u32;
     let mut strengths = Vec::new();
     let mut gaps = Vec::new();
+    let process_scan_signal_status = stage
+        .process_scan_phase
+        .as_ref()
+        .map(derive_process_scan_signal_status_from_phase)
+        .unwrap_or_else(|| fallback_process_scan_signal_status.to_string());
 
     match stage.evidence_improvement_status.as_str() {
         "evidence_improved_pid_no_longer_observed_after_strategy" => {
@@ -362,7 +367,7 @@ fn build_stage_scorecard(
         }
     }
 
-    match process_scan_signal_status {
+    match process_scan_signal_status.as_str() {
         "marker_persistence_detected" => gaps.push(
             "Session-scoped direct process scanning still detected configured markers in readable llama-server memory."
                 .to_string(),
@@ -412,13 +417,35 @@ fn build_stage_scorecard(
         action_status: stage.action_status.clone(),
         vram_evidence_status: stage.evidence_improvement_status.clone(),
         marker_evidence_status: stage.marker_evidence_status.clone(),
-        process_scan_context_status: process_scan_signal_status.to_string(),
+        process_scan_context_status: process_scan_signal_status,
         controlled_canary_signal_status: controlled_canary_signal_status.to_string(),
         validation_score,
         validation_verdict,
         summary,
         strengths,
         gaps,
+    }
+}
+
+fn derive_process_scan_signal_status_from_phase(
+    phase: &crate::audit::ProcessScanPhaseReport,
+) -> String {
+    if phase
+        .patterns
+        .iter()
+        .any(|pattern| pattern.status == "detected_in_scanned_memory")
+    {
+        return "marker_persistence_detected".to_string();
+    }
+
+    match phase.status.as_str() {
+        "scan_completed" => "marker_scan_clear_in_scanned_regions".to_string(),
+        "scan_attempt_failed" | "scan_attempt_incomplete" => "marker_scan_inconclusive".to_string(),
+        "scan_backend_unsupported_on_platform" => "marker_scan_backend_unsupported".to_string(),
+        "process_not_observable_for_scan"
+        | "post_shutdown_observation_inconclusive"
+        | "pattern_empty" => "marker_scan_not_completed".to_string(),
+        _ => "marker_scan_context_mixed".to_string(),
     }
 }
 

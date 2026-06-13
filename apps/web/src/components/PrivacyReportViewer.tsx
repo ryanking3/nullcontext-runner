@@ -840,6 +840,12 @@ export function PrivacyReportViewer({
                           marker evidence: {humanizeSnakeCase(stage.marker_evidence_status)}
                         </div>
                         <div>
+                          stage process scan:{" "}
+                          {stage.process_scan_phase
+                            ? humanizeSnakeCase(stage.process_scan_phase.status)
+                            : "none"}
+                        </div>
+                        <div>
                           peak gpu bytes:{" "}
                           {stage.evidence_snapshot.gpu_peak_memory_bytes
                             ? formatBytes(stage.evidence_snapshot.gpu_peak_memory_bytes)
@@ -849,6 +855,12 @@ export function PrivacyReportViewer({
                           gpu-positive samples:{" "}
                           {stage.evidence_snapshot.gpu_samples_with_pid_observed}
                         </div>
+                        {stage.process_scan_phase && (
+                          <div>
+                            stage scan method:{" "}
+                            {humanizeSnakeCase(stage.process_scan_phase.method)}
+                          </div>
+                        )}
                         <div>{stage.marker_evidence_summary}</div>
                         <div>{stage.summary}</div>
                         {stage.notes.map((note) => (
