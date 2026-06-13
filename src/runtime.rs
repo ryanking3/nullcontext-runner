@@ -1,9 +1,12 @@
-use crate::audit::ProcessScanPhaseReport;
+use crate::audit::{ProcessScanPhaseReport, ProcessScanReport};
 use crate::config::SessionConfig;
 use crate::cuda_pressure::run_cuda_memory_pressure_probe;
 use crate::gpu_inspection::observe_gpu_process;
 use crate::logging::stdout_line;
-use crate::process_scan::{scan_process_phase_with_presence, ProcessScanMarker};
+use crate::process_scan::{
+    build_process_scan_report, scan_live_process_phase, scan_post_shutdown_process_phase,
+    scan_process_phase_with_presence, ProcessScanMarker,
+};
 use crate::ram_pressure::{run_host_page_discard_probe, run_host_ram_pressure_probe};
 use crate::runtime_introspection::{
     parse_runtime_introspection_signals, RuntimeIntrospectionSignal,
@@ -19,6 +22,8 @@ use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
+use uuid::Uuid;
+use zeroize::Zeroize;
 
 #[derive(Debug)]
 pub struct ManagedRuntime {
@@ -106,6 +111,7 @@ pub struct RuntimeGpuObservationStrategyStage {
     pub action_notes: Vec<String>,
     pub window: RuntimeGpuObservationWindow,
     pub process_scan_phase: Option<ProcessScanPhaseReport>,
+    pub helper_process_scan_report: Option<ProcessScanReport>,
 }
 
 #[derive(Debug, Clone)]
@@ -212,6 +218,23 @@ struct VramCleanupStrategyStagePlan {
 struct HelperProbeCompletionRequest {
     prompt: String,
     n_predict: u32,
+}
+
+impl HelperProbeCompletionRequest {
+    fn sanitize(&mut self) {
+        self.prompt.zeroize();
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct HelperProbeCompletionResponse {
+    content: String,
+}
+
+struct HelperRuntimeProbeOutcome {
+    action_status: String,
+    notes: Vec<String>,
+    process_scan_report: Option<ProcessScanReport>,
 }
 
 impl RuntimePostShutdownGpuWindowObservation {
@@ -609,16 +632,15 @@ fn observe_post_shutdown_internal(
 
         for stage_plan in VRAM_CLEANUP_STRATEGY_STAGES {
             thread::sleep(Duration::from_millis(stage_plan.cooldown_ms_before_stage));
-            let (action_status, action_notes) =
-                execute_vram_cleanup_strategy_stage(stage_plan, strategy_config);
+            let stage_outcome = execute_vram_cleanup_strategy_stage(stage_plan, strategy_config);
 
             stages.push(RuntimeGpuObservationStrategyStage {
                 stage_id: stage_plan.stage_id.to_string(),
                 stage_label: stage_plan.stage_label.to_string(),
                 stage_kind: stage_plan.stage_kind.to_string(),
                 cooldown_ms_before_stage: stage_plan.cooldown_ms_before_stage,
-                action_status,
-                action_notes,
+                action_status: stage_outcome.action_status,
+                action_notes: stage_outcome.notes,
                 window: observe_gpu_window(
                     pid,
                     VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS,
@@ -629,6 +651,7 @@ fn observe_post_shutdown_internal(
                     stage_plan.stage_id,
                     stage_process_scan_markers,
                 ),
+                helper_process_scan_report: stage_outcome.process_scan_report,
             });
         }
 
@@ -733,31 +756,48 @@ fn build_stage_process_scan_phase(
 fn execute_vram_cleanup_strategy_stage(
     stage_plan: VramCleanupStrategyStagePlan,
     strategy_config: Option<&SessionConfig>,
-) -> (String, Vec<String>) {
+) -> HelperRuntimeProbeOutcome {
     match stage_plan.stage_kind {
         "host_ram_pressure_probe" => {
             let report = run_host_ram_pressure_probe();
-            (report.status, report.notes)
+            HelperRuntimeProbeOutcome {
+                action_status: report.status,
+                notes: report.notes,
+                process_scan_report: None,
+            }
         }
         "host_page_discard_probe" => {
             let report = run_host_page_discard_probe();
-            (report.status, report.notes)
+            HelperRuntimeProbeOutcome {
+                action_status: report.status,
+                notes: report.notes,
+                process_scan_report: None,
+            }
         }
         "cuda_memory_pressure_probe" => {
             let report = run_cuda_memory_pressure_probe();
-            (report.status, report.notes)
+            HelperRuntimeProbeOutcome {
+                action_status: report.status,
+                notes: report.notes,
+                process_scan_report: None,
+            }
         }
         _ if stage_plan.perform_helper_relaunch_probe => match strategy_config {
             Some(config) => execute_helper_runtime_probe_stage(config, stage_plan),
-            None => (
-                format!("{}_unavailable", stage_plan.stage_id),
-                vec![
+            None => HelperRuntimeProbeOutcome {
+                action_status: format!("{}_unavailable", stage_plan.stage_id),
+                notes: vec![
                     "Helper runtime relaunch probe was skipped because no session configuration was available during this shutdown observation."
                         .to_string(),
                 ],
-            ),
+                process_scan_report: None,
+            },
         },
-        _ => ("cooldown_recheck_completed".to_string(), vec![]),
+        _ => HelperRuntimeProbeOutcome {
+            action_status: "cooldown_recheck_completed".to_string(),
+            notes: vec![],
+            process_scan_report: None,
+        },
     }
 }
 
@@ -788,7 +828,7 @@ fn observe_gpu_window(
 fn execute_helper_runtime_probe_stage(
     config: &SessionConfig,
     stage_plan: VramCleanupStrategyStagePlan,
-) -> (String, Vec<String>) {
+) -> HelperRuntimeProbeOutcome {
     match ManagedRuntime::launch(config) {
         Ok(mut helper_runtime) => {
             let helper_pid = helper_runtime.pid();
@@ -798,82 +838,156 @@ fn execute_helper_runtime_probe_stage(
                 stage_plan.stage_id, helper_endpoint, helper_pid
             )];
 
-            let action_status = if stage_plan.stage_kind == "helper_runtime_allocation_churn_probe"
-            {
-                match run_helper_runtime_completion_probe(&helper_runtime) {
-                    Ok(()) => {
-                        notes.push(
-                            "Helper runtime allocation churn probe completed a tiny completion request to exercise model/KV/GPU allocation paths before shutdown."
-                                .to_string(),
-                        );
-                        "helper_runtime_allocation_churn_probe_completed".to_string()
-                    }
-                    Err(error) => {
-                        notes.push(format!(
-                            "Helper runtime allocation churn probe failed during completion request: {error}."
-                        ));
-                        "helper_runtime_allocation_churn_probe_request_failed".to_string()
-                    }
-                }
-            } else {
-                "helper_runtime_relaunch_probe_completed".to_string()
-            };
+            let helper_probe = run_helper_runtime_completion_probe(
+                &mut helper_runtime,
+                config,
+                stage_plan.stage_kind == "helper_runtime_allocation_churn_probe",
+            );
 
-            let shutdown_result = helper_runtime.shutdown();
-
-            match shutdown_result {
-                Ok(outcome) => {
-                    notes.push(format!(
-                        "Helper runtime probe stage {} shut the temporary runtime down using {} (exit code {}).",
-                        stage_plan.stage_id,
-                        outcome.shutdown_method,
-                        outcome
-                            .exit_code
-                            .map(|value| value.to_string())
-                            .unwrap_or_else(|| "unknown".to_string())
-                    ));
-
-                    (action_status, notes)
+            let (action_status, process_scan_report) = match helper_probe {
+                Ok(probe) => {
+                    notes.extend(probe.notes);
+                    (probe.action_status, probe.process_scan_report)
                 }
                 Err(error) => {
+                    match helper_runtime.shutdown() {
+                        Ok(outcome) => notes.push(format!(
+                            "Helper runtime probe stage {} recovered by shutting the temporary runtime down using {} (exit code {}).",
+                            stage_plan.stage_id,
+                            outcome.shutdown_method,
+                            outcome
+                                .exit_code
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "unknown".to_string())
+                        )),
+                        Err(shutdown_error) => notes.push(format!(
+                            "Helper runtime probe stage {} also failed to clean up the temporary runtime after the canary error: {shutdown_error}.",
+                            stage_plan.stage_id
+                        )),
+                    }
                     notes.push(format!(
-                        "Helper runtime probe stage {} started successfully but cleanup failed: {error}.",
+                        "Helper runtime probe stage {} failed during canary completion or scanning: {error}.",
                         stage_plan.stage_id
                     ));
-
-                    (format!("{}_cleanup_failed", stage_plan.stage_id), notes)
+                    (format!("{}_request_failed", stage_plan.stage_id), None)
                 }
+            };
+
+            HelperRuntimeProbeOutcome {
+                action_status,
+                notes,
+                process_scan_report,
             }
         }
-        Err(error) => (
-            format!("{}_failed", stage_plan.stage_id),
-            vec![format!(
+        Err(error) => HelperRuntimeProbeOutcome {
+            action_status: format!("{}_failed", stage_plan.stage_id),
+            notes: vec![format!(
                 "Helper runtime probe stage {} could not start a temporary runtime: {error}.",
                 stage_plan.stage_id
             )],
-        ),
+            process_scan_report: None,
+        },
     }
 }
 
-fn run_helper_runtime_completion_probe(helper_runtime: &ManagedRuntime) -> Result<()> {
+fn run_helper_runtime_completion_probe(
+    helper_runtime: &mut ManagedRuntime,
+    config: &SessionConfig,
+    allocation_churn: bool,
+) -> Result<HelperRuntimeProbeOutcome> {
     let client = Client::builder()
         .timeout(Duration::from_secs(120))
         .build()
         .context("failed to build helper runtime probe HTTP client")?;
-    let request = HelperProbeCompletionRequest {
-        prompt: "NullContext helper allocation churn probe.".to_string(),
-        n_predict: 8,
+    let canary_id = format!("nc-stage-helper-{}", Uuid::new_v4().simple());
+    let mut request = HelperProbeCompletionRequest {
+        prompt: format!(
+            "NullContext helper cleanup-stage canary {canary_id}. Reply in one short sentence that includes the token NC-STAGE-RESP-{canary_id} exactly once."
+        ),
+        n_predict: if allocation_churn { 16 } else { 8 },
     };
+    let prompt_marker = request.prompt.as_bytes().to_vec();
 
-    client
+    let response = client
         .post(helper_runtime.completion_url())
         .json(&request)
         .send()
         .context("failed to send helper runtime completion probe request")?
         .error_for_status()
-        .context("helper runtime completion probe returned an error status")?;
+        .context("helper runtime completion probe returned an error status")?
+        .json::<HelperProbeCompletionResponse>()
+        .context("failed to parse helper runtime completion probe response")?;
 
-    Ok(())
+    request.sanitize();
+
+    let response_marker = response.content.as_bytes().to_vec();
+    let helper_pid = helper_runtime.pid();
+    let live_process_scan = scan_live_process_phase(
+        helper_pid,
+        &[
+            ProcessScanMarker {
+                kind: "helper_stage_prompt_marker",
+                bytes: &prompt_marker,
+            },
+            ProcessScanMarker {
+                kind: "helper_stage_response_marker",
+                bytes: &response_marker,
+            },
+        ],
+    );
+    let shutdown = helper_runtime
+        .shutdown()
+        .context("failed to shut down helper runtime after canary completion")?;
+    let post_shutdown = observe_post_shutdown_baseline(helper_pid, gpu_offload_requested(config));
+    let post_shutdown_process_scan = scan_post_shutdown_process_phase(
+        helper_pid,
+        &post_shutdown,
+        &[
+            ProcessScanMarker {
+                kind: "helper_stage_prompt_marker",
+                bytes: &prompt_marker,
+            },
+            ProcessScanMarker {
+                kind: "helper_stage_response_marker",
+                bytes: &response_marker,
+            },
+        ],
+    );
+    let process_scan_report = build_process_scan_report(
+        Some(helper_pid),
+        vec![live_process_scan, post_shutdown_process_scan],
+    );
+
+    let mut notes = vec![
+        format!(
+            "Helper cleanup-stage canary {} generated {} response bytes and produced scan status {}.",
+            canary_id,
+            response.content.len(),
+            process_scan_report.overall_status
+        ),
+        format!(
+            "Helper runtime shut down using {} (exit code {}).",
+            shutdown.shutdown_method,
+            shutdown
+                .exit_code
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        ),
+    ];
+    notes.extend(post_shutdown.observation_notes);
+
+    let mut response_content = response.content;
+    response_content.zeroize();
+
+    Ok(HelperRuntimeProbeOutcome {
+        action_status: if allocation_churn {
+            "helper_runtime_allocation_churn_probe_completed".to_string()
+        } else {
+            "helper_runtime_relaunch_probe_completed".to_string()
+        },
+        notes,
+        process_scan_report: Some(process_scan_report),
+    })
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]

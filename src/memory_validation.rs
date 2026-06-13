@@ -229,9 +229,15 @@ fn build_stage_scorecard(
     let mut strengths = Vec::new();
     let mut gaps = Vec::new();
     let process_scan_signal_status = stage
-        .process_scan_phase
+        .helper_process_scan_report
         .as_ref()
-        .map(derive_process_scan_signal_status_from_phase)
+        .map(derive_process_scan_signal_status_from_report)
+        .or_else(|| {
+            stage
+                .process_scan_phase
+                .as_ref()
+                .map(derive_process_scan_signal_status_from_phase)
+        })
         .unwrap_or_else(|| fallback_process_scan_signal_status.to_string());
 
     match stage.evidence_improvement_status.as_str() {
@@ -424,6 +430,19 @@ fn build_stage_scorecard(
         summary,
         strengths,
         gaps,
+    }
+}
+
+fn derive_process_scan_signal_status_from_report(report: &ProcessScanReport) -> String {
+    match report.overall_status.as_str() {
+        "markers_detected_in_scanned_memory" => "marker_persistence_detected".to_string(),
+        "no_markers_detected_in_scanned_regions" => {
+            "marker_scan_clear_in_scanned_regions".to_string()
+        }
+        "scan_attempt_failed" => "marker_scan_inconclusive".to_string(),
+        "scan_backend_unsupported_on_platform" => "marker_scan_backend_unsupported".to_string(),
+        "scan_skipped" | "scan_not_completed" => "marker_scan_not_completed".to_string(),
+        _ => "marker_scan_context_mixed".to_string(),
     }
 }
 

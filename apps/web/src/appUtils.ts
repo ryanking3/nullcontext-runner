@@ -401,6 +401,7 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
     if (parsed.llama_runtime?.vram_cleanup?.stages) {
       for (const stage of parsed.llama_runtime.vram_cleanup.stages) {
         stage.process_scan_phase ??= null;
+        stage.helper_process_scan_report ??= null;
         stage.marker_evidence_status ??= "marker_evidence_not_yet_contextualized";
         stage.marker_evidence_summary ??=
           "This older report did not attach RAM-side marker context to this cleanup stage.";

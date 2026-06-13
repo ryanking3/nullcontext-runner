@@ -846,6 +846,12 @@ export function PrivacyReportViewer({
                             : "none"}
                         </div>
                         <div>
+                          helper canary scan:{" "}
+                          {stage.helper_process_scan_report
+                            ? humanizeSnakeCase(stage.helper_process_scan_report.overall_status)
+                            : "none"}
+                        </div>
+                        <div>
                           peak gpu bytes:{" "}
                           {stage.evidence_snapshot.gpu_peak_memory_bytes
                             ? formatBytes(stage.evidence_snapshot.gpu_peak_memory_bytes)
@@ -859,6 +865,11 @@ export function PrivacyReportViewer({
                           <div>
                             stage scan method:{" "}
                             {humanizeSnakeCase(stage.process_scan_phase.method)}
+                          </div>
+                        )}
+                        {stage.helper_process_scan_report && (
+                          <div>
+                            helper scan summary: {stage.helper_process_scan_report.summary}
                           </div>
                         )}
                         <div>{stage.marker_evidence_summary}</div>

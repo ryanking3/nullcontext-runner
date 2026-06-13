@@ -372,6 +372,8 @@ pub struct VramCleanupStrategyStageReport {
     pub evidence_improvement_status: String,
     #[serde(default)]
     pub process_scan_phase: Option<ProcessScanPhaseReport>,
+    #[serde(default)]
+    pub helper_process_scan_report: Option<ProcessScanReport>,
     #[serde(default = "default_vram_cleanup_marker_evidence_status")]
     pub marker_evidence_status: String,
     #[serde(default = "default_vram_cleanup_marker_evidence_summary")]
@@ -678,19 +680,11 @@ fn build_platform_capability_matrix_report(
 }
 
 fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
-    let process_scan_signal_status = match report
+    let process_scan_signal_status = report
         .process_scan
         .as_ref()
-        .map(|scan| scan.overall_status.as_str())
-    {
-        Some("markers_detected_in_scanned_memory") => "marker_persistence_detected",
-        Some("no_markers_detected_in_scanned_regions") => "marker_scan_clear_in_scanned_regions",
-        Some("scan_attempt_failed") => "marker_scan_inconclusive",
-        Some("scan_backend_unsupported_on_platform") => "marker_scan_backend_unsupported",
-        Some("scan_skipped") | Some("scan_not_completed") => "marker_scan_not_completed",
-        Some(_) => "marker_scan_context_mixed",
-        None => "process_scan_context_unavailable",
-    };
+        .map(derive_process_scan_signal_status_from_report)
+        .unwrap_or_else(|| "process_scan_context_unavailable".to_string());
     let controlled_canary_signal_status = report
         .memory_validation
         .controlled_canary_run
@@ -712,16 +706,11 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
                 .stages
                 .iter()
                 .find(|stage| &stage.stage_id == selected_stage_id)
-                .and_then(|stage| {
-                    stage
-                        .process_scan_phase
-                        .as_ref()
-                        .map(derive_process_scan_signal_status_from_phase)
-                })
+                .and_then(derive_stage_process_scan_signal_status)
         });
     let comparison_process_scan_signal_status = selected_stage_process_scan_signal_status
         .as_deref()
-        .unwrap_or(process_scan_signal_status);
+        .unwrap_or(process_scan_signal_status.as_str());
     let comparison_marker_evidence_status = derive_vram_cleanup_marker_evidence_status(
         &llama_runtime
             .vram_cleanup
@@ -742,11 +731,8 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
         comparison_marker_evidence_status;
 
     for stage in &mut llama_runtime.vram_cleanup.stages {
-        let stage_process_scan_signal_status = stage
-            .process_scan_phase
-            .as_ref()
-            .map(derive_process_scan_signal_status_from_phase)
-            .unwrap_or_else(|| process_scan_signal_status.to_string());
+        let stage_process_scan_signal_status = derive_stage_process_scan_signal_status(stage)
+            .unwrap_or_else(|| process_scan_signal_status.clone());
         let marker_evidence_status = derive_vram_cleanup_marker_evidence_status(
             &stage.evidence_improvement_status,
             &stage_process_scan_signal_status,
@@ -758,6 +744,19 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
             &controlled_canary_signal_status,
         );
         stage.marker_evidence_status = marker_evidence_status;
+    }
+}
+
+fn derive_process_scan_signal_status_from_report(report: &ProcessScanReport) -> String {
+    match report.overall_status.as_str() {
+        "markers_detected_in_scanned_memory" => "marker_persistence_detected".to_string(),
+        "no_markers_detected_in_scanned_regions" => {
+            "marker_scan_clear_in_scanned_regions".to_string()
+        }
+        "scan_attempt_failed" => "marker_scan_inconclusive".to_string(),
+        "scan_backend_unsupported_on_platform" => "marker_scan_backend_unsupported".to_string(),
+        "scan_skipped" | "scan_not_completed" => "marker_scan_not_completed".to_string(),
+        _ => "marker_scan_context_mixed".to_string(),
     }
 }
 
@@ -779,6 +778,21 @@ fn derive_process_scan_signal_status_from_phase(phase: &ProcessScanPhaseReport) 
         | "pattern_empty" => "marker_scan_not_completed".to_string(),
         _ => "marker_scan_context_mixed".to_string(),
     }
+}
+
+fn derive_stage_process_scan_signal_status(
+    stage: &VramCleanupStrategyStageReport,
+) -> Option<String> {
+    stage
+        .helper_process_scan_report
+        .as_ref()
+        .map(derive_process_scan_signal_status_from_report)
+        .or_else(|| {
+            stage
+                .process_scan_phase
+                .as_ref()
+                .map(derive_process_scan_signal_status_from_phase)
+        })
 }
 
 fn derive_vram_cleanup_marker_evidence_status(
@@ -2272,6 +2286,7 @@ fn build_vram_cleanup_stage_report(
             vram_cleanup_comparison_summary(&evidence_improvement_status)
         ),
         process_scan_phase: strategy_stage.process_scan_phase.clone(),
+        helper_process_scan_report: strategy_stage.helper_process_scan_report.clone(),
         marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
         marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
         notes: {
