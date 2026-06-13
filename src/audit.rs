@@ -35,6 +35,8 @@ pub struct PrivacyReport {
     pub memory_validation: MemoryValidationReport,
     #[serde(default = "default_memory_validation_history_report")]
     pub memory_validation_history: MemoryValidationHistoryReport,
+    #[serde(default = "default_platform_capability_matrix_report")]
+    pub platform_capability_matrix: PlatformCapabilityMatrixReport,
     pub retrieval: Option<RetrievalReport>,
     pub residual_risk: String,
 }
@@ -215,6 +217,32 @@ pub struct MemoryValidationHistoryReport {
     pub best_stage_score_max: Option<u32>,
     pub best_stage_score_avg: Option<f64>,
     pub last_recorded_at: Option<String>,
+    pub summary: String,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformCapabilityMatrixReport {
+    pub matrix_status: String,
+    pub scope_platform: String,
+    pub scope_model_id: Option<String>,
+    pub runtime_build_profile: Option<String>,
+    pub gpu_offload_requested: Option<bool>,
+    pub summary: String,
+    #[serde(default)]
+    pub capabilities: Vec<PlatformCapabilityEntryReport>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformCapabilityEntryReport {
+    pub capability_id: String,
+    pub capability_label: String,
+    pub roadmap_track: String,
+    pub current_status: String,
+    pub evidence_level: String,
+    pub v1_blocker: bool,
+    pub claim_boundary: String,
     pub summary: String,
     pub notes: Vec<String>,
 }
@@ -421,6 +449,7 @@ impl PrivacyReport {
             process_scan: None,
             memory_validation: default_memory_validation_report(),
             memory_validation_history: default_memory_validation_history_report(),
+            platform_capability_matrix: default_platform_capability_matrix_report(),
             retrieval: None,
             residual_risk:
                 "OS memory, swap, shell history, and llama.cpp internal allocations are not yet sanitized."
@@ -440,13 +469,13 @@ impl PrivacyReport {
 
     pub fn with_llama_runtime(mut self, llama_runtime: LlamaRuntimeReport) -> Self {
         self.llama_runtime = Some(llama_runtime);
-        self.memory_validation = build_memory_validation_report(&self);
+        self.refresh_derived_sections();
         self
     }
 
     pub fn with_process_scan(mut self, process_scan: ProcessScanReport) -> Self {
         self.process_scan = Some(process_scan);
-        self.memory_validation = build_memory_validation_report(&self);
+        self.refresh_derived_sections();
         self
     }
 
@@ -455,7 +484,7 @@ impl PrivacyReport {
         controlled_canary_run: ControlledCanaryValidationRunReport,
     ) -> Self {
         self.memory_validation.controlled_canary_run = controlled_canary_run;
-        self.memory_validation = build_memory_validation_report(&self);
+        self.refresh_derived_sections();
         self
     }
 
@@ -464,6 +493,7 @@ impl PrivacyReport {
         memory_validation_history: MemoryValidationHistoryReport,
     ) -> Self {
         self.memory_validation_history = memory_validation_history;
+        self.refresh_derived_sections();
         self
     }
 
@@ -474,6 +504,11 @@ impl PrivacyReport {
 
     pub fn to_pretty_json(&self) -> Result<String> {
         Ok(serde_json::to_string_pretty(self)?)
+    }
+
+    fn refresh_derived_sections(&mut self) {
+        self.memory_validation = build_memory_validation_report(self);
+        self.platform_capability_matrix = build_platform_capability_matrix_report(self);
     }
 }
 
@@ -509,9 +544,341 @@ pub fn sync_report_lifecycle(
     let mut report: PrivacyReport = serde_json::from_str(&raw)?;
     report.lifecycle = Some(LifecycleReport::from_metadata(lifecycle));
     report.memory_validation = build_memory_validation_report(&report);
+    report.platform_capability_matrix = build_platform_capability_matrix_report(&report);
     fs::write(report_path, report.to_pretty_json()?)?;
 
     Ok(())
+}
+
+fn build_platform_capability_matrix_report(
+    report: &PrivacyReport,
+) -> PlatformCapabilityMatrixReport {
+    let scope_platform = report
+        .process_scan
+        .as_ref()
+        .map(|scan| scan.platform.clone())
+        .or_else(|| {
+            let platform = report
+                .memory_validation
+                .controlled_canary_run
+                .process_scan
+                .platform
+                .clone();
+            if platform.is_empty() {
+                None
+            } else {
+                Some(platform)
+            }
+        })
+        .unwrap_or_else(|| std::env::consts::OS.to_string());
+
+    let Some(llama_runtime) = report.llama_runtime.as_ref() else {
+        return PlatformCapabilityMatrixReport {
+            matrix_status: "matrix_waiting_for_runtime_report".to_string(),
+            scope_platform,
+            scope_model_id: None,
+            runtime_build_profile: None,
+            gpu_offload_requested: None,
+            summary:
+                "NullContext reserved the platform capability matrix, but this report did not include a runtime section yet."
+                    .to_string(),
+            capabilities: vec![],
+            notes: vec![
+                "The matrix is derived after runtime/process/canary evidence is attached to the report."
+                    .to_string(),
+            ],
+        };
+    };
+
+    let process_scan_entry = build_process_scan_capability_entry(report);
+    let allocator_entry = build_allocator_kv_capability_entry(llama_runtime);
+    let gpu_inspection_entry =
+        build_gpu_inspection_capability_entry(&scope_platform, llama_runtime);
+    let cleanup_entry =
+        build_vram_cleanup_capability_entry(llama_runtime, &report.memory_validation);
+    let validation_entry = build_validation_harness_capability_entry(
+        &report.memory_validation,
+        &report.memory_validation_history,
+    );
+
+    let capabilities = vec![
+        process_scan_entry,
+        allocator_entry,
+        gpu_inspection_entry,
+        cleanup_entry,
+        validation_entry,
+    ];
+
+    let supported_or_active = capabilities
+        .iter()
+        .filter(|entry| {
+            entry.current_status.contains("supported")
+                || entry.current_status.contains("available")
+                || entry.current_status.contains("active")
+        })
+        .count();
+    let limited_or_unavailable = capabilities
+        .iter()
+        .filter(|entry| {
+            entry.current_status.contains("limited")
+                || entry.current_status.contains("unavailable")
+                || entry.current_status.contains("unsupported")
+                || entry.current_status.contains("not_exercised")
+                || entry.current_status.contains("not_applicable")
+        })
+        .count();
+    let blocker_gaps = capabilities
+        .iter()
+        .filter(|entry| {
+            entry.v1_blocker
+                && !entry.current_status.contains("supported")
+                && !entry.current_status.contains("available")
+                && !entry.current_status.contains("active")
+        })
+        .count();
+
+    PlatformCapabilityMatrixReport {
+        matrix_status: if blocker_gaps == 0 {
+            "matrix_ready_for_current_scope".to_string()
+        } else {
+            "matrix_blockers_still_open".to_string()
+        },
+        scope_platform,
+        scope_model_id: Some(llama_runtime.model_id.clone()),
+        runtime_build_profile: Some(llama_runtime.introspection.runtime_build_profile.clone()),
+        gpu_offload_requested: Some(llama_runtime.gpu_offload_requested),
+        summary: format!(
+            "NullContext derived a v1 roadmap capability matrix for this {} report scope. {} track(s) are currently active or supported, {} remain limited or unavailable, and {} v1-blocking track(s) still have open gaps.",
+            llama_runtime.model_id,
+            supported_or_active,
+            limited_or_unavailable,
+            blocker_gaps
+        ),
+        capabilities,
+        notes: vec![
+            "This matrix is a scope-level readiness summary for the current report, not a claim that full RAM or VRAM sanitization has been achieved."
+                .to_string(),
+            "Track C remains intentionally platform-specific: Windows/NVIDIA API inspection work should not be overstated on macOS or non-CUDA paths."
+                .to_string(),
+        ],
+    }
+}
+
+fn build_process_scan_capability_entry(report: &PrivacyReport) -> PlatformCapabilityEntryReport {
+    let process_scan = report
+        .process_scan
+        .as_ref()
+        .unwrap_or(&report.memory_validation.controlled_canary_run.process_scan);
+    let current_status = if process_scan.implementation_status
+        == "direct_process_scan_not_implemented_on_platform"
+    {
+        "direct_process_scan_unsupported_on_current_platform".to_string()
+    } else if process_scan.implementation_status == "controlled_canary_not_run_yet" {
+        "direct_process_scan_not_exercised_in_this_report".to_string()
+    } else {
+        "direct_process_scan_supported_on_current_platform".to_string()
+    };
+    let evidence_level = match process_scan.overall_status.as_str() {
+        "markers_detected_in_scanned_memory" => "direct_marker_detection_observed",
+        "no_markers_detected_in_scanned_regions" => "direct_marker_miss_observed",
+        "scan_attempt_failed" => "direct_scan_attempt_inconclusive",
+        "scan_backend_unsupported_on_platform" => "direct_scan_backend_unavailable",
+        _ => "direct_scan_not_completed_for_scope",
+    }
+    .to_string();
+
+    PlatformCapabilityEntryReport {
+        capability_id: "track_a_process_memory_scan".to_string(),
+        capability_label: "Direct Process Memory Scanning".to_string(),
+        roadmap_track: "track_a".to_string(),
+        current_status,
+        evidence_level,
+        v1_blocker: true,
+        claim_boundary:
+            "Scans configured markers in readable llama-server regions; it is not yet full forensic process-memory coverage."
+                .to_string(),
+        summary: process_scan.summary.clone(),
+        notes: {
+            let mut notes = vec![process_scan.residual_risk_summary.clone()];
+            notes.extend(process_scan.notes.clone());
+            notes
+        },
+    }
+}
+
+fn build_allocator_kv_capability_entry(
+    llama_runtime: &LlamaRuntimeReport,
+) -> PlatformCapabilityEntryReport {
+    let introspection = &llama_runtime.introspection;
+    let observed_any_signal = introspection.allocator_initialized_observed
+        || introspection.allocator_teardown_observed
+        || introspection.allocator_reset_observed
+        || introspection.kv_cache_initialized_observed
+        || introspection.kv_cache_reused_observed
+        || introspection.kv_cache_clear_observed
+        || !introspection.observed_events.is_empty();
+    let current_status =
+        if introspection.allocator_reset_observed || introspection.kv_cache_clear_observed {
+            "allocator_and_kv_signal_support_active".to_string()
+        } else if introspection.capability_source == "sidecar_manifest" || observed_any_signal {
+            "allocator_and_kv_signal_support_partial".to_string()
+        } else {
+            "allocator_and_kv_signal_support_limited".to_string()
+        };
+    let evidence_level =
+        if introspection.allocator_reset_observed || introspection.kv_cache_clear_observed {
+            "runtime_reset_or_clear_signal_observed".to_string()
+        } else if introspection.capability_source == "sidecar_manifest" || observed_any_signal {
+            "runtime_signal_capability_or_partial_events_observed".to_string()
+        } else {
+            "stock_runtime_without_direct_allocator_or_kv_evidence".to_string()
+        };
+
+    PlatformCapabilityEntryReport {
+        capability_id: "track_b_allocator_kv_introspection".to_string(),
+        capability_label: "Allocator / KV Introspection".to_string(),
+        roadmap_track: "track_b".to_string(),
+        current_status,
+        evidence_level,
+        v1_blocker: true,
+        claim_boundary:
+            "Observed lifecycle signals strengthen allocator/KV evidence, but they still do not prove freed-page overwrites or zeroization."
+                .to_string(),
+        summary: introspection.summary.clone(),
+        notes: vec![
+            introspection.allocator_summary.clone(),
+            introspection.kv_cache_summary.clone(),
+        ],
+    }
+}
+
+fn build_gpu_inspection_capability_entry(
+    scope_platform: &str,
+    llama_runtime: &LlamaRuntimeReport,
+) -> PlatformCapabilityEntryReport {
+    let current_status = if scope_platform != "windows" {
+        "windows_nvidia_track_not_applicable_on_current_platform".to_string()
+    } else if !llama_runtime.gpu_offload_requested {
+        "windows_nvidia_gpu_inspection_not_exercised_in_this_report".to_string()
+    } else if llama_runtime
+        .gpu_observation_backend
+        .as_deref()
+        .map(|backend| backend.contains("nvidia"))
+        .unwrap_or(false)
+        || llama_runtime
+            .gpu_check_backend
+            .as_deref()
+            .map(|backend| backend.contains("nvidia"))
+            .unwrap_or(false)
+    {
+        "windows_nvidia_gpu_inspection_supported_with_host_tool_evidence".to_string()
+    } else {
+        "windows_nvidia_gpu_inspection_limited".to_string()
+    };
+    let evidence_level = if scope_platform != "windows" {
+        "non_windows_scope".to_string()
+    } else if !llama_runtime.gpu_offload_requested {
+        "gpu_offload_not_exercised".to_string()
+    } else {
+        llama_runtime.vram_inspection_status.clone()
+    };
+
+    PlatformCapabilityEntryReport {
+        capability_id: "track_c_cuda_nvidia_api_inspection".to_string(),
+        capability_label: "CUDA / NVIDIA API Inspection".to_string(),
+        roadmap_track: "track_c".to_string(),
+        current_status,
+        evidence_level,
+        v1_blocker: true,
+        claim_boundary:
+            "Current GPU evidence may still come from host tools rather than true CUDA/NVML allocator-level inspection."
+                .to_string(),
+        summary: llama_runtime.inspection_summary.clone(),
+        notes: vec![
+            llama_runtime.cleanup_summary.clone(),
+            llama_runtime.residual_risk_summary.clone(),
+        ],
+    }
+}
+
+fn build_vram_cleanup_capability_entry(
+    llama_runtime: &LlamaRuntimeReport,
+    memory_validation: &MemoryValidationReport,
+) -> PlatformCapabilityEntryReport {
+    let current_status = if !llama_runtime.gpu_offload_requested {
+        "experimental_cleanup_not_exercised_in_this_report".to_string()
+    } else if !llama_runtime.vram_cleanup.stages.is_empty() {
+        "experimental_cleanup_stages_available".to_string()
+    } else {
+        "experimental_cleanup_stages_unavailable".to_string()
+    };
+    let evidence_level = if !llama_runtime.gpu_offload_requested {
+        "gpu_offload_not_exercised".to_string()
+    } else if !llama_runtime.vram_cleanup.stages.is_empty() {
+        memory_validation.best_stage_verdict.clone()
+    } else {
+        llama_runtime.vram_cleanup.evidence_outcome.clone()
+    };
+
+    PlatformCapabilityEntryReport {
+        capability_id: "track_d_experimental_vram_cleanup".to_string(),
+        capability_label: "Experimental VRAM Cleanup".to_string(),
+        roadmap_track: "track_d".to_string(),
+        current_status,
+        evidence_level,
+        v1_blocker: true,
+        claim_boundary:
+            "Cleanup stages are measured by post-shutdown evidence changes; they are experiments, not proof of sanitized VRAM contents."
+                .to_string(),
+        summary: llama_runtime.vram_cleanup.summary.clone(),
+        notes: llama_runtime.vram_cleanup.notes.clone(),
+    }
+}
+
+fn build_validation_harness_capability_entry(
+    memory_validation: &MemoryValidationReport,
+    memory_validation_history: &MemoryValidationHistoryReport,
+) -> PlatformCapabilityEntryReport {
+    let current_status = if memory_validation.controlled_canary_run.requested_passes > 0
+        && memory_validation_history.runs_recorded > 0
+    {
+        "validation_harness_active_with_cross_session_history".to_string()
+    } else if memory_validation.controlled_canary_run.requested_passes > 0 {
+        "validation_harness_active_for_current_report_only".to_string()
+    } else {
+        "validation_harness_not_exercised".to_string()
+    };
+    let evidence_level = if memory_validation.controlled_canary_run.requested_passes > 0 {
+        memory_validation
+            .controlled_canary_run
+            .aggregate_signal_status
+            .clone()
+    } else {
+        memory_validation.validation_status.clone()
+    };
+
+    PlatformCapabilityEntryReport {
+        capability_id: "track_e_validation_release_gating".to_string(),
+        capability_label: "Validation / Release Gating".to_string(),
+        roadmap_track: "track_e".to_string(),
+        current_status,
+        evidence_level,
+        v1_blocker: true,
+        claim_boundary:
+            "Validation history and repeated canary passes improve confidence, but they are still comparative evidence rather than release-proof forensic guarantees."
+                .to_string(),
+        summary: memory_validation.summary.clone(),
+        notes: vec![
+            memory_validation_history.summary.clone(),
+            format!(
+                "Controlled canary aggregate signal: {}.",
+                memory_validation
+                    .controlled_canary_run
+                    .aggregate_signal_status
+                    .replace('_', " ")
+            ),
+        ],
+    }
 }
 
 pub fn build_llama_runtime_report(
@@ -1447,6 +1814,22 @@ fn default_memory_validation_history_report() -> MemoryValidationHistoryReport {
         notes: vec![
             "Older reports may not include the cross-session memory-validation history section."
                 .to_string(),
+        ],
+    }
+}
+
+fn default_platform_capability_matrix_report() -> PlatformCapabilityMatrixReport {
+    PlatformCapabilityMatrixReport {
+        matrix_status: "matrix_not_derived".to_string(),
+        scope_platform: std::env::consts::OS.to_string(),
+        scope_model_id: None,
+        runtime_build_profile: None,
+        gpu_offload_requested: None,
+        summary: "NullContext had not yet derived a platform capability matrix for this report."
+            .to_string(),
+        capabilities: vec![],
+        notes: vec![
+            "Older reports may not include the platform capability matrix section.".to_string(),
         ],
     }
 }

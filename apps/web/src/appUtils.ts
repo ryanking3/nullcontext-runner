@@ -16,6 +16,23 @@ export function statusClass(status: string): string {
 
 export function inspectionStatusClass(status: string): string {
   if (
+    status.includes("unsupported") ||
+    status.includes("unavailable") ||
+    status.includes("partial") ||
+    status.includes("not_exercised")
+  ) {
+    return "pill warning";
+  }
+
+  if (
+    status.includes("supported") ||
+    status.includes("available") ||
+    status.includes("active")
+  ) {
+    return "pill success";
+  }
+
+  if (
     status.includes("strong_improvement_signal") ||
     status.includes("moderate_improvement_signal")
   ) {
@@ -297,6 +314,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.memory_validation_history = legacyMemoryValidationHistoryReport();
     }
 
+    if (!parsed.platform_capability_matrix) {
+      parsed.platform_capability_matrix = legacyPlatformCapabilityMatrixReport();
+    }
+
     if (parsed.memory_validation && !parsed.memory_validation.controlled_canary_run) {
       parsed.memory_validation.controlled_canary_run =
         legacyMemoryValidationReport().controlled_canary_run;
@@ -485,6 +506,21 @@ function legacyMemoryValidationHistoryReport() {
       "This older report did not include cross-session memory-validation history.",
     notes: [
       "Open a newer report to inspect locally persisted validation history for the current model/platform scope.",
+    ],
+  };
+}
+
+function legacyPlatformCapabilityMatrixReport() {
+  return {
+    matrix_status: "matrix_not_derived",
+    scope_platform: "unknown",
+    scope_model_id: null,
+    runtime_build_profile: null,
+    gpu_offload_requested: null,
+    summary: "This older report did not include a platform capability matrix.",
+    capabilities: [],
+    notes: [
+      "Open a newer report to inspect Track A-E readiness for the current platform scope.",
     ],
   };
 }

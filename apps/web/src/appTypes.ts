@@ -302,6 +302,29 @@ export type MemoryValidationHistoryReportData = {
   notes: string[];
 };
 
+export type PlatformCapabilityEntryReportData = {
+  capability_id: string;
+  capability_label: string;
+  roadmap_track: string;
+  current_status: string;
+  evidence_level: string;
+  v1_blocker: boolean;
+  claim_boundary: string;
+  summary: string;
+  notes: string[];
+};
+
+export type PlatformCapabilityMatrixReportData = {
+  matrix_status: string;
+  scope_platform: string;
+  scope_model_id?: string | null;
+  runtime_build_profile?: string | null;
+  gpu_offload_requested?: boolean | null;
+  summary: string;
+  capabilities: PlatformCapabilityEntryReportData[];
+  notes: string[];
+};
+
 export type LlamaMemoryDomainReport = {
   domain: string;
   exposure_scope: string;
@@ -476,6 +499,7 @@ export type PrivacyReportData = {
   process_scan?: ProcessScanReportData | null;
   memory_validation: MemoryValidationReportData;
   memory_validation_history: MemoryValidationHistoryReportData;
+  platform_capability_matrix: PlatformCapabilityMatrixReportData;
   retrieval?: RetrievalReportData | null;
   residual_risk: string;
 };

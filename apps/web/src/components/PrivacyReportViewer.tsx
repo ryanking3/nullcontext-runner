@@ -1245,6 +1245,104 @@ export function PrivacyReportViewer({
         </section>
       )}
 
+      {currentReport.platform_capability_matrix && (
+        <section className="report-section">
+          <div className="panel-title">platform capability matrix</div>
+
+          <div className="report-risk-block">
+            <p>{currentReport.platform_capability_matrix.summary}</p>
+          </div>
+
+          <div className="registry-lifecycle-summary">
+            <span
+              className={inspectionStatusClass(
+                currentReport.platform_capability_matrix.matrix_status
+              )}
+            >
+              status {humanizeSnakeCase(currentReport.platform_capability_matrix.matrix_status)}
+            </span>
+          </div>
+
+          <ReportGrid
+            entries={[
+              {
+                label: "platform",
+                value: currentReport.platform_capability_matrix.scope_platform,
+              },
+              {
+                label: "model id",
+                value: currentReport.platform_capability_matrix.scope_model_id || "unknown",
+              },
+              {
+                label: "runtime build profile",
+                value:
+                  currentReport.platform_capability_matrix.runtime_build_profile || "unknown",
+              },
+              {
+                label: "gpu offload requested",
+                value:
+                  currentReport.platform_capability_matrix.gpu_offload_requested === undefined ||
+                  currentReport.platform_capability_matrix.gpu_offload_requested === null
+                    ? "unknown"
+                    : currentReport.platform_capability_matrix.gpu_offload_requested
+                      ? "true"
+                      : "false",
+              },
+              {
+                label: "track entries",
+                value: String(currentReport.platform_capability_matrix.capabilities.length),
+              },
+            ]}
+          />
+
+          <details className="report-detail" open>
+            <summary>
+              track readiness ({currentReport.platform_capability_matrix.capabilities.length})
+            </summary>
+            {currentReport.platform_capability_matrix.capabilities.length === 0 ? (
+              <p className="muted-text">no capability entries available</p>
+            ) : (
+              <div className="report-list">
+                {currentReport.platform_capability_matrix.capabilities.map((capability) => (
+                  <div className="report-item" key={capability.capability_id}>
+                    <div className="report-item-header">
+                      <strong>{capability.capability_label}</strong>
+                      <span className={inspectionStatusClass(capability.current_status)}>
+                        {humanizeSnakeCase(capability.current_status)}
+                      </span>
+                    </div>
+
+                    <div className="report-path-list">
+                      <div>track: {humanizeSnakeCase(capability.roadmap_track)}</div>
+                      <div>evidence: {humanizeSnakeCase(capability.evidence_level)}</div>
+                      <div>v1 blocker: {capability.v1_blocker ? "yes" : "no"}</div>
+                      <div>boundary: {capability.claim_boundary}</div>
+                      <div>{capability.summary}</div>
+                      {capability.notes.map((note) => (
+                        <div key={`${capability.capability_id}-${note}`}>{note}</div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </details>
+
+          {currentReport.platform_capability_matrix.notes.length > 0 && (
+            <details className="report-detail">
+              <summary>
+                matrix notes ({currentReport.platform_capability_matrix.notes.length})
+              </summary>
+              <ul className="report-note-list">
+                {currentReport.platform_capability_matrix.notes.map((note, index) => (
+                  <li key={`platform-capability-note-${index}`}>{note}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </section>
+      )}
+
       {currentReport.memory_validation && (
         <section className="report-section">
           <div className="panel-title">memory validation harness</div>
