@@ -299,6 +299,31 @@ export type MemoryValidationHistoryReportData = {
   best_stage_score_max?: number | null;
   best_stage_score_avg?: number | null;
   last_recorded_at?: string | null;
+  stage_trends: MemoryValidationStageTrendReportData[];
+  summary: string;
+  notes: string[];
+};
+
+export type MemoryValidationStageTrendReportData = {
+  stage_id: string;
+  stage_label: string;
+  stage_kind: string;
+  runs_recorded: number;
+  avg_validation_score: number;
+  best_validation_score: number;
+  improved_runs: number;
+  unchanged_runs: number;
+  worsened_runs: number;
+  inconclusive_runs: number;
+  strong_or_moderate_runs: number;
+  marker_detection_runs: number;
+  clear_marker_support_runs: number;
+  helper_scan_runs: number;
+  helper_scan_clear_runs: number;
+  helper_scan_marker_detection_runs: number;
+  latest_vram_evidence_status: string;
+  latest_validation_verdict: string;
+  latest_marker_evidence_status: string;
   summary: string;
   notes: string[];
 };

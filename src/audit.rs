@@ -219,6 +219,33 @@ pub struct MemoryValidationHistoryReport {
     pub best_stage_score_max: Option<u32>,
     pub best_stage_score_avg: Option<f64>,
     pub last_recorded_at: Option<String>,
+    #[serde(default)]
+    pub stage_trends: Vec<MemoryValidationStageTrendReport>,
+    pub summary: String,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryValidationStageTrendReport {
+    pub stage_id: String,
+    pub stage_label: String,
+    pub stage_kind: String,
+    pub runs_recorded: u32,
+    pub avg_validation_score: f64,
+    pub best_validation_score: u32,
+    pub improved_runs: u32,
+    pub unchanged_runs: u32,
+    pub worsened_runs: u32,
+    pub inconclusive_runs: u32,
+    pub strong_or_moderate_runs: u32,
+    pub marker_detection_runs: u32,
+    pub clear_marker_support_runs: u32,
+    pub helper_scan_runs: u32,
+    pub helper_scan_clear_runs: u32,
+    pub helper_scan_marker_detection_runs: u32,
+    pub latest_vram_evidence_status: String,
+    pub latest_validation_verdict: String,
+    pub latest_marker_evidence_status: String,
     pub summary: String,
     pub notes: Vec<String>,
 }
@@ -2031,6 +2058,7 @@ fn default_memory_validation_history_report() -> MemoryValidationHistoryReport {
         best_stage_score_max: None,
         best_stage_score_avg: None,
         last_recorded_at: None,
+        stage_trends: vec![],
         summary:
             "NullContext had not yet derived or persisted cross-session memory-validation history for this report."
                 .to_string(),

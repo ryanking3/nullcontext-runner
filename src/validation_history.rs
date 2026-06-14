@@ -1,7 +1,10 @@
-use crate::audit::{MemoryValidationHistoryReport, PrivacyReport};
+use crate::audit::{
+    MemoryValidationHistoryReport, MemoryValidationStageTrendReport, PrivacyReport,
+};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -27,6 +30,20 @@ pub struct ValidationHistoryEntry {
     pub canary_aggregate_signal_status: String,
     pub best_stage_score: u32,
     pub best_stage_verdict: String,
+    #[serde(default)]
+    pub stage_results: Vec<ValidationHistoryStageResultEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationHistoryStageResultEntry {
+    pub stage_id: String,
+    pub stage_label: String,
+    pub stage_kind: String,
+    pub vram_evidence_status: String,
+    pub validation_score: u32,
+    pub validation_verdict: String,
+    pub marker_evidence_status: String,
+    pub helper_process_scan_status: String,
 }
 
 pub fn apply_and_record_memory_validation_history(
@@ -77,6 +94,7 @@ pub fn apply_and_record_memory_validation_history(
                 best_stage_score_max: None,
                 best_stage_score_avg: None,
                 last_recorded_at: None,
+                stage_trends: vec![],
                 summary:
                     "NullContext could not load the cross-session validation-history registry for this report."
                         .to_string(),
@@ -128,6 +146,33 @@ impl ValidationHistoryEntry {
                 .clone(),
             best_stage_score: report.memory_validation.best_stage_score,
             best_stage_verdict: report.memory_validation.best_stage_verdict.clone(),
+            stage_results: report
+                .memory_validation
+                .stage_scorecards
+                .iter()
+                .map(|scorecard| ValidationHistoryStageResultEntry {
+                    stage_id: scorecard.stage_id.clone(),
+                    stage_label: scorecard.stage_label.clone(),
+                    stage_kind: scorecard.stage_kind.clone(),
+                    vram_evidence_status: scorecard.vram_evidence_status.clone(),
+                    validation_score: scorecard.validation_score,
+                    validation_verdict: scorecard.validation_verdict.clone(),
+                    marker_evidence_status: scorecard.marker_evidence_status.clone(),
+                    helper_process_scan_status: report
+                        .llama_runtime
+                        .as_ref()
+                        .and_then(|runtime| {
+                            runtime
+                                .vram_cleanup
+                                .stages
+                                .iter()
+                                .find(|stage| stage.stage_id == scorecard.stage_id)
+                                .and_then(|stage| stage.helper_process_scan_report.as_ref())
+                        })
+                        .map(|scan| helper_process_scan_signal_status(scan.overall_status.as_str()))
+                        .unwrap_or_else(|| "helper_process_scan_not_recorded".to_string()),
+                })
+                .collect(),
         }
     }
 }
@@ -165,6 +210,7 @@ fn build_history_report_from_registry(
             best_stage_score_max: None,
             best_stage_score_avg: None,
             last_recorded_at: None,
+            stage_trends: vec![],
             summary:
                 "NullContext defined the cross-session validation-history scope, but this is the first recorded run in that scope."
                     .to_string(),
@@ -221,6 +267,7 @@ fn build_history_report_from_registry(
                 / matching_entries.len() as f64,
         )
     };
+    let stage_trends = build_stage_trends(&matching_entries);
 
     MemoryValidationHistoryReport {
         history_status: "history_recorded".to_string(),
@@ -243,6 +290,7 @@ fn build_history_report_from_registry(
         best_stage_score_max,
         best_stage_score_avg,
         last_recorded_at: matching_entries.first().map(|entry| entry.recorded_at.clone()),
+        stage_trends,
         summary: format!(
             "NullContext has recorded {} validation run(s) for scope {}. {} run(s) still showed marker-detection evidence, {} run(s) achieved fully clear repeated canary passes, and the best-stage score average is {}.",
             runs_recorded,
@@ -259,6 +307,209 @@ fn build_history_report_from_registry(
             "Cross-session history is local-only and stores compact validation metadata rather than prompt/response content."
                 .to_string(),
         ],
+    }
+}
+
+#[derive(Debug, Default)]
+struct StageTrendAccumulator {
+    stage_label: String,
+    stage_kind: String,
+    runs_recorded: u32,
+    total_validation_score: u64,
+    best_validation_score: u32,
+    improved_runs: u32,
+    unchanged_runs: u32,
+    worsened_runs: u32,
+    inconclusive_runs: u32,
+    strong_or_moderate_runs: u32,
+    marker_detection_runs: u32,
+    clear_marker_support_runs: u32,
+    helper_scan_runs: u32,
+    helper_scan_clear_runs: u32,
+    helper_scan_marker_detection_runs: u32,
+    latest_recorded_at: String,
+    latest_vram_evidence_status: String,
+    latest_validation_verdict: String,
+    latest_marker_evidence_status: String,
+}
+
+fn build_stage_trends(
+    matching_entries: &[&ValidationHistoryEntry],
+) -> Vec<MemoryValidationStageTrendReport> {
+    let mut by_stage: BTreeMap<String, StageTrendAccumulator> = BTreeMap::new();
+
+    for entry in matching_entries {
+        for stage in &entry.stage_results {
+            let accumulator = by_stage.entry(stage.stage_id.clone()).or_default();
+            if accumulator.stage_label.is_empty() {
+                accumulator.stage_label = stage.stage_label.clone();
+            }
+            if accumulator.stage_kind.is_empty() {
+                accumulator.stage_kind = stage.stage_kind.clone();
+            }
+            accumulator.runs_recorded = accumulator.runs_recorded.saturating_add(1);
+            accumulator.total_validation_score = accumulator
+                .total_validation_score
+                .saturating_add(stage.validation_score as u64);
+            accumulator.best_validation_score = accumulator
+                .best_validation_score
+                .max(stage.validation_score);
+            match classify_stage_outcome(&stage.vram_evidence_status) {
+                "improved" => {
+                    accumulator.improved_runs = accumulator.improved_runs.saturating_add(1);
+                }
+                "unchanged" => {
+                    accumulator.unchanged_runs = accumulator.unchanged_runs.saturating_add(1);
+                }
+                "worsened" => {
+                    accumulator.worsened_runs = accumulator.worsened_runs.saturating_add(1);
+                }
+                _ => {
+                    accumulator.inconclusive_runs = accumulator.inconclusive_runs.saturating_add(1);
+                }
+            }
+            if stage.validation_verdict == "strong_improvement_signal"
+                || stage.validation_verdict == "moderate_improvement_signal"
+            {
+                accumulator.strong_or_moderate_runs =
+                    accumulator.strong_or_moderate_runs.saturating_add(1);
+            }
+            if stage
+                .marker_evidence_status
+                .contains("marker_persistence_detected")
+                || stage.helper_process_scan_status == "helper_process_scan_marker_detected"
+            {
+                accumulator.marker_detection_runs =
+                    accumulator.marker_detection_runs.saturating_add(1);
+            }
+            if stage.marker_evidence_status
+                == "gpu_evidence_supported_by_clear_session_and_canary_scans"
+            {
+                accumulator.clear_marker_support_runs =
+                    accumulator.clear_marker_support_runs.saturating_add(1);
+            }
+            if stage.helper_process_scan_status != "helper_process_scan_not_recorded" {
+                accumulator.helper_scan_runs = accumulator.helper_scan_runs.saturating_add(1);
+            }
+            if stage.helper_process_scan_status == "helper_process_scan_clear" {
+                accumulator.helper_scan_clear_runs =
+                    accumulator.helper_scan_clear_runs.saturating_add(1);
+            }
+            if stage.helper_process_scan_status == "helper_process_scan_marker_detected" {
+                accumulator.helper_scan_marker_detection_runs = accumulator
+                    .helper_scan_marker_detection_runs
+                    .saturating_add(1);
+            }
+            if entry.recorded_at >= accumulator.latest_recorded_at {
+                accumulator.latest_recorded_at = entry.recorded_at.clone();
+                accumulator.latest_vram_evidence_status = stage.vram_evidence_status.clone();
+                accumulator.latest_validation_verdict = stage.validation_verdict.clone();
+                accumulator.latest_marker_evidence_status = stage.marker_evidence_status.clone();
+            }
+        }
+    }
+
+    let mut stage_trends = by_stage
+        .into_iter()
+        .map(|(stage_id, accumulator)| {
+            let avg_validation_score = if accumulator.runs_recorded == 0 {
+                0.0
+            } else {
+                accumulator.total_validation_score as f64 / accumulator.runs_recorded as f64
+            };
+            let stage_label = accumulator.stage_label;
+            let stage_kind = accumulator.stage_kind;
+            let latest_vram_evidence_status = accumulator.latest_vram_evidence_status;
+            let latest_validation_verdict = accumulator.latest_validation_verdict;
+            let latest_marker_evidence_status = accumulator.latest_marker_evidence_status;
+            let summary = format!(
+                "{} was recorded in {} run(s), averaged {:.1}/100, improved {} time(s), stayed unchanged {} time(s), worsened {} time(s), and remained inconclusive {} time(s).",
+                stage_label,
+                accumulator.runs_recorded,
+                avg_validation_score,
+                accumulator.improved_runs,
+                accumulator.unchanged_runs,
+                accumulator.worsened_runs,
+                accumulator.inconclusive_runs
+            );
+            let notes = vec![
+                format!(
+                    "Strong/moderate runs: {}, marker-detection runs: {}, clear marker support runs: {}.",
+                    accumulator.strong_or_moderate_runs,
+                    accumulator.marker_detection_runs,
+                    accumulator.clear_marker_support_runs
+                ),
+                format!(
+                    "Helper-stage scan runs: {}, clear helper scans: {}, helper marker detections: {}.",
+                    accumulator.helper_scan_runs,
+                    accumulator.helper_scan_clear_runs,
+                    accumulator.helper_scan_marker_detection_runs
+                ),
+                format!(
+                    "Latest VRAM evidence: {}. Latest verdict: {}. Latest marker evidence: {}.",
+                    latest_vram_evidence_status.replace('_', " "),
+                    latest_validation_verdict.replace('_', " "),
+                    latest_marker_evidence_status.replace('_', " ")
+                ),
+            ];
+            MemoryValidationStageTrendReport {
+                stage_id,
+                stage_label,
+                stage_kind,
+                runs_recorded: accumulator.runs_recorded,
+                avg_validation_score,
+                best_validation_score: accumulator.best_validation_score,
+                improved_runs: accumulator.improved_runs,
+                unchanged_runs: accumulator.unchanged_runs,
+                worsened_runs: accumulator.worsened_runs,
+                inconclusive_runs: accumulator.inconclusive_runs,
+                strong_or_moderate_runs: accumulator.strong_or_moderate_runs,
+                marker_detection_runs: accumulator.marker_detection_runs,
+                clear_marker_support_runs: accumulator.clear_marker_support_runs,
+                helper_scan_runs: accumulator.helper_scan_runs,
+                helper_scan_clear_runs: accumulator.helper_scan_clear_runs,
+                helper_scan_marker_detection_runs: accumulator.helper_scan_marker_detection_runs,
+                latest_vram_evidence_status,
+                latest_validation_verdict,
+                latest_marker_evidence_status,
+                summary,
+                notes,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    stage_trends.sort_by(|a, b| {
+        b.avg_validation_score
+            .total_cmp(&a.avg_validation_score)
+            .then_with(|| b.runs_recorded.cmp(&a.runs_recorded))
+            .then_with(|| b.strong_or_moderate_runs.cmp(&a.strong_or_moderate_runs))
+    });
+
+    stage_trends
+}
+
+fn helper_process_scan_signal_status(overall_status: &str) -> String {
+    match overall_status {
+        "markers_detected_in_scanned_memory" => "helper_process_scan_marker_detected".to_string(),
+        "no_markers_detected_in_scanned_regions" => "helper_process_scan_clear".to_string(),
+        "scan_attempt_failed" => "helper_process_scan_inconclusive".to_string(),
+        "scan_backend_unsupported_on_platform" => {
+            "helper_process_scan_backend_unsupported".to_string()
+        }
+        "scan_skipped" | "scan_not_completed" => "helper_process_scan_not_completed".to_string(),
+        _ => "helper_process_scan_mixed".to_string(),
+    }
+}
+
+fn classify_stage_outcome(vram_evidence_status: &str) -> &'static str {
+    match vram_evidence_status {
+        "evidence_improved_pid_no_longer_observed_after_strategy"
+        | "evidence_improved_bytes_no_longer_visible_but_pid_still_observed"
+        | "evidence_improved_peak_bytes_lower_but_residency_still_observed" => "improved",
+        "evidence_unchanged_not_observed" | "evidence_unchanged_pid_still_observed" => "unchanged",
+        "evidence_worsened_peak_bytes_higher_after_strategy"
+        | "evidence_worsened_gpu_visibility_increased_after_strategy" => "worsened",
+        _ => "inconclusive",
     }
 }
 

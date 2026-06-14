@@ -1532,6 +1532,63 @@ export function PrivacyReportViewer({
               ]}
             />
 
+            <details className="report-detail">
+              <summary>
+                cleanup stage trends ({currentReport.memory_validation_history.stage_trends.length})
+              </summary>
+              {currentReport.memory_validation_history.stage_trends.length === 0 ? (
+                <p className="muted-text">no repeated cleanup stage trends available yet</p>
+              ) : (
+                <div className="report-list">
+                  {currentReport.memory_validation_history.stage_trends.map((trend) => (
+                    <div className="report-item" key={`history-stage-trend-${trend.stage_id}`}>
+                      <div className="report-item-header">
+                        <strong>{trend.stage_label}</strong>
+                        <span className={inspectionStatusClass(trend.latest_validation_verdict)}>
+                          {trend.avg_validation_score.toFixed(1)}/100
+                        </span>
+                      </div>
+                      <div className="report-path-list">
+                        <div>stage id: {trend.stage_id}</div>
+                        <div>kind: {humanizeSnakeCase(trend.stage_kind)}</div>
+                        <div>runs recorded: {trend.runs_recorded}</div>
+                        <div>best score: {trend.best_validation_score}/100</div>
+                        <div>improved runs: {trend.improved_runs}</div>
+                        <div>unchanged runs: {trend.unchanged_runs}</div>
+                        <div>worsened runs: {trend.worsened_runs}</div>
+                        <div>inconclusive runs: {trend.inconclusive_runs}</div>
+                        <div>strong or moderate runs: {trend.strong_or_moderate_runs}</div>
+                        <div>marker-detection runs: {trend.marker_detection_runs}</div>
+                        <div>clear marker support runs: {trend.clear_marker_support_runs}</div>
+                        <div>helper scan runs: {trend.helper_scan_runs}</div>
+                        <div>helper scan clear runs: {trend.helper_scan_clear_runs}</div>
+                        <div>
+                          helper scan marker detections:{" "}
+                          {trend.helper_scan_marker_detection_runs}
+                        </div>
+                        <div>
+                          latest vram evidence:{" "}
+                          {humanizeSnakeCase(trend.latest_vram_evidence_status)}
+                        </div>
+                        <div>
+                          latest verdict:{" "}
+                          {humanizeSnakeCase(trend.latest_validation_verdict)}
+                        </div>
+                        <div>
+                          latest marker evidence:{" "}
+                          {humanizeSnakeCase(trend.latest_marker_evidence_status)}
+                        </div>
+                        <div>{trend.summary}</div>
+                        {trend.notes.map((note) => (
+                          <div key={`${trend.stage_id}-${note}`}>{note}</div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </details>
+
             {currentReport.memory_validation_history.notes.length > 0 && (
               <details className="report-detail">
                 <summary>

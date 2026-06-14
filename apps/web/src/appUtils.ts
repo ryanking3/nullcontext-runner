@@ -336,6 +336,15 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
     if (!parsed.memory_validation_history) {
       parsed.memory_validation_history = legacyMemoryValidationHistoryReport();
     }
+    if (parsed.memory_validation_history.stage_trends === undefined) {
+      parsed.memory_validation_history.stage_trends =
+        legacyMemoryValidationHistoryReport().stage_trends;
+    }
+    parsed.memory_validation_history.stage_trends =
+      parsed.memory_validation_history.stage_trends.map((trend) => ({
+        ...legacyMemoryValidationStageTrendReport(),
+        ...trend,
+      }));
 
     if (!parsed.platform_capability_matrix) {
       parsed.platform_capability_matrix = legacyPlatformCapabilityMatrixReport();
@@ -549,11 +558,38 @@ function legacyMemoryValidationHistoryReport() {
     best_stage_score_max: null,
     best_stage_score_avg: null,
     last_recorded_at: null,
+    stage_trends: [],
     summary:
       "This older report did not include cross-session memory-validation history.",
     notes: [
       "Open a newer report to inspect locally persisted validation history for the current model/platform scope.",
     ],
+  };
+}
+
+function legacyMemoryValidationStageTrendReport() {
+  return {
+    stage_id: "legacy_stage",
+    stage_label: "Legacy Stage",
+    stage_kind: "legacy",
+    runs_recorded: 0,
+    avg_validation_score: 0,
+    best_validation_score: 0,
+    improved_runs: 0,
+    unchanged_runs: 0,
+    worsened_runs: 0,
+    inconclusive_runs: 0,
+    strong_or_moderate_runs: 0,
+    marker_detection_runs: 0,
+    clear_marker_support_runs: 0,
+    helper_scan_runs: 0,
+    helper_scan_clear_runs: 0,
+    helper_scan_marker_detection_runs: 0,
+    latest_vram_evidence_status: "legacy_status_unknown",
+    latest_validation_verdict: "legacy_status_unknown",
+    latest_marker_evidence_status: "legacy_status_unknown",
+    summary: "This older report did not include cleanup-stage trend details.",
+    notes: [],
   };
 }
 
