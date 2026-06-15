@@ -926,6 +926,23 @@ export function PrivacyReportViewer({
                   value: currentReport.llama_runtime.introspection.instrumentation_backend,
                 },
                 {
+                  label: "declared signals",
+                  value:
+                    currentReport.llama_runtime.introspection.declared_signal_ids.length === 0
+                      ? "none"
+                      : currentReport.llama_runtime.introspection.declared_signal_ids.join(", "),
+                },
+                {
+                  label: "declared cleanup signals",
+                  value:
+                    currentReport.llama_runtime.introspection.declared_cleanup_signal_ids
+                      .length === 0
+                      ? "none"
+                      : currentReport.llama_runtime.introspection.declared_cleanup_signal_ids.join(
+                          ", "
+                        ),
+                },
+                {
                   label: "signal evidence tier",
                   value: humanizeSnakeCase(
                     currentReport.llama_runtime.introspection.lifecycle_signal_evidence_tier

@@ -439,6 +439,8 @@ export type LlamaRuntimeIntrospectionReport = {
   manifest_path?: string | null;
   runtime_build_profile: string;
   instrumentation_backend: string;
+  declared_signal_ids: string[];
+  declared_cleanup_signal_ids: string[];
   lifecycle_signal_evidence_tier: string;
   cleanup_path_evidence_status: string;
   setup_signal_coverage_status: string;

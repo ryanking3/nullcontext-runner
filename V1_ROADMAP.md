@@ -81,6 +81,7 @@ NullContext already has meaningful foundations in-tree:
 - allocator / KV lifecycle evidence tiers and cleanup-path status reporting
 - phase-classified runtime introspection events and cleanup-signal coverage reporting
 - cleanup-signal coverage matrix for allocator reset, KV clear, and model unload
+- richer manifest-declared signal contract for instrumented runtimes
 
 That is strong progress.
 
@@ -174,6 +175,7 @@ Done or partially done:
 - explicit signal-evidence tier and cleanup-path status reporting exists
 - observed runtime events are phase-classified and carry cleanup relevance
 - cleanup-signal coverage is exposed as a compact matrix instead of only spread across booleans
+- instrumented manifest declarations now include explicit signal IDs and cleanup-signal IDs
 
 ### Remaining v1 Work
 
@@ -450,7 +452,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `18-28` commits
+- core security/evidence work across Tracks A-E: `17-27` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -459,7 +461,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `40-65` commits
+- `39-64` commits
 
 ### Track Breakdown
 
@@ -479,7 +481,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `3-7` commits
+- `2-6` commits
 
 Expected areas:
 

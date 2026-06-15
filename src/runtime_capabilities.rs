@@ -9,6 +9,8 @@ pub struct RuntimeIntrospectionCapabilities {
     pub manifest_path: Option<String>,
     pub runtime_build_profile: String,
     pub instrumentation_backend: String,
+    pub declared_signal_ids: Vec<String>,
+    pub declared_cleanup_signal_ids: Vec<String>,
     pub allocator_introspection_status: String,
     pub kv_cache_introspection_status: String,
     pub model_unload_signal_status: String,
@@ -20,6 +22,8 @@ pub struct RuntimeIntrospectionCapabilities {
 struct RuntimeIntrospectionManifest {
     runtime_build_profile: Option<String>,
     instrumentation_backend: Option<String>,
+    declared_signal_ids: Option<Vec<String>>,
+    declared_cleanup_signal_ids: Option<Vec<String>>,
     allocator_introspection_status: Option<String>,
     kv_cache_introspection_status: Option<String>,
     model_unload_signal_status: Option<String>,
@@ -64,6 +68,8 @@ pub fn detect_runtime_introspection_capabilities(
         instrumentation_backend: manifest
             .instrumentation_backend
             .unwrap_or_else(|| "manifest_declared".to_string()),
+        declared_signal_ids: manifest.declared_signal_ids.unwrap_or_default(),
+        declared_cleanup_signal_ids: manifest.declared_cleanup_signal_ids.unwrap_or_default(),
         allocator_introspection_status: manifest
             .allocator_introspection_status
             .unwrap_or_else(|| "allocator_introspection_status_unspecified".to_string()),
@@ -100,6 +106,8 @@ fn stock_runtime_capabilities() -> RuntimeIntrospectionCapabilities {
         manifest_path: None,
         runtime_build_profile: "stock_external_llama_server".to_string(),
         instrumentation_backend: "none".to_string(),
+        declared_signal_ids: vec![],
+        declared_cleanup_signal_ids: vec![],
         allocator_introspection_status: "allocator_introspection_unavailable".to_string(),
         kv_cache_introspection_status: "kv_cache_introspection_unavailable".to_string(),
         model_unload_signal_status: "model_unload_not_observed_directly".to_string(),

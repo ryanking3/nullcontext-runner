@@ -485,6 +485,8 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub manifest_path: Option<String>,
     pub runtime_build_profile: String,
     pub instrumentation_backend: String,
+    pub declared_signal_ids: Vec<String>,
+    pub declared_cleanup_signal_ids: Vec<String>,
     pub lifecycle_signal_evidence_tier: String,
     pub cleanup_path_evidence_status: String,
     pub setup_signal_coverage_status: String,
@@ -1717,6 +1719,8 @@ fn build_llama_runtime_introspection_report(
                 manifest_path: None,
                 runtime_build_profile: "stock_external_llama_server".to_string(),
                 instrumentation_backend: "none".to_string(),
+                declared_signal_ids: vec![],
+                declared_cleanup_signal_ids: vec![],
                 lifecycle_signal_evidence_tier: "introspection_capability_load_failed"
                     .to_string(),
                 cleanup_path_evidence_status: if startup_failed {
@@ -1903,7 +1907,11 @@ fn build_llama_runtime_introspection_report(
         cleanup_signal_entry(
             "allocator_reset",
             "Allocator Reset",
-            capabilities
+            signal_declared(
+                &capabilities.declared_cleanup_signal_ids,
+                &capabilities.declared_signal_ids,
+                "allocator_reset_observed",
+            ) || capabilities
                 .allocator_reset_signal_status
                 .contains("available"),
             observed_allocator_reset_signal,
@@ -1912,14 +1920,22 @@ fn build_llama_runtime_introspection_report(
         cleanup_signal_entry(
             "kv_cache_clear",
             "KV Cache Clear",
-            declared_kv_cache_introspection_status.contains("available"),
+            signal_declared(
+                &capabilities.declared_cleanup_signal_ids,
+                &capabilities.declared_signal_ids,
+                "kv_cache_clear_observed",
+            ) || declared_kv_cache_introspection_status.contains("available"),
             observed_kv_clear,
             startup_failed,
         ),
         cleanup_signal_entry(
             "model_unload",
             "Model Unload",
-            capabilities
+            signal_declared(
+                &capabilities.declared_cleanup_signal_ids,
+                &capabilities.declared_signal_ids,
+                "model_unload_observed",
+            ) || capabilities
                 .model_unload_signal_status
                 .contains("available"),
             observed_model_unload_signal,
@@ -1932,6 +1948,8 @@ fn build_llama_runtime_introspection_report(
         manifest_path: capabilities.manifest_path,
         runtime_build_profile: capabilities.runtime_build_profile.clone(),
         instrumentation_backend: capabilities.instrumentation_backend.clone(),
+        declared_signal_ids: capabilities.declared_signal_ids.clone(),
+        declared_cleanup_signal_ids: capabilities.declared_cleanup_signal_ids.clone(),
         lifecycle_signal_evidence_tier,
         cleanup_path_evidence_status,
         setup_signal_coverage_status,
@@ -2123,6 +2141,17 @@ fn cleanup_signal_entry(
         evidence_status: evidence_status.to_string(),
         summary,
     }
+}
+
+fn signal_declared(
+    declared_cleanup_signal_ids: &[String],
+    declared_signal_ids: &[String],
+    signal_id: &str,
+) -> bool {
+    declared_cleanup_signal_ids
+        .iter()
+        .any(|value| value == signal_id)
+        || declared_signal_ids.iter().any(|value| value == signal_id)
 }
 
 fn observed_signal_sources(signals: &[RuntimeIntrospectionSignal]) -> Vec<String> {

@@ -1,6 +1,20 @@
 {
   "runtime_build_profile": "nullcontext_instrumented_llama_server",
   "instrumentation_backend": "stdout_event_signals_v1",
+  "declared_signal_ids": [
+    "allocator_initialized",
+    "allocator_teardown_observed",
+    "allocator_reset_observed",
+    "kv_cache_initialized",
+    "kv_cache_reused",
+    "kv_cache_clear_observed",
+    "model_unload_observed"
+  ],
+  "declared_cleanup_signal_ids": [
+    "allocator_reset_observed",
+    "kv_cache_clear_observed",
+    "model_unload_observed"
+  ],
   "allocator_introspection_status": "allocator_lifecycle_signals_available",
   "kv_cache_introspection_status": "kv_cache_lifecycle_signals_available",
   "model_unload_signal_status": "model_unload_signal_available",
