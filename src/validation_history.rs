@@ -29,10 +29,22 @@ pub struct ValidationHistoryEntry {
     pub process_scan_signal_status: String,
     pub canary_execution_status: String,
     pub canary_aggregate_signal_status: String,
+    #[serde(default = "default_canary_aggregate_process_scan_status")]
+    pub canary_aggregate_process_scan_status: String,
+    #[serde(default)]
+    pub canary_requested_passes: u32,
+    #[serde(default)]
+    pub canary_completed_passes: u32,
+    #[serde(default)]
+    pub canary_failed_passes: u32,
     pub best_stage_score: u32,
     pub best_stage_verdict: String,
     #[serde(default)]
     pub stage_results: Vec<ValidationHistoryStageResultEntry>,
+}
+
+fn default_canary_aggregate_process_scan_status() -> String {
+    "scan_not_completed".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +108,7 @@ pub fn apply_and_record_memory_validation_history(
                 best_stage_score_avg: None,
                 last_recorded_at: None,
                 stage_trends: vec![],
+                controlled_canary_history: build_controlled_canary_history(&[]),
                 cleanup_stage_recommendation:
                     default_stage_recommendation_report("history_registry_unavailable"),
                 summary:
@@ -147,6 +160,20 @@ impl ValidationHistoryEntry {
                 .controlled_canary_run
                 .aggregate_signal_status
                 .clone(),
+            canary_aggregate_process_scan_status: report
+                .memory_validation
+                .controlled_canary_run
+                .aggregate_process_scan_status
+                .clone(),
+            canary_requested_passes: report
+                .memory_validation
+                .controlled_canary_run
+                .requested_passes,
+            canary_completed_passes: report
+                .memory_validation
+                .controlled_canary_run
+                .completed_passes,
+            canary_failed_passes: report.memory_validation.controlled_canary_run.failed_passes,
             best_stage_score: report.memory_validation.best_stage_score,
             best_stage_verdict: report.memory_validation.best_stage_verdict.clone(),
             stage_results: report
@@ -214,6 +241,7 @@ fn build_history_report_from_registry(
             best_stage_score_avg: None,
             last_recorded_at: None,
             stage_trends: vec![],
+            controlled_canary_history: build_controlled_canary_history(&[]),
             cleanup_stage_recommendation: default_stage_recommendation_report(
                 "history_scope_empty",
             ),
@@ -274,7 +302,9 @@ fn build_history_report_from_registry(
         )
     };
     let stage_trends = build_stage_trends(&matching_entries);
+    let controlled_canary_history = build_controlled_canary_history(&matching_entries);
     let cleanup_stage_recommendation = build_stage_recommendation(&stage_trends);
+    let canary_summary = controlled_canary_history.summary.clone();
     let recommendation_summary = cleanup_stage_recommendation.summary.clone();
 
     MemoryValidationHistoryReport {
@@ -299,9 +329,10 @@ fn build_history_report_from_registry(
         best_stage_score_avg,
         last_recorded_at: matching_entries.first().map(|entry| entry.recorded_at.clone()),
         stage_trends,
+        controlled_canary_history,
         cleanup_stage_recommendation,
         summary: format!(
-            "NullContext has recorded {} validation run(s) for scope {}. {} run(s) still showed marker-detection evidence, {} run(s) achieved fully clear repeated canary passes, and the best-stage score average is {}. {}",
+            "NullContext has recorded {} validation run(s) for scope {}. {} run(s) still showed marker-detection evidence, {} run(s) achieved fully clear repeated canary passes, and the best-stage score average is {}. {} {}",
             runs_recorded,
             history_scope_label(report),
             marker_detection_runs,
@@ -309,6 +340,7 @@ fn build_history_report_from_registry(
             best_stage_score_avg
                 .map(|value| format!("{value:.1}/100"))
                 .unwrap_or_else(|| "unavailable".to_string()),
+            canary_summary,
             recommendation_summary
         ),
         notes: vec![
@@ -496,6 +528,195 @@ fn build_stage_trends(
     });
 
     stage_trends
+}
+
+fn build_controlled_canary_history(
+    matching_entries: &[&ValidationHistoryEntry],
+) -> crate::audit::ControlledCanaryHistoryReport {
+    if matching_entries.is_empty() {
+        return crate::audit::ControlledCanaryHistoryReport {
+            history_status: "controlled_canary_history_empty".to_string(),
+            recommendation_status: "controlled_canary_not_exercised".to_string(),
+            runs_with_canary_requested: 0,
+            runs_with_completed_passes: 0,
+            total_requested_passes: 0,
+            total_completed_passes: 0,
+            total_failed_passes: 0,
+            clear_runs: 0,
+            marker_detection_runs: 0,
+            mixed_or_inconclusive_runs: 0,
+            backend_unsupported_runs: 0,
+            latest_execution_status: "controlled_canary_not_run_yet".to_string(),
+            latest_aggregate_signal_status: "controlled_canary_not_run_yet".to_string(),
+            summary:
+                "NullContext has not yet recorded repeated dedicated controlled canary history for this scope."
+                    .to_string(),
+            notes: vec![
+                "Dedicated helper-canary guidance becomes meaningful only after at least one run in this scope requests the canary harness."
+                    .to_string(),
+            ],
+        };
+    }
+
+    let runs_with_canary_requested = matching_entries
+        .iter()
+        .filter(|entry| entry.canary_requested_passes > 0)
+        .count() as u32;
+    let runs_with_completed_passes = matching_entries
+        .iter()
+        .filter(|entry| entry.canary_completed_passes > 0)
+        .count() as u32;
+    let total_requested_passes = matching_entries
+        .iter()
+        .map(|entry| entry.canary_requested_passes)
+        .sum::<u32>();
+    let total_completed_passes = matching_entries
+        .iter()
+        .map(|entry| entry.canary_completed_passes)
+        .sum::<u32>();
+    let total_failed_passes = matching_entries
+        .iter()
+        .map(|entry| entry.canary_failed_passes)
+        .sum::<u32>();
+    let clear_runs = matching_entries
+        .iter()
+        .filter(|entry| {
+            entry.canary_aggregate_signal_status == "controlled_canary_all_completed_passes_clear"
+        })
+        .count() as u32;
+    let marker_detection_runs = matching_entries
+        .iter()
+        .filter(|entry| {
+            entry.canary_aggregate_signal_status
+                == "controlled_canary_markers_detected_across_passes"
+        })
+        .count() as u32;
+    let backend_unsupported_runs = matching_entries
+        .iter()
+        .filter(|entry| {
+            entry.canary_aggregate_signal_status
+                == "controlled_canary_backend_unsupported_across_passes"
+        })
+        .count() as u32;
+    let mixed_or_inconclusive_runs = matching_entries
+        .iter()
+        .filter(|entry| {
+            matches!(
+                entry.canary_aggregate_signal_status.as_str(),
+                "controlled_canary_mixed_clear_and_inconclusive"
+                    | "controlled_canary_inconclusive_across_passes"
+                    | "controlled_canary_request_failed"
+                    | "controlled_canary_shutdown_failed"
+                    | "controlled_canary_helper_failed"
+                    | "controlled_canary_all_passes_failed"
+                    | "controlled_canary_not_run_yet"
+            ) || entry.canary_execution_status != "controlled_canary_completed"
+        })
+        .count() as u32;
+    let latest_execution_status = matching_entries
+        .first()
+        .map(|entry| entry.canary_execution_status.clone())
+        .unwrap_or_else(|| "controlled_canary_not_run_yet".to_string());
+    let latest_aggregate_signal_status = matching_entries
+        .first()
+        .map(|entry| entry.canary_aggregate_signal_status.clone())
+        .unwrap_or_else(|| "controlled_canary_not_run_yet".to_string());
+
+    let recommendation_status = if runs_with_canary_requested == 0 {
+        "controlled_canary_not_exercised"
+    } else if marker_detection_runs > 0 {
+        "controlled_canary_marker_persistence_detected_across_history"
+    } else if clear_runs >= 2
+        && mixed_or_inconclusive_runs == 0
+        && backend_unsupported_runs == 0
+        && runs_with_completed_passes >= 2
+    {
+        "controlled_canary_repeated_clear_history"
+    } else if clear_runs == 1
+        && runs_with_canary_requested == 1
+        && mixed_or_inconclusive_runs == 0
+        && backend_unsupported_runs == 0
+    {
+        "controlled_canary_single_clear_run_only"
+    } else if backend_unsupported_runs == runs_with_canary_requested {
+        "controlled_canary_backend_unsupported_across_history"
+    } else if runs_with_completed_passes == 0 {
+        "controlled_canary_no_completed_history"
+    } else {
+        "controlled_canary_mixed_or_inconclusive_history"
+    };
+
+    let summary = match recommendation_status {
+        "controlled_canary_repeated_clear_history" => format!(
+            "Dedicated helper-canary history is currently strongest in this scope: {} run(s) completed with fully clear repeated canary passes and no repeated marker detections.",
+            clear_runs
+        ),
+        "controlled_canary_marker_persistence_detected_across_history" => format!(
+            "Dedicated helper-canary history still detected markers in {} run(s), so the repeated canary evidence remains a strong negative signal.",
+            marker_detection_runs
+        ),
+        "controlled_canary_single_clear_run_only" => {
+            "Dedicated helper-canary history has one fully clear run so far, but it is not repeated enough yet to count as strong release-gating evidence."
+                .to_string()
+        }
+        "controlled_canary_backend_unsupported_across_history" => {
+            "Dedicated helper-canary runs were requested in this scope, but the direct-scan backend remained unsupported across the recorded history."
+                .to_string()
+        }
+        "controlled_canary_no_completed_history" => {
+            "Dedicated helper-canary runs were requested, but none completed cleanly enough yet to provide strong repeated evidence."
+                .to_string()
+        }
+        _ => {
+            "Dedicated helper-canary history is present for this scope, but the repeated results are still mixed or inconclusive."
+                .to_string()
+        }
+    };
+
+    let mut notes = vec![
+        format!(
+            "Requested passes: {}, completed passes: {}, failed passes: {} across {} run(s) with requested canary validation.",
+            total_requested_passes,
+            total_completed_passes,
+            total_failed_passes,
+            runs_with_canary_requested
+        ),
+        format!(
+            "Latest canary execution: {}. Latest aggregate signal: {}.",
+            latest_execution_status.replace('_', " "),
+            latest_aggregate_signal_status.replace('_', " ")
+        ),
+    ];
+    if backend_unsupported_runs > 0 {
+        notes.push(
+            "Some helper-canary history remained backend-limited, so absence of marker detections in those runs should not be treated as a clear pass."
+                .to_string(),
+        );
+    }
+    if mixed_or_inconclusive_runs > 0 {
+        notes.push(
+            "Mixed or inconclusive helper-canary runs still exist in this scope, which means the repeated canary story is not fully clean yet."
+                .to_string(),
+        );
+    }
+
+    crate::audit::ControlledCanaryHistoryReport {
+        history_status: "controlled_canary_history_recorded".to_string(),
+        recommendation_status: recommendation_status.to_string(),
+        runs_with_canary_requested,
+        runs_with_completed_passes,
+        total_requested_passes,
+        total_completed_passes,
+        total_failed_passes,
+        clear_runs,
+        marker_detection_runs,
+        mixed_or_inconclusive_runs,
+        backend_unsupported_runs,
+        latest_execution_status,
+        latest_aggregate_signal_status,
+        summary,
+        notes,
+    }
 }
 
 fn build_stage_recommendation(

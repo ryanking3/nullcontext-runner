@@ -300,7 +300,26 @@ export type MemoryValidationHistoryReportData = {
   best_stage_score_avg?: number | null;
   last_recorded_at?: string | null;
   stage_trends: MemoryValidationStageTrendReportData[];
+  controlled_canary_history: ControlledCanaryHistoryReportData;
   cleanup_stage_recommendation: MemoryValidationStageRecommendationReportData;
+  summary: string;
+  notes: string[];
+};
+
+export type ControlledCanaryHistoryReportData = {
+  history_status: string;
+  recommendation_status: string;
+  runs_with_canary_requested: number;
+  runs_with_completed_passes: number;
+  total_requested_passes: number;
+  total_completed_passes: number;
+  total_failed_passes: number;
+  clear_runs: number;
+  marker_detection_runs: number;
+  mixed_or_inconclusive_runs: number;
+  backend_unsupported_runs: number;
+  latest_execution_status: string;
+  latest_aggregate_signal_status: string;
   summary: string;
   notes: string[];
 };

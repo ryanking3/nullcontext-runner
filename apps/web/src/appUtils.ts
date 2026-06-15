@@ -340,6 +340,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.memory_validation_history.stage_trends =
         legacyMemoryValidationHistoryReport().stage_trends;
     }
+    if (parsed.memory_validation_history.controlled_canary_history === undefined) {
+      parsed.memory_validation_history.controlled_canary_history =
+        legacyMemoryValidationHistoryReport().controlled_canary_history;
+    }
     if (parsed.memory_validation_history.cleanup_stage_recommendation === undefined) {
       parsed.memory_validation_history.cleanup_stage_recommendation =
         legacyMemoryValidationHistoryReport().cleanup_stage_recommendation;
@@ -352,6 +356,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
     parsed.memory_validation_history.cleanup_stage_recommendation = {
       ...legacyMemoryValidationStageRecommendationReport(),
       ...parsed.memory_validation_history.cleanup_stage_recommendation,
+    };
+    parsed.memory_validation_history.controlled_canary_history = {
+      ...legacyControlledCanaryHistoryReport(),
+      ...parsed.memory_validation_history.controlled_canary_history,
     };
 
     if (!parsed.platform_capability_matrix) {
@@ -567,6 +575,7 @@ function legacyMemoryValidationHistoryReport() {
     best_stage_score_avg: null,
     last_recorded_at: null,
     stage_trends: [],
+    controlled_canary_history: legacyControlledCanaryHistoryReport(),
     cleanup_stage_recommendation: legacyMemoryValidationStageRecommendationReport(),
     summary:
       "This older report did not include cross-session memory-validation history.",
@@ -625,6 +634,26 @@ function legacyMemoryValidationStageRecommendationReport() {
     inconclusive_runs: 0,
     marker_detection_runs: 0,
     summary: "This older report did not include cleanup-stage recommendation guidance.",
+    notes: [],
+  };
+}
+
+function legacyControlledCanaryHistoryReport() {
+  return {
+    history_status: "controlled_canary_history_not_derived",
+    recommendation_status: "controlled_canary_not_exercised",
+    runs_with_canary_requested: 0,
+    runs_with_completed_passes: 0,
+    total_requested_passes: 0,
+    total_completed_passes: 0,
+    total_failed_passes: 0,
+    clear_runs: 0,
+    marker_detection_runs: 0,
+    mixed_or_inconclusive_runs: 0,
+    backend_unsupported_runs: 0,
+    latest_execution_status: "controlled_canary_not_run_yet",
+    latest_aggregate_signal_status: "controlled_canary_not_run_yet",
+    summary: "This older report did not include repeated controlled canary history.",
     notes: [],
   };
 }

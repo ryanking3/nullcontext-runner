@@ -313,10 +313,10 @@ Done or largely done:
 - repeated cleanup-stage trend aggregation
 - repeated best-stage recommendation
 - runner-up stage comparison and effectiveness-gap reporting
+- explicit repeated controlled-canary history reporting
 
 ### Remaining v1 Work
 
-- aggregate helper-stage dedicated canary outcomes across reports more explicitly
 - define what counts as a meaningful pass versus weak/inconclusive evidence
 - tighten recommendation semantics so “best stage” is clearly separated from “clean stage”
 - freeze v1 security claim wording
@@ -343,7 +343,6 @@ This is the order that best fits the actual blocker stack.
 Must do:
 
 - keep the existing cleanup-stage outcome history and recommendation path honest as more repeated runs accumulate
-- aggregate helper-stage canary-scan outcome history more explicitly
 - define stronger release-gating thresholds for:
   - enough repeated runs
   - mixed versus acceptable evidence

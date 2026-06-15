@@ -221,8 +221,29 @@ pub struct MemoryValidationHistoryReport {
     pub last_recorded_at: Option<String>,
     #[serde(default)]
     pub stage_trends: Vec<MemoryValidationStageTrendReport>,
+    #[serde(default = "default_controlled_canary_history_report")]
+    pub controlled_canary_history: ControlledCanaryHistoryReport,
     #[serde(default = "default_memory_validation_stage_recommendation_report")]
     pub cleanup_stage_recommendation: MemoryValidationStageRecommendationReport,
+    pub summary: String,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlledCanaryHistoryReport {
+    pub history_status: String,
+    pub recommendation_status: String,
+    pub runs_with_canary_requested: u32,
+    pub runs_with_completed_passes: u32,
+    pub total_requested_passes: u32,
+    pub total_completed_passes: u32,
+    pub total_failed_passes: u32,
+    pub clear_runs: u32,
+    pub marker_detection_runs: u32,
+    pub mixed_or_inconclusive_runs: u32,
+    pub backend_unsupported_runs: u32,
+    pub latest_execution_status: String,
+    pub latest_aggregate_signal_status: String,
     pub summary: String,
     pub notes: Vec<String>,
 }
@@ -1118,6 +1139,12 @@ fn build_validation_harness_capability_entry(
     memory_validation_history: &MemoryValidationHistoryReport,
 ) -> PlatformCapabilityEntryReport {
     let current_status = if memory_validation_history
+        .controlled_canary_history
+        .recommendation_status
+        == "controlled_canary_repeated_clear_history"
+    {
+        "validation_harness_active_with_repeated_clear_canary_history".to_string()
+    } else if memory_validation_history
         .cleanup_stage_recommendation
         .recommendation_status
         == "recommendation_available"
@@ -1154,6 +1181,10 @@ fn build_validation_harness_capability_entry(
         summary: memory_validation.summary.clone(),
         notes: vec![
             memory_validation_history.summary.clone(),
+            memory_validation_history
+                .controlled_canary_history
+                .summary
+                .clone(),
             memory_validation_history
                 .cleanup_stage_recommendation
                 .summary
@@ -2097,12 +2128,38 @@ fn default_memory_validation_history_report() -> MemoryValidationHistoryReport {
         best_stage_score_avg: None,
         last_recorded_at: None,
         stage_trends: vec![],
+        controlled_canary_history: default_controlled_canary_history_report(),
         cleanup_stage_recommendation: default_memory_validation_stage_recommendation_report(),
         summary:
             "NullContext had not yet derived or persisted cross-session memory-validation history for this report."
                 .to_string(),
         notes: vec![
             "Older reports may not include the cross-session memory-validation history section."
+                .to_string(),
+        ],
+    }
+}
+
+fn default_controlled_canary_history_report() -> ControlledCanaryHistoryReport {
+    ControlledCanaryHistoryReport {
+        history_status: "controlled_canary_history_not_derived".to_string(),
+        recommendation_status: "controlled_canary_not_exercised".to_string(),
+        runs_with_canary_requested: 0,
+        runs_with_completed_passes: 0,
+        total_requested_passes: 0,
+        total_completed_passes: 0,
+        total_failed_passes: 0,
+        clear_runs: 0,
+        marker_detection_runs: 0,
+        mixed_or_inconclusive_runs: 0,
+        backend_unsupported_runs: 0,
+        latest_execution_status: "controlled_canary_not_run_yet".to_string(),
+        latest_aggregate_signal_status: "controlled_canary_not_run_yet".to_string(),
+        summary:
+            "NullContext had not yet derived repeated dedicated controlled canary history for this report."
+                .to_string(),
+        notes: vec![
+            "Older reports may not include repeated controlled canary history guidance."
                 .to_string(),
         ],
     }

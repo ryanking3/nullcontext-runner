@@ -1462,6 +1462,13 @@ export function PrivacyReportViewer({
 
             <div className="report-risk-block">
               <p>
+                <strong>controlled canary history:</strong>{" "}
+                {currentReport.memory_validation_history.controlled_canary_history.summary}
+              </p>
+            </div>
+
+            <div className="report-risk-block">
+              <p>
                 <strong>cleanup stage recommendation:</strong>{" "}
                 {currentReport.memory_validation_history.cleanup_stage_recommendation.summary}
               </p>
@@ -1538,6 +1545,122 @@ export function PrivacyReportViewer({
                 },
               ]}
             />
+
+            <details className="report-detail">
+              <summary>
+                controlled canary history
+                <span
+                  className={inspectionStatusClass(
+                    currentReport.memory_validation_history.controlled_canary_history
+                      .recommendation_status
+                  )}
+                >
+                  {humanizeSnakeCase(
+                    currentReport.memory_validation_history.controlled_canary_history
+                      .recommendation_status
+                  )}
+                </span>
+              </summary>
+
+              <ReportGrid
+                entries={[
+                  {
+                    label: "history status",
+                    value: humanizeSnakeCase(
+                      currentReport.memory_validation_history.controlled_canary_history
+                        .history_status
+                    ),
+                  },
+                  {
+                    label: "runs with canary",
+                    value: String(
+                      currentReport.memory_validation_history.controlled_canary_history
+                        .runs_with_canary_requested
+                    ),
+                  },
+                  {
+                    label: "runs with completed passes",
+                    value: String(
+                      currentReport.memory_validation_history.controlled_canary_history
+                        .runs_with_completed_passes
+                    ),
+                  },
+                  {
+                    label: "requested passes",
+                    value: String(
+                      currentReport.memory_validation_history.controlled_canary_history
+                        .total_requested_passes
+                    ),
+                  },
+                  {
+                    label: "completed passes",
+                    value: String(
+                      currentReport.memory_validation_history.controlled_canary_history
+                        .total_completed_passes
+                    ),
+                  },
+                  {
+                    label: "failed passes",
+                    value: String(
+                      currentReport.memory_validation_history.controlled_canary_history
+                        .total_failed_passes
+                    ),
+                  },
+                  {
+                    label: "clear runs",
+                    value: String(
+                      currentReport.memory_validation_history.controlled_canary_history.clear_runs
+                    ),
+                  },
+                  {
+                    label: "marker-detection runs",
+                    value: String(
+                      currentReport.memory_validation_history.controlled_canary_history
+                        .marker_detection_runs
+                    ),
+                  },
+                  {
+                    label: "mixed or inconclusive runs",
+                    value: String(
+                      currentReport.memory_validation_history.controlled_canary_history
+                        .mixed_or_inconclusive_runs
+                    ),
+                  },
+                  {
+                    label: "backend unsupported runs",
+                    value: String(
+                      currentReport.memory_validation_history.controlled_canary_history
+                        .backend_unsupported_runs
+                    ),
+                  },
+                  {
+                    label: "latest execution",
+                    value: humanizeSnakeCase(
+                      currentReport.memory_validation_history.controlled_canary_history
+                        .latest_execution_status
+                    ),
+                  },
+                  {
+                    label: "latest aggregate signal",
+                    value: humanizeSnakeCase(
+                      currentReport.memory_validation_history.controlled_canary_history
+                        .latest_aggregate_signal_status
+                    ),
+                  },
+                ]}
+              />
+
+              {currentReport.memory_validation_history.controlled_canary_history.notes.length >
+                0 && (
+                <ul className="report-note-list">
+                  {currentReport.memory_validation_history.controlled_canary_history.notes.map(
+                    (note, index) => (
+                      <li key={`memory-validation-history-canary-note-${index}`}>{note}</li>
+                    )
+                  )}
+                </ul>
+              )}
+            </details>
 
             <details className="report-detail">
               <summary>
