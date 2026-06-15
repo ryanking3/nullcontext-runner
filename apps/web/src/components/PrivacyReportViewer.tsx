@@ -1460,6 +1460,13 @@ export function PrivacyReportViewer({
               <p>{currentReport.memory_validation_history.summary}</p>
             </div>
 
+            <div className="report-risk-block">
+              <p>
+                <strong>cleanup stage recommendation:</strong>{" "}
+                {currentReport.memory_validation_history.cleanup_stage_recommendation.summary}
+              </p>
+            </div>
+
             <ReportGrid
               entries={[
                 {
@@ -1531,6 +1538,135 @@ export function PrivacyReportViewer({
                 },
               ]}
             />
+
+            <details className="report-detail">
+              <summary>
+                cleanup stage recommendation
+                <span
+                  className={inspectionStatusClass(
+                    currentReport.memory_validation_history.cleanup_stage_recommendation
+                      .recommendation_status
+                  )}
+                >
+                  {humanizeSnakeCase(
+                    currentReport.memory_validation_history.cleanup_stage_recommendation
+                      .recommendation_status
+                  )}
+                </span>
+              </summary>
+
+              <ReportGrid
+                entries={[
+                  {
+                    label: "recommended stage",
+                    value:
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .stage_label || "none",
+                  },
+                  {
+                    label: "stage id",
+                    value:
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .stage_id || "none",
+                  },
+                  {
+                    label: "stage kind",
+                    value:
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .stage_kind
+                        ? humanizeSnakeCase(
+                            currentReport.memory_validation_history.cleanup_stage_recommendation
+                              .stage_kind
+                          )
+                        : "none",
+                  },
+                  {
+                    label: "compared stages",
+                    value: String(
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .compared_stage_count
+                    ),
+                  },
+                  {
+                    label: "runs recorded",
+                    value: String(
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .runs_recorded
+                    ),
+                  },
+                  {
+                    label: "avg validation score",
+                    value:
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .avg_validation_score === undefined ||
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .avg_validation_score === null
+                        ? "unavailable"
+                        : `${currentReport.memory_validation_history.cleanup_stage_recommendation.avg_validation_score.toFixed(1)}/100`,
+                  },
+                  {
+                    label: "effectiveness score",
+                    value:
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .effectiveness_score === undefined ||
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .effectiveness_score === null
+                        ? "unavailable"
+                        : currentReport.memory_validation_history.cleanup_stage_recommendation.effectiveness_score.toFixed(
+                            1
+                          ),
+                  },
+                  {
+                    label: "improved runs",
+                    value: String(
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .improved_runs
+                    ),
+                  },
+                  {
+                    label: "unchanged runs",
+                    value: String(
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .unchanged_runs
+                    ),
+                  },
+                  {
+                    label: "worsened runs",
+                    value: String(
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .worsened_runs
+                    ),
+                  },
+                  {
+                    label: "inconclusive runs",
+                    value: String(
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .inconclusive_runs
+                    ),
+                  },
+                  {
+                    label: "marker-detection runs",
+                    value: String(
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .marker_detection_runs
+                    ),
+                  },
+                ]}
+              />
+
+              {currentReport.memory_validation_history.cleanup_stage_recommendation.notes.length >
+                0 && (
+                <ul className="report-note-list">
+                  {currentReport.memory_validation_history.cleanup_stage_recommendation.notes.map(
+                    (note, index) => (
+                      <li key={`memory-validation-history-recommendation-note-${index}`}>
+                        {note}
+                      </li>
+                    )
+                  )}
+                </ul>
+              )}
+            </details>
 
             <details className="report-detail">
               <summary>

@@ -340,11 +340,19 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.memory_validation_history.stage_trends =
         legacyMemoryValidationHistoryReport().stage_trends;
     }
+    if (parsed.memory_validation_history.cleanup_stage_recommendation === undefined) {
+      parsed.memory_validation_history.cleanup_stage_recommendation =
+        legacyMemoryValidationHistoryReport().cleanup_stage_recommendation;
+    }
     parsed.memory_validation_history.stage_trends =
       parsed.memory_validation_history.stage_trends.map((trend) => ({
         ...legacyMemoryValidationStageTrendReport(),
         ...trend,
       }));
+    parsed.memory_validation_history.cleanup_stage_recommendation = {
+      ...legacyMemoryValidationStageRecommendationReport(),
+      ...parsed.memory_validation_history.cleanup_stage_recommendation,
+    };
 
     if (!parsed.platform_capability_matrix) {
       parsed.platform_capability_matrix = legacyPlatformCapabilityMatrixReport();
@@ -559,6 +567,7 @@ function legacyMemoryValidationHistoryReport() {
     best_stage_score_avg: null,
     last_recorded_at: null,
     stage_trends: [],
+    cleanup_stage_recommendation: legacyMemoryValidationStageRecommendationReport(),
     summary:
       "This older report did not include cross-session memory-validation history.",
     notes: [
@@ -589,6 +598,26 @@ function legacyMemoryValidationStageTrendReport() {
     latest_validation_verdict: "legacy_status_unknown",
     latest_marker_evidence_status: "legacy_status_unknown",
     summary: "This older report did not include cleanup-stage trend details.",
+    notes: [],
+  };
+}
+
+function legacyMemoryValidationStageRecommendationReport() {
+  return {
+    recommendation_status: "recommendation_not_derived",
+    stage_id: null,
+    stage_label: null,
+    stage_kind: null,
+    compared_stage_count: 0,
+    runs_recorded: 0,
+    avg_validation_score: null,
+    effectiveness_score: null,
+    improved_runs: 0,
+    unchanged_runs: 0,
+    worsened_runs: 0,
+    inconclusive_runs: 0,
+    marker_detection_runs: 0,
+    summary: "This older report did not include cleanup-stage recommendation guidance.",
     notes: [],
   };
 }

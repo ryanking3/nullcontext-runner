@@ -300,6 +300,25 @@ export type MemoryValidationHistoryReportData = {
   best_stage_score_avg?: number | null;
   last_recorded_at?: string | null;
   stage_trends: MemoryValidationStageTrendReportData[];
+  cleanup_stage_recommendation: MemoryValidationStageRecommendationReportData;
+  summary: string;
+  notes: string[];
+};
+
+export type MemoryValidationStageRecommendationReportData = {
+  recommendation_status: string;
+  stage_id?: string | null;
+  stage_label?: string | null;
+  stage_kind?: string | null;
+  compared_stage_count: number;
+  runs_recorded: number;
+  avg_validation_score?: number | null;
+  effectiveness_score?: number | null;
+  improved_runs: number;
+  unchanged_runs: number;
+  worsened_runs: number;
+  inconclusive_runs: number;
+  marker_detection_runs: number;
   summary: string;
   notes: string[];
 };

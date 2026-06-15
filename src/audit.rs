@@ -221,6 +221,27 @@ pub struct MemoryValidationHistoryReport {
     pub last_recorded_at: Option<String>,
     #[serde(default)]
     pub stage_trends: Vec<MemoryValidationStageTrendReport>,
+    #[serde(default = "default_memory_validation_stage_recommendation_report")]
+    pub cleanup_stage_recommendation: MemoryValidationStageRecommendationReport,
+    pub summary: String,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryValidationStageRecommendationReport {
+    pub recommendation_status: String,
+    pub stage_id: Option<String>,
+    pub stage_label: Option<String>,
+    pub stage_kind: Option<String>,
+    pub compared_stage_count: u32,
+    pub runs_recorded: u32,
+    pub avg_validation_score: Option<f64>,
+    pub effectiveness_score: Option<f64>,
+    pub improved_runs: u32,
+    pub unchanged_runs: u32,
+    pub worsened_runs: u32,
+    pub inconclusive_runs: u32,
+    pub marker_detection_runs: u32,
     pub summary: String,
     pub notes: Vec<String>,
 }
@@ -1089,7 +1110,13 @@ fn build_validation_harness_capability_entry(
     memory_validation: &MemoryValidationReport,
     memory_validation_history: &MemoryValidationHistoryReport,
 ) -> PlatformCapabilityEntryReport {
-    let current_status = if memory_validation.controlled_canary_run.requested_passes > 0
+    let current_status = if memory_validation_history
+        .cleanup_stage_recommendation
+        .recommendation_status
+        == "recommendation_available"
+    {
+        "validation_harness_active_with_repeated_stage_guidance".to_string()
+    } else if memory_validation.controlled_canary_run.requested_passes > 0
         && memory_validation_history.runs_recorded > 0
     {
         "validation_harness_active_with_cross_session_history".to_string()
@@ -1120,6 +1147,10 @@ fn build_validation_harness_capability_entry(
         summary: memory_validation.summary.clone(),
         notes: vec![
             memory_validation_history.summary.clone(),
+            memory_validation_history
+                .cleanup_stage_recommendation
+                .summary
+                .clone(),
             format!(
                 "Controlled canary aggregate signal: {}.",
                 memory_validation
@@ -2059,12 +2090,38 @@ fn default_memory_validation_history_report() -> MemoryValidationHistoryReport {
         best_stage_score_avg: None,
         last_recorded_at: None,
         stage_trends: vec![],
+        cleanup_stage_recommendation: default_memory_validation_stage_recommendation_report(),
         summary:
             "NullContext had not yet derived or persisted cross-session memory-validation history for this report."
                 .to_string(),
         notes: vec![
             "Older reports may not include the cross-session memory-validation history section."
                 .to_string(),
+        ],
+    }
+}
+
+fn default_memory_validation_stage_recommendation_report(
+) -> MemoryValidationStageRecommendationReport {
+    MemoryValidationStageRecommendationReport {
+        recommendation_status: "recommendation_not_derived".to_string(),
+        stage_id: None,
+        stage_label: None,
+        stage_kind: None,
+        compared_stage_count: 0,
+        runs_recorded: 0,
+        avg_validation_score: None,
+        effectiveness_score: None,
+        improved_runs: 0,
+        unchanged_runs: 0,
+        worsened_runs: 0,
+        inconclusive_runs: 0,
+        marker_detection_runs: 0,
+        summary:
+            "NullContext had not yet derived a repeated-evidence cleanup-stage recommendation for this report."
+                .to_string(),
+        notes: vec![
+            "Older reports may not include cleanup-stage recommendation guidance.".to_string(),
         ],
     }
 }

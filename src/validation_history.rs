@@ -1,5 +1,6 @@
 use crate::audit::{
-    MemoryValidationHistoryReport, MemoryValidationStageTrendReport, PrivacyReport,
+    MemoryValidationHistoryReport, MemoryValidationStageRecommendationReport,
+    MemoryValidationStageTrendReport, PrivacyReport,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -95,6 +96,8 @@ pub fn apply_and_record_memory_validation_history(
                 best_stage_score_avg: None,
                 last_recorded_at: None,
                 stage_trends: vec![],
+                cleanup_stage_recommendation:
+                    default_stage_recommendation_report("history_registry_unavailable"),
                 summary:
                     "NullContext could not load the cross-session validation-history registry for this report."
                         .to_string(),
@@ -211,6 +214,9 @@ fn build_history_report_from_registry(
             best_stage_score_avg: None,
             last_recorded_at: None,
             stage_trends: vec![],
+            cleanup_stage_recommendation: default_stage_recommendation_report(
+                "history_scope_empty",
+            ),
             summary:
                 "NullContext defined the cross-session validation-history scope, but this is the first recorded run in that scope."
                     .to_string(),
@@ -268,6 +274,8 @@ fn build_history_report_from_registry(
         )
     };
     let stage_trends = build_stage_trends(&matching_entries);
+    let cleanup_stage_recommendation = build_stage_recommendation(&stage_trends);
+    let recommendation_summary = cleanup_stage_recommendation.summary.clone();
 
     MemoryValidationHistoryReport {
         history_status: "history_recorded".to_string(),
@@ -291,15 +299,17 @@ fn build_history_report_from_registry(
         best_stage_score_avg,
         last_recorded_at: matching_entries.first().map(|entry| entry.recorded_at.clone()),
         stage_trends,
+        cleanup_stage_recommendation,
         summary: format!(
-            "NullContext has recorded {} validation run(s) for scope {}. {} run(s) still showed marker-detection evidence, {} run(s) achieved fully clear repeated canary passes, and the best-stage score average is {}.",
+            "NullContext has recorded {} validation run(s) for scope {}. {} run(s) still showed marker-detection evidence, {} run(s) achieved fully clear repeated canary passes, and the best-stage score average is {}. {}",
             runs_recorded,
             history_scope_label(report),
             marker_detection_runs,
             clear_canary_runs,
             best_stage_score_avg
                 .map(|value| format!("{value:.1}/100"))
-                .unwrap_or_else(|| "unavailable".to_string())
+                .unwrap_or_else(|| "unavailable".to_string()),
+            recommendation_summary
         ),
         notes: vec![
             "This scope groups validation history by model id, host platform, and whether GPU offload was requested."
@@ -486,6 +496,179 @@ fn build_stage_trends(
     });
 
     stage_trends
+}
+
+fn build_stage_recommendation(
+    stage_trends: &[MemoryValidationStageTrendReport],
+) -> MemoryValidationStageRecommendationReport {
+    if stage_trends.is_empty() {
+        return default_stage_recommendation_report("no_stage_history_available");
+    }
+
+    let best = stage_trends
+        .iter()
+        .map(|trend| (trend, stage_effectiveness_score(trend)))
+        .max_by(|(left_trend, left_score), (right_trend, right_score)| {
+            left_score
+                .total_cmp(right_score)
+                .then_with(|| {
+                    left_trend
+                        .avg_validation_score
+                        .total_cmp(&right_trend.avg_validation_score)
+                })
+                .then_with(|| left_trend.runs_recorded.cmp(&right_trend.runs_recorded))
+                .then_with(|| {
+                    right_trend
+                        .marker_detection_runs
+                        .cmp(&left_trend.marker_detection_runs)
+                })
+        });
+
+    let Some((trend, effectiveness_score)) = best else {
+        return default_stage_recommendation_report("no_stage_history_available");
+    };
+
+    let recommendation_status = if trend.runs_recorded < 2 {
+        "recommendation_waiting_for_repeated_runs"
+    } else if trend.marker_detection_runs > 0 {
+        "recommendation_limited_by_marker_persistence"
+    } else if trend.worsened_runs > 0 {
+        "recommendation_limited_by_regressions"
+    } else if trend.improved_runs == 0 && trend.strong_or_moderate_runs == 0 {
+        "recommendation_mixed_no_clear_improvement"
+    } else if trend.inconclusive_runs * 2 >= trend.runs_recorded {
+        "recommendation_limited_by_inconclusive_history"
+    } else {
+        "recommendation_available"
+    };
+
+    let mut notes = vec![
+        format!(
+            "Compared across {} cleanup stage(s) recorded in this model/platform/GPU-offload scope.",
+            stage_trends.len()
+        ),
+        "This recommendation is comparative operator guidance, not proof of full RAM or VRAM sanitization."
+            .to_string(),
+    ];
+
+    if trend.marker_detection_runs > 0 {
+        notes.push(
+            "The leading stage still has repeated marker-detection evidence in its history, so treat the recommendation as limited rather than clean."
+                .to_string(),
+        );
+    }
+    if trend.worsened_runs > 0 {
+        notes.push(
+            "The leading stage also has at least one repeated worsened outcome, so it should not be treated as uniformly safe."
+                .to_string(),
+        );
+    }
+    if trend.inconclusive_runs > 0 {
+        notes.push(
+            "Some recorded runs for this stage were still inconclusive, which means the recommendation remains visibility-limited."
+                .to_string(),
+        );
+    }
+
+    let summary = match recommendation_status {
+        "recommendation_available" => format!(
+            "{} is the current best repeated cleanup stage for this scope based on {} run(s) with an average validation score of {:.1}/100 and no repeated marker detections.",
+            trend.stage_label,
+            trend.runs_recorded,
+            trend.avg_validation_score
+        ),
+        "recommendation_waiting_for_repeated_runs" => format!(
+            "{} is the current top-scoring cleanup stage, but NullContext has only recorded {} run(s) for it in this scope so far.",
+            trend.stage_label,
+            trend.runs_recorded
+        ),
+        "recommendation_limited_by_marker_persistence" => format!(
+            "{} currently ranks highest by repeated evidence, but its history still includes {} marker-detection run(s).",
+            trend.stage_label,
+            trend.marker_detection_runs
+        ),
+        "recommendation_limited_by_regressions" => format!(
+            "{} currently ranks highest overall, but its history still includes {} worsened run(s).",
+            trend.stage_label,
+            trend.worsened_runs
+        ),
+        "recommendation_limited_by_inconclusive_history" => format!(
+            "{} currently ranks highest overall, but too many of its runs remained inconclusive to call it a clean winner yet.",
+            trend.stage_label
+        ),
+        _ => format!(
+            "{} currently ranks highest overall, but the repeated evidence still looks mixed rather than clearly improved.",
+            trend.stage_label
+        ),
+    };
+
+    MemoryValidationStageRecommendationReport {
+        recommendation_status: recommendation_status.to_string(),
+        stage_id: Some(trend.stage_id.clone()),
+        stage_label: Some(trend.stage_label.clone()),
+        stage_kind: Some(trend.stage_kind.clone()),
+        compared_stage_count: stage_trends.len() as u32,
+        runs_recorded: trend.runs_recorded,
+        avg_validation_score: Some(trend.avg_validation_score),
+        effectiveness_score: Some(effectiveness_score),
+        improved_runs: trend.improved_runs,
+        unchanged_runs: trend.unchanged_runs,
+        worsened_runs: trend.worsened_runs,
+        inconclusive_runs: trend.inconclusive_runs,
+        marker_detection_runs: trend.marker_detection_runs,
+        summary,
+        notes,
+    }
+}
+
+fn stage_effectiveness_score(trend: &MemoryValidationStageTrendReport) -> f64 {
+    trend.avg_validation_score
+        + (trend.improved_runs as f64 * 8.0)
+        + (trend.unchanged_runs as f64 * 1.5)
+        + (trend.strong_or_moderate_runs as f64 * 4.0)
+        + (trend.clear_marker_support_runs as f64 * 3.0)
+        + (trend.helper_scan_clear_runs as f64 * 2.0)
+        - (trend.worsened_runs as f64 * 12.0)
+        - (trend.marker_detection_runs as f64 * 10.0)
+        - (trend.helper_scan_marker_detection_runs as f64 * 8.0)
+        - (trend.inconclusive_runs as f64 * 2.0)
+}
+
+fn default_stage_recommendation_report(
+    recommendation_status: &str,
+) -> MemoryValidationStageRecommendationReport {
+    let summary = match recommendation_status {
+        "history_registry_unavailable" => {
+            "NullContext could not derive a cleanup-stage recommendation because the validation-history registry was unavailable."
+        }
+        "history_scope_empty" => {
+            "NullContext has not yet recorded enough history in this scope to recommend a cleanup stage."
+        }
+        _ => {
+            "NullContext does not yet have enough repeated cleanup-stage history to recommend a best stage for this scope."
+        }
+    };
+
+    MemoryValidationStageRecommendationReport {
+        recommendation_status: recommendation_status.to_string(),
+        stage_id: None,
+        stage_label: None,
+        stage_kind: None,
+        compared_stage_count: 0,
+        runs_recorded: 0,
+        avg_validation_score: None,
+        effectiveness_score: None,
+        improved_runs: 0,
+        unchanged_runs: 0,
+        worsened_runs: 0,
+        inconclusive_runs: 0,
+        marker_detection_runs: 0,
+        summary: summary.to_string(),
+        notes: vec![
+            "A repeated-evidence recommendation only becomes meaningful once multiple cleanup-stage outcomes have been recorded in the same scope."
+                .to_string(),
+        ],
+    }
 }
 
 fn helper_process_scan_signal_status(overall_status: &str) -> String {
