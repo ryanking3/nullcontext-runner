@@ -779,6 +779,21 @@ fn build_stage_recommendation(
     } else {
         "recommendation_available"
     };
+    let clean_claim_status = if trend.runs_recorded < 2 {
+        "clean_claim_blocked_by_insufficient_repeated_runs"
+    } else if trend.marker_detection_runs > 0 {
+        "clean_claim_blocked_by_marker_persistence"
+    } else if trend.worsened_runs > 0 {
+        "clean_claim_blocked_by_worsened_history"
+    } else if trend.inconclusive_runs > 0 {
+        "clean_claim_blocked_by_inconclusive_history"
+    } else if effectiveness_gap.is_some_and(|gap| gap <= 3.0) {
+        "clean_claim_blocked_by_narrow_lead_over_runner_up"
+    } else if recommendation_status != "recommendation_available" {
+        "clean_claim_blocked_by_limited_recommendation_status"
+    } else {
+        "clean_claim_eligible_under_current_thresholds"
+    };
 
     let mut notes = vec![
         format!(
@@ -871,9 +886,40 @@ fn build_stage_recommendation(
             trend.stage_label
         ),
     };
+    let clean_claim_summary = match clean_claim_status {
+        "clean_claim_eligible_under_current_thresholds" => format!(
+            "{} is not only the current best repeated stage, but also the current cleanest stage candidate under the in-report thresholds.",
+            trend.stage_label
+        ),
+        "clean_claim_blocked_by_marker_persistence" => format!(
+            "{} is currently the best repeated stage, but it is not a clean stage candidate because marker persistence still exists in its history.",
+            trend.stage_label
+        ),
+        "clean_claim_blocked_by_worsened_history" => format!(
+            "{} is currently the best repeated stage, but it is not a clean stage candidate because its history still includes worsened runs.",
+            trend.stage_label
+        ),
+        "clean_claim_blocked_by_inconclusive_history" => format!(
+            "{} is currently the best repeated stage, but it is not a clean stage candidate because some repeated runs remain inconclusive.",
+            trend.stage_label
+        ),
+        "clean_claim_blocked_by_narrow_lead_over_runner_up" => format!(
+            "{} is currently ahead, but the lead over the runner-up is too narrow to treat it as a clearly cleaner stage yet.",
+            trend.stage_label
+        ),
+        "clean_claim_blocked_by_insufficient_repeated_runs" => format!(
+            "{} is currently the best stage available, but there are not yet enough repeated runs to treat it as a clean stage candidate.",
+            trend.stage_label
+        ),
+        _ => format!(
+            "{} is currently the best stage available, but the recommendation still does not support a stronger clean-stage claim yet.",
+            trend.stage_label
+        ),
+    };
 
     MemoryValidationStageRecommendationReport {
         recommendation_status: recommendation_status.to_string(),
+        clean_claim_status: clean_claim_status.to_string(),
         stage_id: Some(trend.stage_id.clone()),
         stage_label: Some(trend.stage_label.clone()),
         stage_kind: Some(trend.stage_kind.clone()),
@@ -896,6 +942,7 @@ fn build_stage_recommendation(
         inconclusive_runs: trend.inconclusive_runs,
         marker_detection_runs: trend.marker_detection_runs,
         summary,
+        clean_claim_summary,
         notes,
     }
 }
@@ -917,8 +964,8 @@ fn build_release_gate(
         && cleanup_stage_recommendation.inconclusive_runs
             <= max_inconclusive_runs_allowed_for_clean_stage
         && matches!(
-            cleanup_stage_recommendation.recommendation_status.as_str(),
-            "recommendation_available"
+            cleanup_stage_recommendation.clean_claim_status.as_str(),
+            "clean_claim_eligible_under_current_thresholds"
         );
 
     let cleanup_stage_gate_status = if cleanup_stage_recommendation.runs_recorded
@@ -936,6 +983,10 @@ fn build_release_gate(
         > max_inconclusive_runs_allowed_for_clean_stage
     {
         "cleanup_stage_gate_blocked_by_inconclusive_runs"
+    } else if cleanup_stage_recommendation.clean_claim_status
+        == "clean_claim_blocked_by_narrow_lead_over_runner_up"
+    {
+        "cleanup_stage_gate_blocked_by_narrow_lead_over_runner_up"
     } else if cleanup_stage_recommendation.recommendation_status != "recommendation_available" {
         "cleanup_stage_gate_limited_by_recommendation_status"
     } else {
@@ -1087,6 +1138,7 @@ fn default_stage_recommendation_report(
 
     MemoryValidationStageRecommendationReport {
         recommendation_status: recommendation_status.to_string(),
+        clean_claim_status: "clean_claim_not_derived".to_string(),
         stage_id: None,
         stage_label: None,
         stage_kind: None,
@@ -1107,6 +1159,9 @@ fn default_stage_recommendation_report(
         inconclusive_runs: 0,
         marker_detection_runs: 0,
         summary: summary.to_string(),
+        clean_claim_summary:
+            "NullContext does not yet have enough repeated cleanup-stage history to support a stronger clean-stage claim for this scope."
+                .to_string(),
         notes: vec![
             "A repeated-evidence recommendation only becomes meaningful once multiple cleanup-stage outcomes have been recorded in the same scope."
                 .to_string(),

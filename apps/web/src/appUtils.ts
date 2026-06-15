@@ -623,6 +623,7 @@ function legacyMemoryValidationStageTrendReport() {
 function legacyMemoryValidationStageRecommendationReport() {
   return {
     recommendation_status: "recommendation_not_derived",
+    clean_claim_status: "clean_claim_not_derived",
     stage_id: null,
     stage_label: null,
     stage_kind: null,
@@ -643,6 +644,8 @@ function legacyMemoryValidationStageRecommendationReport() {
     inconclusive_runs: 0,
     marker_detection_runs: 0,
     summary: "This older report did not include cleanup-stage recommendation guidance.",
+    clean_claim_summary:
+      "This older report did not separate 'best stage' from 'clean stage' guidance.",
     notes: [],
   };
 }

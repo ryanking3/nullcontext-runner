@@ -315,10 +315,10 @@ Done or largely done:
 - runner-up stage comparison and effectiveness-gap reporting
 - explicit repeated controlled-canary history reporting
 - explicit repeated-evidence release-gating thresholds in reports
+- explicit “best repeated stage” versus “clean stage candidate” semantics
 
 ### Remaining v1 Work
 
-- tighten recommendation semantics so “best stage” is clearly separated from “clean stage”
 - freeze v1 security claim wording
 
 ### v1 Exit Criteria
@@ -433,6 +433,157 @@ If we cannot say those things honestly, we are not done.
 Those are not required.
 
 But the absence of those things must be visible and explicit.
+
+---
+
+## Estimated Remaining Commits
+
+This is an estimate, not a promise.
+
+It is meant to answer: how much real work is still likely left before a truthful `v1`.
+
+Current rough estimate:
+
+- core security/evidence work across Tracks A-E: `18-28` commits
+- cross-cutting extra work: `6-10` commits
+- tests / validation / real-machine verification: `6-10` commits
+- docs / wording / claim-boundary pass: `3-5` commits
+- packaging / release prep: `4-7` commits
+- cleanup / polish / final pass: `3-5` commits
+
+Estimated total remaining before `v1`:
+
+- `40-65` commits
+
+### Track Breakdown
+
+### Track A: Direct Process Memory Scanning
+
+Estimated remaining:
+
+- `3-5` commits
+
+Expected areas:
+
+- tighten stage-local versus fallback scan attribution
+- improve repeated stage-local process-scan interpretation
+- possibly one more platform/backend pass if it adds real evidence rather than noise
+
+### Track B: llama.cpp Allocator / KV Introspection
+
+Estimated remaining:
+
+- `6-10` commits
+
+Expected areas:
+
+- stronger instrumented-runtime path
+- more direct allocator/KV event capture
+- better report semantics for observed versus supported versus unknown
+- better tie-in between allocator/KV signals and cleanup interpretation
+
+### Track C: CUDA / NVIDIA Inspection
+
+Estimated remaining:
+
+- `5-8` commits
+
+Expected areas:
+
+- stronger Windows/NVIDIA inspection truth
+- API-level or driver-level investigation beyond current host-tool reporting
+- tighter claim boundaries around PID visibility, allocation visibility, and allocator unknowns
+
+### Track D: Experimental Cleanup / Sanitization
+
+Estimated remaining:
+
+- `2-4` commits
+
+Expected areas:
+
+- only add or keep cleanup stages that produce better evidence
+- possibly one or two more invasive experiments if they materially improve truth
+- tighten stage-selection interpretation after more repeated runs
+
+### Track E: Validation and Release Gating
+
+Estimated remaining:
+
+- `2-4` commits
+
+Expected areas:
+
+- keep recommendation and gate semantics honest as more runs accumulate
+- tune repeated-evidence thresholds against real history
+- finish final release-gating semantics and wording
+
+### Cross-Cutting Extra Work
+
+Estimated remaining:
+
+- `6-10` commits
+
+Expected areas:
+
+- connect allocator/KV truth to RAM/VRAM evidence summaries
+- improve capability-matrix wording and consistency
+- close gaps between backend report fields and frontend surfaces
+- make residual-risk summaries more uniform and less repetitive
+
+### Tests And Validation
+
+Estimated remaining:
+
+- `6-10` commits
+
+Expected areas:
+
+- targeted Rust tests for report derivation logic
+- validation-history compatibility coverage for older report shapes
+- manual real-machine verification passes:
+  - macOS
+  - Windows/NVIDIA
+  - repeated canary runs
+  - repeated cleanup-stage runs
+
+### Docs And Claim Wording
+
+Estimated remaining:
+
+- `3-5` commits
+
+Expected areas:
+
+- freeze README / roadmap / agent wording around final evidence level
+- tighten “best effort” versus “observed directly” language everywhere
+- final operator-facing explanation of what NullContext can and cannot claim
+
+### Packaging And Release Prep
+
+Estimated remaining:
+
+- `4-7` commits
+
+Expected areas:
+
+- release build checks
+- config/example cleanup
+- frontend/backend startup ergonomics
+- any final packaging scripts or release notes work
+
+### Cleanup And Final Polish
+
+Estimated remaining:
+
+- `3-5` commits
+
+Expected areas:
+
+- delete or simplify stale temporary wording
+- remove low-value duplication in reports/UI
+- final code cleanup after the larger security slices settle
+- final roadmap/checklist closeout
 
 ---
 

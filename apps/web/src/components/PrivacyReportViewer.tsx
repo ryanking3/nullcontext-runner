@@ -1479,6 +1479,13 @@ export function PrivacyReportViewer({
                 <strong>cleanup stage recommendation:</strong>{" "}
                 {currentReport.memory_validation_history.cleanup_stage_recommendation.summary}
               </p>
+              <p>
+                <strong>clean-stage claim:</strong>{" "}
+                {
+                  currentReport.memory_validation_history.cleanup_stage_recommendation
+                    .clean_claim_summary
+                }
+              </p>
             </div>
 
             <ReportGrid
@@ -1781,6 +1788,13 @@ export function PrivacyReportViewer({
 
               <ReportGrid
                 entries={[
+                  {
+                    label: "clean-claim status",
+                    value: humanizeSnakeCase(
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .clean_claim_status
+                    ),
+                  },
                   {
                     label: "recommended stage",
                     value:

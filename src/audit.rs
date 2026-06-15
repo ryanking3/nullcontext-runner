@@ -269,6 +269,7 @@ pub struct ControlledCanaryHistoryReport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryValidationStageRecommendationReport {
     pub recommendation_status: String,
+    pub clean_claim_status: String,
     pub stage_id: Option<String>,
     pub stage_label: Option<String>,
     pub stage_kind: Option<String>,
@@ -289,6 +290,7 @@ pub struct MemoryValidationStageRecommendationReport {
     pub inconclusive_runs: u32,
     pub marker_detection_runs: u32,
     pub summary: String,
+    pub clean_claim_summary: String,
     pub notes: Vec<String>,
 }
 
@@ -1157,6 +1159,12 @@ fn build_validation_harness_capability_entry(
     memory_validation_history: &MemoryValidationHistoryReport,
 ) -> PlatformCapabilityEntryReport {
     let current_status = if memory_validation_history
+        .cleanup_stage_recommendation
+        .clean_claim_status
+        == "clean_claim_eligible_under_current_thresholds"
+    {
+        "validation_harness_active_with_clean_stage_candidate".to_string()
+    } else if memory_validation_history
         .controlled_canary_history
         .recommendation_status
         == "controlled_canary_repeated_clear_history"
@@ -1206,6 +1214,10 @@ fn build_validation_harness_capability_entry(
             memory_validation_history
                 .cleanup_stage_recommendation
                 .summary
+                .clone(),
+            memory_validation_history
+                .cleanup_stage_recommendation
+                .clean_claim_summary
                 .clone(),
             format!(
                 "Controlled canary aggregate signal: {}.",
@@ -2209,6 +2221,7 @@ fn default_memory_validation_stage_recommendation_report(
 ) -> MemoryValidationStageRecommendationReport {
     MemoryValidationStageRecommendationReport {
         recommendation_status: "recommendation_not_derived".to_string(),
+        clean_claim_status: "clean_claim_not_derived".to_string(),
         stage_id: None,
         stage_label: None,
         stage_kind: None,
@@ -2230,6 +2243,9 @@ fn default_memory_validation_stage_recommendation_report(
         marker_detection_runs: 0,
         summary:
             "NullContext had not yet derived a repeated-evidence cleanup-stage recommendation for this report."
+                .to_string(),
+        clean_claim_summary:
+            "NullContext had not yet separated 'best repeated stage' from 'clean enough stage' for this report."
                 .to_string(),
         notes: vec![
             "Older reports may not include cleanup-stage recommendation guidance.".to_string(),
