@@ -330,6 +330,11 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         ...legacyLlamaRuntimeIntrospectionReport(),
         ...parsed.llama_runtime.introspection,
       };
+      parsed.llama_runtime.introspection.cleanup_signal_matrix =
+        parsed.llama_runtime.introspection.cleanup_signal_matrix.map((entry) => ({
+          ...legacyLlamaRuntimeCleanupSignalEntryReport(),
+          ...entry,
+        }));
     }
 
     if (parsed.llama_runtime && !parsed.llama_runtime.vram_cleanup.comparison) {
@@ -509,8 +514,21 @@ function legacyLlamaRuntimeIntrospectionReport() {
       "This older report did not include the newer runtime introspection evidence-tier summary.",
     observed_signal_count: 0,
     observed_signal_sources: [],
+    cleanup_signal_matrix: [],
     observed_events: [],
     notes: [],
+  };
+}
+
+function legacyLlamaRuntimeCleanupSignalEntryReport() {
+  return {
+    signal_id: "legacy_cleanup_signal",
+    signal_label: "Legacy Cleanup Signal",
+    declared_support_status: "support_unknown_in_legacy_report",
+    observation_status: "signal_not_observed",
+    evidence_status: "legacy_cleanup_signal_evidence_unavailable",
+    summary:
+      "This older report did not include structured cleanup-signal coverage entries.",
   };
 }
 

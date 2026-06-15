@@ -459,8 +459,18 @@ export type LlamaRuntimeIntrospectionReport = {
   summary: string;
   observed_signal_count: number;
   observed_signal_sources: string[];
+  cleanup_signal_matrix: LlamaRuntimeCleanupSignalEntryReport[];
   observed_events: LlamaRuntimeIntrospectionEventReport[];
   notes: string[];
+};
+
+export type LlamaRuntimeCleanupSignalEntryReport = {
+  signal_id: string;
+  signal_label: string;
+  declared_support_status: string;
+  observation_status: string;
+  evidence_status: string;
+  summary: string;
 };
 
 export type LlamaRuntimeIntrospectionEventReport = {

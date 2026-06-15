@@ -505,8 +505,19 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub summary: String,
     pub observed_signal_count: u32,
     pub observed_signal_sources: Vec<String>,
+    pub cleanup_signal_matrix: Vec<LlamaRuntimeCleanupSignalEntryReport>,
     pub observed_events: Vec<LlamaRuntimeIntrospectionEventReport>,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlamaRuntimeCleanupSignalEntryReport {
+    pub signal_id: String,
+    pub signal_label: String,
+    pub declared_support_status: String,
+    pub observation_status: String,
+    pub evidence_status: String,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1756,6 +1767,19 @@ fn build_llama_runtime_introspection_report(
                 ),
                 observed_signal_count: observed_signals.len() as u32,
                 observed_signal_sources: observed_signal_sources(observed_signals),
+                cleanup_signal_matrix: vec![
+                    fallback_cleanup_signal_entry(
+                        "allocator_reset",
+                        "Allocator Reset",
+                        startup_failed,
+                    ),
+                    fallback_cleanup_signal_entry(
+                        "kv_cache_clear",
+                        "KV Cache Clear",
+                        startup_failed,
+                    ),
+                    fallback_cleanup_signal_entry("model_unload", "Model Unload", startup_failed),
+                ],
                 observed_events: observed_signals
                     .iter()
                     .map(map_runtime_introspection_signal)
@@ -1875,6 +1899,33 @@ fn build_llama_runtime_introspection_report(
     } else {
         "no_cleanup_signals_observed".to_string()
     };
+    let cleanup_signal_matrix = vec![
+        cleanup_signal_entry(
+            "allocator_reset",
+            "Allocator Reset",
+            capabilities
+                .allocator_reset_signal_status
+                .contains("available"),
+            observed_allocator_reset_signal,
+            startup_failed,
+        ),
+        cleanup_signal_entry(
+            "kv_cache_clear",
+            "KV Cache Clear",
+            declared_kv_cache_introspection_status.contains("available"),
+            observed_kv_clear,
+            startup_failed,
+        ),
+        cleanup_signal_entry(
+            "model_unload",
+            "Model Unload",
+            capabilities
+                .model_unload_signal_status
+                .contains("available"),
+            observed_model_unload_signal,
+            startup_failed,
+        ),
+    ];
 
     LlamaRuntimeIntrospectionReport {
         capability_source: capabilities.capability_source.clone(),
@@ -1972,8 +2023,105 @@ fn build_llama_runtime_introspection_report(
         },
         observed_signal_count,
         observed_signal_sources,
+        cleanup_signal_matrix,
         observed_events,
         notes,
+    }
+}
+
+fn fallback_cleanup_signal_entry(
+    signal_id: &str,
+    signal_label: &str,
+    startup_failed: bool,
+) -> LlamaRuntimeCleanupSignalEntryReport {
+    let observation_status = if startup_failed {
+        "signal_collection_interrupted_by_startup_failure"
+    } else {
+        "signal_not_observed"
+    };
+    let evidence_status = if startup_failed {
+        "signal_evidence_unavailable_due_to_startup_failure"
+    } else {
+        "signal_support_unknown_in_fallback_path"
+    };
+
+    LlamaRuntimeCleanupSignalEntryReport {
+        signal_id: signal_id.to_string(),
+        signal_label: signal_label.to_string(),
+        declared_support_status: "support_unknown_in_fallback_path".to_string(),
+        observation_status: observation_status.to_string(),
+        evidence_status: evidence_status.to_string(),
+        summary: if startup_failed {
+            format!(
+                "{} could not be evaluated because runtime startup failed before normal signal collection.",
+                signal_label
+            )
+        } else {
+            format!(
+                "{} remained on the stock fallback path, so NullContext could not verify direct support for this cleanup signal.",
+                signal_label
+            )
+        },
+    }
+}
+
+fn cleanup_signal_entry(
+    signal_id: &str,
+    signal_label: &str,
+    declared_support: bool,
+    observed: bool,
+    startup_failed: bool,
+) -> LlamaRuntimeCleanupSignalEntryReport {
+    let declared_support_status = if declared_support {
+        "declared_signal_support_available"
+    } else {
+        "declared_signal_support_unavailable"
+    };
+    let observation_status = if startup_failed {
+        "signal_collection_interrupted_by_startup_failure"
+    } else if observed {
+        "signal_observed"
+    } else {
+        "signal_not_observed"
+    };
+    let evidence_status = if startup_failed {
+        "signal_evidence_unavailable_due_to_startup_failure"
+    } else if observed {
+        "direct_signal_observed"
+    } else if declared_support {
+        "declared_support_but_signal_not_observed"
+    } else {
+        "no_declared_support_and_no_signal_observed"
+    };
+    let summary = if startup_failed {
+        format!(
+            "{} could not be evaluated because runtime startup failed before normal signal collection.",
+            signal_label
+        )
+    } else if observed {
+        format!(
+            "{} was observed directly during this runtime lifecycle.",
+            signal_label
+        )
+    } else if declared_support {
+        format!(
+            "{} was declared as supported by this runtime path, but no direct signal was observed for this session.",
+            signal_label
+        )
+    } else {
+        format!(
+            "{} was neither declared as supported nor observed directly for this session.",
+            signal_label
+        )
+    };
+
+    LlamaRuntimeCleanupSignalEntryReport {
+        signal_id: signal_id.to_string(),
+        signal_label: signal_label.to_string(),
+        declared_support_status: declared_support_status.to_string(),
+        observation_status: observation_status.to_string(),
+        evidence_status: evidence_status.to_string(),
+        summary,
     }
 }
 
