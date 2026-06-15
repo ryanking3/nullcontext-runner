@@ -1,6 +1,6 @@
 use crate::audit::{
     MemoryValidationHistoryReport, MemoryValidationStageRecommendationReport,
-    MemoryValidationStageTrendReport, PrivacyReport,
+    MemoryValidationStageTrendReport, PrivacyReport, ValidationReleaseGateReport,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -111,6 +111,7 @@ pub fn apply_and_record_memory_validation_history(
                 controlled_canary_history: build_controlled_canary_history(&[]),
                 cleanup_stage_recommendation:
                     default_stage_recommendation_report("history_registry_unavailable"),
+                release_gate: default_release_gate_report(),
                 summary:
                     "NullContext could not load the cross-session validation-history registry for this report."
                         .to_string(),
@@ -245,6 +246,7 @@ fn build_history_report_from_registry(
             cleanup_stage_recommendation: default_stage_recommendation_report(
                 "history_scope_empty",
             ),
+            release_gate: default_release_gate_report(),
             summary:
                 "NullContext defined the cross-session validation-history scope, but this is the first recorded run in that scope."
                     .to_string(),
@@ -304,8 +306,11 @@ fn build_history_report_from_registry(
     let stage_trends = build_stage_trends(&matching_entries);
     let controlled_canary_history = build_controlled_canary_history(&matching_entries);
     let cleanup_stage_recommendation = build_stage_recommendation(&stage_trends);
+    let release_gate =
+        build_release_gate(&cleanup_stage_recommendation, &controlled_canary_history);
     let canary_summary = controlled_canary_history.summary.clone();
     let recommendation_summary = cleanup_stage_recommendation.summary.clone();
+    let release_gate_summary = release_gate.summary.clone();
 
     MemoryValidationHistoryReport {
         history_status: "history_recorded".to_string(),
@@ -331,8 +336,9 @@ fn build_history_report_from_registry(
         stage_trends,
         controlled_canary_history,
         cleanup_stage_recommendation,
+        release_gate,
         summary: format!(
-            "NullContext has recorded {} validation run(s) for scope {}. {} run(s) still showed marker-detection evidence, {} run(s) achieved fully clear repeated canary passes, and the best-stage score average is {}. {} {}",
+            "NullContext has recorded {} validation run(s) for scope {}. {} run(s) still showed marker-detection evidence, {} run(s) achieved fully clear repeated canary passes, and the best-stage score average is {}. {} {} {}",
             runs_recorded,
             history_scope_label(report),
             marker_detection_runs,
@@ -341,7 +347,8 @@ fn build_history_report_from_registry(
                 .map(|value| format!("{value:.1}/100"))
                 .unwrap_or_else(|| "unavailable".to_string()),
             canary_summary,
-            recommendation_summary
+            recommendation_summary,
+            release_gate_summary
         ),
         notes: vec![
             "This scope groups validation history by model id, host platform, and whether GPU offload was requested."
@@ -890,6 +897,163 @@ fn build_stage_recommendation(
         marker_detection_runs: trend.marker_detection_runs,
         summary,
         notes,
+    }
+}
+
+fn build_release_gate(
+    cleanup_stage_recommendation: &MemoryValidationStageRecommendationReport,
+    controlled_canary_history: &crate::audit::ControlledCanaryHistoryReport,
+) -> ValidationReleaseGateReport {
+    let min_stage_runs_required = 2;
+    let min_clear_canary_runs_required = 2;
+    let max_marker_detection_runs_allowed_for_clean_claim = 0;
+    let max_worsened_runs_allowed_for_clean_stage = 0;
+    let max_inconclusive_runs_allowed_for_clean_stage = 0;
+
+    let stage_gate_passed = cleanup_stage_recommendation.runs_recorded >= min_stage_runs_required
+        && cleanup_stage_recommendation.marker_detection_runs
+            <= max_marker_detection_runs_allowed_for_clean_claim
+        && cleanup_stage_recommendation.worsened_runs <= max_worsened_runs_allowed_for_clean_stage
+        && cleanup_stage_recommendation.inconclusive_runs
+            <= max_inconclusive_runs_allowed_for_clean_stage
+        && matches!(
+            cleanup_stage_recommendation.recommendation_status.as_str(),
+            "recommendation_available"
+        );
+
+    let cleanup_stage_gate_status = if cleanup_stage_recommendation.runs_recorded
+        < min_stage_runs_required
+    {
+        "cleanup_stage_gate_waiting_for_more_repeated_runs"
+    } else if cleanup_stage_recommendation.marker_detection_runs
+        > max_marker_detection_runs_allowed_for_clean_claim
+    {
+        "cleanup_stage_gate_blocked_by_marker_persistence"
+    } else if cleanup_stage_recommendation.worsened_runs > max_worsened_runs_allowed_for_clean_stage
+    {
+        "cleanup_stage_gate_blocked_by_worsened_runs"
+    } else if cleanup_stage_recommendation.inconclusive_runs
+        > max_inconclusive_runs_allowed_for_clean_stage
+    {
+        "cleanup_stage_gate_blocked_by_inconclusive_runs"
+    } else if cleanup_stage_recommendation.recommendation_status != "recommendation_available" {
+        "cleanup_stage_gate_limited_by_recommendation_status"
+    } else {
+        "cleanup_stage_gate_passed"
+    };
+
+    let controlled_canary_gate_passed = controlled_canary_history.clear_runs
+        >= min_clear_canary_runs_required
+        && controlled_canary_history.marker_detection_runs
+            <= max_marker_detection_runs_allowed_for_clean_claim
+        && controlled_canary_history.mixed_or_inconclusive_runs == 0
+        && controlled_canary_history.backend_unsupported_runs == 0
+        && controlled_canary_history.runs_with_completed_passes >= min_clear_canary_runs_required;
+
+    let controlled_canary_gate_status = if controlled_canary_history.runs_with_canary_requested == 0
+    {
+        "controlled_canary_gate_not_exercised"
+    } else if controlled_canary_history.runs_with_completed_passes < min_clear_canary_runs_required
+    {
+        "controlled_canary_gate_waiting_for_more_completed_history"
+    } else if controlled_canary_history.marker_detection_runs
+        > max_marker_detection_runs_allowed_for_clean_claim
+    {
+        "controlled_canary_gate_blocked_by_marker_persistence"
+    } else if controlled_canary_history.backend_unsupported_runs > 0 {
+        "controlled_canary_gate_blocked_by_backend_unsupported_runs"
+    } else if controlled_canary_history.mixed_or_inconclusive_runs > 0 {
+        "controlled_canary_gate_blocked_by_mixed_or_inconclusive_runs"
+    } else if controlled_canary_history.clear_runs < min_clear_canary_runs_required {
+        "controlled_canary_gate_waiting_for_more_clear_runs"
+    } else {
+        "controlled_canary_gate_passed"
+    };
+
+    let gate_status = if stage_gate_passed && controlled_canary_gate_passed {
+        "release_gate_repeated_evidence_threshold_met"
+    } else if !stage_gate_passed && !controlled_canary_gate_passed {
+        "release_gate_blocked_on_stage_and_canary_thresholds"
+    } else if !stage_gate_passed {
+        "release_gate_blocked_on_cleanup_stage_thresholds"
+    } else {
+        "release_gate_blocked_on_controlled_canary_thresholds"
+    };
+
+    let summary = match gate_status {
+        "release_gate_repeated_evidence_threshold_met" => {
+            "Repeated validation evidence currently meets the in-report release-gating threshold for both the leading cleanup stage and the dedicated controlled canary history."
+                .to_string()
+        }
+        "release_gate_blocked_on_stage_and_canary_thresholds" => {
+            "Repeated validation evidence does not yet meet the in-report release-gating threshold for either the leading cleanup stage or the dedicated controlled canary history."
+                .to_string()
+        }
+        "release_gate_blocked_on_cleanup_stage_thresholds" => {
+            "Dedicated controlled canary history is stronger than the cleanup-stage recommendation right now, but the cleanup-stage threshold is not met yet."
+                .to_string()
+        }
+        _ => {
+            "The cleanup-stage recommendation is stronger than the dedicated controlled canary history right now, but the repeated controlled canary threshold is not met yet."
+                .to_string()
+        }
+    };
+
+    let notes = vec![
+        format!(
+            "Cleanup-stage threshold requires at least {} repeated runs, {} marker-detection runs, {} worsened runs, and {} inconclusive runs for the recommended stage.",
+            min_stage_runs_required,
+            max_marker_detection_runs_allowed_for_clean_claim,
+            max_worsened_runs_allowed_for_clean_stage,
+            max_inconclusive_runs_allowed_for_clean_stage
+        ),
+        format!(
+            "Controlled-canary threshold requires at least {} clear completed runs, {} marker-detection runs, and no mixed/inconclusive or backend-unsupported history.",
+            min_clear_canary_runs_required,
+            max_marker_detection_runs_allowed_for_clean_claim
+        ),
+        format!(
+            "Current cleanup-stage gate: {}. Current controlled-canary gate: {}.",
+            cleanup_stage_gate_status.replace('_', " "),
+            controlled_canary_gate_status.replace('_', " ")
+        ),
+    ];
+
+    ValidationReleaseGateReport {
+        gate_status: gate_status.to_string(),
+        cleanup_stage_gate_status: cleanup_stage_gate_status.to_string(),
+        controlled_canary_gate_status: controlled_canary_gate_status.to_string(),
+        min_stage_runs_required,
+        min_clear_canary_runs_required,
+        max_marker_detection_runs_allowed_for_clean_claim,
+        max_worsened_runs_allowed_for_clean_stage,
+        max_inconclusive_runs_allowed_for_clean_stage,
+        stage_gate_passed,
+        controlled_canary_gate_passed,
+        summary,
+        notes,
+    }
+}
+
+fn default_release_gate_report() -> ValidationReleaseGateReport {
+    ValidationReleaseGateReport {
+        gate_status: "release_gate_not_derived".to_string(),
+        cleanup_stage_gate_status: "cleanup_stage_gate_not_derived".to_string(),
+        controlled_canary_gate_status: "controlled_canary_gate_not_derived".to_string(),
+        min_stage_runs_required: 2,
+        min_clear_canary_runs_required: 2,
+        max_marker_detection_runs_allowed_for_clean_claim: 0,
+        max_worsened_runs_allowed_for_clean_stage: 0,
+        max_inconclusive_runs_allowed_for_clean_stage: 0,
+        stage_gate_passed: false,
+        controlled_canary_gate_passed: false,
+        summary:
+            "NullContext does not yet have enough repeated evidence to derive explicit release-gating thresholds for this scope."
+                .to_string(),
+        notes: vec![
+            "Release-gating guidance becomes meaningful only after repeated cleanup-stage and controlled-canary evidence exist in the same scope."
+                .to_string(),
+        ],
     }
 }
 

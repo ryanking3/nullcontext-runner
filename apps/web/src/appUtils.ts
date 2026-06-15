@@ -348,6 +348,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.memory_validation_history.cleanup_stage_recommendation =
         legacyMemoryValidationHistoryReport().cleanup_stage_recommendation;
     }
+    if (parsed.memory_validation_history.release_gate === undefined) {
+      parsed.memory_validation_history.release_gate =
+        legacyMemoryValidationHistoryReport().release_gate;
+    }
     parsed.memory_validation_history.stage_trends =
       parsed.memory_validation_history.stage_trends.map((trend) => ({
         ...legacyMemoryValidationStageTrendReport(),
@@ -360,6 +364,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
     parsed.memory_validation_history.controlled_canary_history = {
       ...legacyControlledCanaryHistoryReport(),
       ...parsed.memory_validation_history.controlled_canary_history,
+    };
+    parsed.memory_validation_history.release_gate = {
+      ...legacyValidationReleaseGateReport(),
+      ...parsed.memory_validation_history.release_gate,
     };
 
     if (!parsed.platform_capability_matrix) {
@@ -577,6 +585,7 @@ function legacyMemoryValidationHistoryReport() {
     stage_trends: [],
     controlled_canary_history: legacyControlledCanaryHistoryReport(),
     cleanup_stage_recommendation: legacyMemoryValidationStageRecommendationReport(),
+    release_gate: legacyValidationReleaseGateReport(),
     summary:
       "This older report did not include cross-session memory-validation history.",
     notes: [
@@ -654,6 +663,23 @@ function legacyControlledCanaryHistoryReport() {
     latest_execution_status: "controlled_canary_not_run_yet",
     latest_aggregate_signal_status: "controlled_canary_not_run_yet",
     summary: "This older report did not include repeated controlled canary history.",
+    notes: [],
+  };
+}
+
+function legacyValidationReleaseGateReport() {
+  return {
+    gate_status: "release_gate_not_derived",
+    cleanup_stage_gate_status: "cleanup_stage_gate_not_derived",
+    controlled_canary_gate_status: "controlled_canary_gate_not_derived",
+    min_stage_runs_required: 2,
+    min_clear_canary_runs_required: 2,
+    max_marker_detection_runs_allowed_for_clean_claim: 0,
+    max_worsened_runs_allowed_for_clean_stage: 0,
+    max_inconclusive_runs_allowed_for_clean_stage: 0,
+    stage_gate_passed: false,
+    controlled_canary_gate_passed: false,
+    summary: "This older report did not include explicit release-gating thresholds.",
     notes: [],
   };
 }

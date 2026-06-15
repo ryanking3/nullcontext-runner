@@ -1462,6 +1462,13 @@ export function PrivacyReportViewer({
 
             <div className="report-risk-block">
               <p>
+                <strong>release gate:</strong>{" "}
+                {currentReport.memory_validation_history.release_gate.summary}
+              </p>
+            </div>
+
+            <div className="report-risk-block">
+              <p>
                 <strong>controlled canary history:</strong>{" "}
                 {currentReport.memory_validation_history.controlled_canary_history.summary}
               </p>
@@ -1545,6 +1552,100 @@ export function PrivacyReportViewer({
                 },
               ]}
             />
+
+            <details className="report-detail">
+              <summary>
+                release gate
+                <span
+                  className={inspectionStatusClass(
+                    currentReport.memory_validation_history.release_gate.gate_status
+                  )}
+                >
+                  {humanizeSnakeCase(
+                    currentReport.memory_validation_history.release_gate.gate_status
+                  )}
+                </span>
+              </summary>
+
+              <ReportGrid
+                entries={[
+                  {
+                    label: "cleanup-stage gate",
+                    value: humanizeSnakeCase(
+                      currentReport.memory_validation_history.release_gate
+                        .cleanup_stage_gate_status
+                    ),
+                  },
+                  {
+                    label: "controlled-canary gate",
+                    value: humanizeSnakeCase(
+                      currentReport.memory_validation_history.release_gate
+                        .controlled_canary_gate_status
+                    ),
+                  },
+                  {
+                    label: "stage gate passed",
+                    value: currentReport.memory_validation_history.release_gate.stage_gate_passed
+                      ? "true"
+                      : "false",
+                  },
+                  {
+                    label: "canary gate passed",
+                    value: currentReport.memory_validation_history.release_gate
+                      .controlled_canary_gate_passed
+                      ? "true"
+                      : "false",
+                  },
+                  {
+                    label: "min stage runs",
+                    value: String(
+                      currentReport.memory_validation_history.release_gate
+                        .min_stage_runs_required
+                    ),
+                  },
+                  {
+                    label: "min clear canary runs",
+                    value: String(
+                      currentReport.memory_validation_history.release_gate
+                        .min_clear_canary_runs_required
+                    ),
+                  },
+                  {
+                    label: "max marker detections",
+                    value: String(
+                      currentReport.memory_validation_history.release_gate
+                        .max_marker_detection_runs_allowed_for_clean_claim
+                    ),
+                  },
+                  {
+                    label: "max worsened runs",
+                    value: String(
+                      currentReport.memory_validation_history.release_gate
+                        .max_worsened_runs_allowed_for_clean_stage
+                    ),
+                  },
+                  {
+                    label: "max inconclusive runs",
+                    value: String(
+                      currentReport.memory_validation_history.release_gate
+                        .max_inconclusive_runs_allowed_for_clean_stage
+                    ),
+                  },
+                ]}
+              />
+
+              {currentReport.memory_validation_history.release_gate.notes.length > 0 && (
+                <ul className="report-note-list">
+                  {currentReport.memory_validation_history.release_gate.notes.map(
+                    (note, index) => (
+                      <li key={`memory-validation-history-release-gate-note-${index}`}>
+                        {note}
+                      </li>
+                    )
+                  )}
+                </ul>
+              )}
+            </details>
 
             <details className="report-detail">
               <summary>

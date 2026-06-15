@@ -314,10 +314,10 @@ Done or largely done:
 - repeated best-stage recommendation
 - runner-up stage comparison and effectiveness-gap reporting
 - explicit repeated controlled-canary history reporting
+- explicit repeated-evidence release-gating thresholds in reports
 
 ### Remaining v1 Work
 
-- define what counts as a meaningful pass versus weak/inconclusive evidence
 - tighten recommendation semantics so “best stage” is clearly separated from “clean stage”
 - freeze v1 security claim wording
 
@@ -343,10 +343,7 @@ This is the order that best fits the actual blocker stack.
 Must do:
 
 - keep the existing cleanup-stage outcome history and recommendation path honest as more repeated runs accumulate
-- define stronger release-gating thresholds for:
-  - enough repeated runs
-  - mixed versus acceptable evidence
-  - marker persistence versus recommendation eligibility
+- keep the new release-gating thresholds honest as more repeated runs accumulate
 - keep summarizing repeated stage effectiveness by scope:
   - model
   - platform

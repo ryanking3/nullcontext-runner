@@ -225,6 +225,24 @@ pub struct MemoryValidationHistoryReport {
     pub controlled_canary_history: ControlledCanaryHistoryReport,
     #[serde(default = "default_memory_validation_stage_recommendation_report")]
     pub cleanup_stage_recommendation: MemoryValidationStageRecommendationReport,
+    #[serde(default = "default_validation_release_gate_report")]
+    pub release_gate: ValidationReleaseGateReport,
+    pub summary: String,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationReleaseGateReport {
+    pub gate_status: String,
+    pub cleanup_stage_gate_status: String,
+    pub controlled_canary_gate_status: String,
+    pub min_stage_runs_required: u32,
+    pub min_clear_canary_runs_required: u32,
+    pub max_marker_detection_runs_allowed_for_clean_claim: u32,
+    pub max_worsened_runs_allowed_for_clean_stage: u32,
+    pub max_inconclusive_runs_allowed_for_clean_stage: u32,
+    pub stage_gate_passed: bool,
+    pub controlled_canary_gate_passed: bool,
     pub summary: String,
     pub notes: Vec<String>,
 }
@@ -2130,12 +2148,34 @@ fn default_memory_validation_history_report() -> MemoryValidationHistoryReport {
         stage_trends: vec![],
         controlled_canary_history: default_controlled_canary_history_report(),
         cleanup_stage_recommendation: default_memory_validation_stage_recommendation_report(),
+        release_gate: default_validation_release_gate_report(),
         summary:
             "NullContext had not yet derived or persisted cross-session memory-validation history for this report."
                 .to_string(),
         notes: vec![
             "Older reports may not include the cross-session memory-validation history section."
                 .to_string(),
+        ],
+    }
+}
+
+fn default_validation_release_gate_report() -> ValidationReleaseGateReport {
+    ValidationReleaseGateReport {
+        gate_status: "release_gate_not_derived".to_string(),
+        cleanup_stage_gate_status: "cleanup_stage_gate_not_derived".to_string(),
+        controlled_canary_gate_status: "controlled_canary_gate_not_derived".to_string(),
+        min_stage_runs_required: 2,
+        min_clear_canary_runs_required: 2,
+        max_marker_detection_runs_allowed_for_clean_claim: 0,
+        max_worsened_runs_allowed_for_clean_stage: 0,
+        max_inconclusive_runs_allowed_for_clean_stage: 0,
+        stage_gate_passed: false,
+        controlled_canary_gate_passed: false,
+        summary:
+            "NullContext had not yet derived explicit release-gating thresholds for this report."
+                .to_string(),
+        notes: vec![
+            "Older reports may not include repeated-evidence release-gating guidance.".to_string(),
         ],
     }
 }
