@@ -485,6 +485,8 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub manifest_path: Option<String>,
     pub runtime_build_profile: String,
     pub instrumentation_backend: String,
+    pub lifecycle_signal_evidence_tier: String,
+    pub cleanup_path_evidence_status: String,
     pub allocator_introspection_status: String,
     pub allocator_initialized_observed: bool,
     pub allocator_teardown_observed: bool,
@@ -495,9 +497,12 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub kv_cache_reused_observed: bool,
     pub kv_cache_clear_observed: bool,
     pub kv_cache_summary: String,
+    pub model_unload_observed: bool,
     pub model_unload_signal_status: String,
     pub allocator_reset_signal_status: String,
     pub summary: String,
+    pub observed_signal_count: u32,
+    pub observed_signal_sources: Vec<String>,
     pub observed_events: Vec<LlamaRuntimeIntrospectionEventReport>,
     pub notes: Vec<String>,
 }
@@ -1029,29 +1034,23 @@ fn build_allocator_kv_capability_entry(
     llama_runtime: &LlamaRuntimeReport,
 ) -> PlatformCapabilityEntryReport {
     let introspection = &llama_runtime.introspection;
-    let observed_any_signal = introspection.allocator_initialized_observed
-        || introspection.allocator_teardown_observed
-        || introspection.allocator_reset_observed
-        || introspection.kv_cache_initialized_observed
-        || introspection.kv_cache_reused_observed
-        || introspection.kv_cache_clear_observed
-        || !introspection.observed_events.is_empty();
-    let current_status =
-        if introspection.allocator_reset_observed || introspection.kv_cache_clear_observed {
-            "allocator_and_kv_signal_support_active".to_string()
-        } else if introspection.capability_source == "sidecar_manifest" || observed_any_signal {
+    let current_status = match introspection.lifecycle_signal_evidence_tier.as_str() {
+        "direct_cleanup_path_signals_observed" => {
+            "allocator_and_kv_cleanup_path_signals_active".to_string()
+        }
+        "declared_and_observed_runtime_signals"
+        | "observed_runtime_signals_without_declared_manifest" => {
             "allocator_and_kv_signal_support_partial".to_string()
-        } else {
-            "allocator_and_kv_signal_support_limited".to_string()
-        };
-    let evidence_level =
-        if introspection.allocator_reset_observed || introspection.kv_cache_clear_observed {
-            "runtime_reset_or_clear_signal_observed".to_string()
-        } else if introspection.capability_source == "sidecar_manifest" || observed_any_signal {
-            "runtime_signal_capability_or_partial_events_observed".to_string()
-        } else {
-            "stock_runtime_without_direct_allocator_or_kv_evidence".to_string()
-        };
+        }
+        "declared_support_without_observed_session_signals" => {
+            "allocator_and_kv_declared_support_without_session_evidence".to_string()
+        }
+        "startup_failed_without_direct_runtime_signals" => {
+            "allocator_and_kv_signal_collection_blocked_by_startup_failure".to_string()
+        }
+        _ => "allocator_and_kv_signal_support_limited".to_string(),
+    };
+    let evidence_level = introspection.lifecycle_signal_evidence_tier.clone();
 
     PlatformCapabilityEntryReport {
         capability_id: "track_b_allocator_kv_introspection".to_string(),
@@ -1067,6 +1066,11 @@ fn build_allocator_kv_capability_entry(
         notes: vec![
             introspection.allocator_summary.clone(),
             introspection.kv_cache_summary.clone(),
+            format!(
+                "Cleanup-path evidence status: {}. Observed signal count: {}.",
+                introspection.cleanup_path_evidence_status.replace('_', " "),
+                introspection.observed_signal_count
+            ),
         ],
     }
 }
@@ -1695,6 +1699,13 @@ fn build_llama_runtime_introspection_report(
                 manifest_path: None,
                 runtime_build_profile: "stock_external_llama_server".to_string(),
                 instrumentation_backend: "none".to_string(),
+                lifecycle_signal_evidence_tier: "introspection_capability_load_failed"
+                    .to_string(),
+                cleanup_path_evidence_status: if startup_failed {
+                    "cleanup_path_unavailable_due_to_startup_failure".to_string()
+                } else {
+                    "cleanup_path_not_observed_directly".to_string()
+                },
                 allocator_introspection_status: "allocator_introspection_capability_load_failed"
                     .to_string(),
                 allocator_initialized_observed: false,
@@ -1711,6 +1722,7 @@ fn build_llama_runtime_introspection_report(
                 kv_cache_summary:
                     "NullContext could not load runtime introspection capabilities, so KV/cache lifecycle evidence remained unavailable for this session."
                         .to_string(),
+                model_unload_observed: false,
                 model_unload_signal_status: if startup_failed {
                     "model_unload_signal_unavailable_due_to_startup_failure".to_string()
                 } else {
@@ -1725,6 +1737,8 @@ fn build_llama_runtime_introspection_report(
                     "NullContext tried to load runtime introspection capabilities for this llama-server path, but capability loading failed: {}. Falling back to stock-runtime assumptions.",
                     error
                 ),
+                observed_signal_count: observed_signals.len() as u32,
+                observed_signal_sources: observed_signal_sources(observed_signals),
                 observed_events: observed_signals
                     .iter()
                     .map(map_runtime_introspection_signal)
@@ -1746,6 +1760,8 @@ fn build_llama_runtime_introspection_report(
         .iter()
         .map(map_runtime_introspection_signal)
         .collect::<Vec<_>>();
+    let observed_signal_count = observed_events.len() as u32;
+    let observed_signal_sources = observed_signal_sources(observed_signals);
     let observed_kv_initialized = observed_signals
         .iter()
         .any(|signal| signal.event == "kv_cache_initialized" && signal.status != "failed");
@@ -1782,12 +1798,50 @@ fn build_llama_runtime_introspection_report(
     let declared_allocator_introspection_status =
         capabilities.allocator_introspection_status.clone();
     let declared_kv_cache_introspection_status = capabilities.kv_cache_introspection_status.clone();
+    let declared_direct_support = declared_allocator_introspection_status.contains("available")
+        || declared_kv_cache_introspection_status.contains("available")
+        || capabilities
+            .model_unload_signal_status
+            .contains("available")
+        || capabilities
+            .allocator_reset_signal_status
+            .contains("available");
+    let cleanup_path_evidence_status = if startup_failed {
+        "cleanup_path_unavailable_due_to_startup_failure".to_string()
+    } else if observed_allocator_reset_signal && observed_kv_clear && observed_model_unload_signal {
+        "allocator_reset_kv_clear_and_model_unload_observed".to_string()
+    } else if observed_allocator_reset_signal || observed_kv_clear || observed_model_unload_signal {
+        "partial_cleanup_path_signals_observed".to_string()
+    } else if observed_allocator_initialized
+        || observed_allocator_teardown
+        || observed_kv_initialized
+        || observed_kv_reused
+    {
+        "setup_or_reuse_signals_observed_without_cleanup_signals".to_string()
+    } else {
+        "cleanup_path_not_observed_directly".to_string()
+    };
+    let lifecycle_signal_evidence_tier = if startup_failed && observed_signal_count == 0 {
+        "startup_failed_without_direct_runtime_signals".to_string()
+    } else if observed_allocator_reset_signal && observed_kv_clear && observed_model_unload_signal {
+        "direct_cleanup_path_signals_observed".to_string()
+    } else if observed_signal_count > 0 && capabilities.capability_source == "sidecar_manifest" {
+        "declared_and_observed_runtime_signals".to_string()
+    } else if observed_signal_count > 0 {
+        "observed_runtime_signals_without_declared_manifest".to_string()
+    } else if declared_direct_support {
+        "declared_support_without_observed_session_signals".to_string()
+    } else {
+        "no_direct_runtime_signal_evidence".to_string()
+    };
 
     LlamaRuntimeIntrospectionReport {
         capability_source: capabilities.capability_source.clone(),
         manifest_path: capabilities.manifest_path,
         runtime_build_profile: capabilities.runtime_build_profile.clone(),
         instrumentation_backend: capabilities.instrumentation_backend.clone(),
+        lifecycle_signal_evidence_tier,
+        cleanup_path_evidence_status,
         allocator_introspection_status: if observed_allocator_signal {
             "allocator_lifecycle_signals_observed".to_string()
         } else {
@@ -1835,6 +1889,7 @@ fn build_llama_runtime_introspection_report(
             "KV/cache lifetime is still primarily bounded by runtime lifetime in this build, and NullContext did not capture any direct KV/cache lifecycle signals for this session."
                 .to_string()
         },
+        model_unload_observed: observed_model_unload_signal,
         model_unload_signal_status: if startup_failed
             && capabilities.model_unload_signal_status == "model_unload_not_observed_directly"
         {
@@ -1862,19 +1917,31 @@ fn build_llama_runtime_introspection_report(
             format!(
                 "NullContext loaded runtime introspection capabilities from a sidecar manifest for build profile '{}'. Host-tool memory observation is still in use, and {} lifecycle signal(s) were captured from runtime output for this session.",
                 capabilities.runtime_build_profile,
-                observed_events.len()
+                observed_signal_count
             )
         } else if !observed_events.is_empty() {
             format!(
                 "NullContext captured {} runtime lifecycle signal(s) from llama-server output, even though this runtime is otherwise being treated as a stock external build.",
-                observed_events.len()
+                observed_signal_count
             )
         } else {
             "This runtime is being treated as a stock external llama-server build. NullContext can currently observe process- and host-tool-level evidence, but it does not yet have direct allocator, KV/cache, or model-unload introspection inside llama.cpp.".to_string()
         },
+        observed_signal_count,
+        observed_signal_sources,
         observed_events,
         notes,
     }
+}
+
+fn observed_signal_sources(signals: &[RuntimeIntrospectionSignal]) -> Vec<String> {
+    let mut sources = signals
+        .iter()
+        .map(|signal| signal.source_stream.clone())
+        .collect::<Vec<_>>();
+    sources.sort();
+    sources.dedup();
+    sources
 }
 
 fn map_runtime_introspection_signal(

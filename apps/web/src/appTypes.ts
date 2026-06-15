@@ -439,6 +439,8 @@ export type LlamaRuntimeIntrospectionReport = {
   manifest_path?: string | null;
   runtime_build_profile: string;
   instrumentation_backend: string;
+  lifecycle_signal_evidence_tier: string;
+  cleanup_path_evidence_status: string;
   allocator_introspection_status: string;
   allocator_initialized_observed: boolean;
   allocator_teardown_observed: boolean;
@@ -449,9 +451,12 @@ export type LlamaRuntimeIntrospectionReport = {
   kv_cache_reused_observed: boolean;
   kv_cache_clear_observed: boolean;
   kv_cache_summary: string;
+  model_unload_observed: boolean;
   model_unload_signal_status: string;
   allocator_reset_signal_status: string;
   summary: string;
+  observed_signal_count: number;
+  observed_signal_sources: string[];
   observed_events: LlamaRuntimeIntrospectionEventReport[];
   notes: string[];
 };

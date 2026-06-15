@@ -321,6 +321,17 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.llama_runtime.vram_cleanup = legacyVramCleanupStrategyReport();
     }
 
+    if (parsed.llama_runtime && !parsed.llama_runtime.introspection) {
+      parsed.llama_runtime.introspection = legacyLlamaRuntimeIntrospectionReport();
+    }
+
+    if (parsed.llama_runtime?.introspection) {
+      parsed.llama_runtime.introspection = {
+        ...legacyLlamaRuntimeIntrospectionReport(),
+        ...parsed.llama_runtime.introspection,
+      };
+    }
+
     if (parsed.llama_runtime && !parsed.llama_runtime.vram_cleanup.comparison) {
       parsed.llama_runtime.vram_cleanup.comparison = legacyVramCleanupComparisonReport();
     }
@@ -466,6 +477,38 @@ function legacyVramCleanupStrategyReport(): VramCleanupStrategyReport {
     notes: [
       "Open a newer session report to compare baseline or experimental VRAM cleanup outcomes.",
     ],
+  };
+}
+
+function legacyLlamaRuntimeIntrospectionReport() {
+  return {
+    capability_source: "stock_runtime_fallback",
+    manifest_path: null,
+    runtime_build_profile: "stock_external_llama_server",
+    instrumentation_backend: "none",
+    lifecycle_signal_evidence_tier: "no_direct_runtime_signal_evidence",
+    cleanup_path_evidence_status: "cleanup_path_not_observed_directly",
+    allocator_introspection_status: "allocator_introspection_unavailable",
+    allocator_initialized_observed: false,
+    allocator_teardown_observed: false,
+    allocator_reset_observed: false,
+    allocator_summary:
+      "This older report did not include direct allocator lifecycle introspection.",
+    kv_cache_introspection_status: "kv_cache_introspection_unavailable",
+    kv_cache_initialized_observed: false,
+    kv_cache_reused_observed: false,
+    kv_cache_clear_observed: false,
+    kv_cache_summary:
+      "This older report did not include direct KV/cache lifecycle introspection.",
+    model_unload_observed: false,
+    model_unload_signal_status: "model_unload_not_observed_directly",
+    allocator_reset_signal_status: "allocator_reset_not_observed_directly",
+    summary:
+      "This older report did not include the newer runtime introspection evidence-tier summary.",
+    observed_signal_count: 0,
+    observed_signal_sources: [],
+    observed_events: [],
+    notes: [],
   };
 }
 

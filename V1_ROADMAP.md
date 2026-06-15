@@ -78,6 +78,7 @@ NullContext already has meaningful foundations in-tree:
 - stage-aware marker evidence in scoring
 - helper-stage dedicated canary scans
 - allocator / KV signal reporting through capability manifests and parsed runtime output
+- allocator / KV lifecycle evidence tiers and cleanup-path status reporting
 
 That is strong progress.
 
@@ -168,6 +169,7 @@ Done or partially done:
 - parsed lifecycle signal reporting exists
 - allocator/KV summaries exist in reports
 - allocator reset / KV clear / model unload fields exist
+- explicit signal-evidence tier and cleanup-path status reporting exists
 
 ### Remaining v1 Work
 
@@ -473,7 +475,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `6-10` commits
+- `5-9` commits
 
 Expected areas:
 

@@ -926,6 +926,18 @@ export function PrivacyReportViewer({
                   value: currentReport.llama_runtime.introspection.instrumentation_backend,
                 },
                 {
+                  label: "signal evidence tier",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.introspection.lifecycle_signal_evidence_tier
+                  ),
+                },
+                {
+                  label: "cleanup-path evidence",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.introspection.cleanup_path_evidence_status
+                  ),
+                },
+                {
                   label: "allocator introspection",
                   value: humanizeSnakeCase(
                     currentReport.llama_runtime.introspection.allocator_introspection_status
@@ -974,6 +986,12 @@ export function PrivacyReportViewer({
                   ),
                 },
                 {
+                  label: "model unload observed",
+                  value: formatBoolean(
+                    currentReport.llama_runtime.introspection.model_unload_observed
+                  ),
+                },
+                {
                   label: "model unload signal",
                   value: humanizeSnakeCase(
                     currentReport.llama_runtime.introspection.model_unload_signal_status
@@ -984,6 +1002,21 @@ export function PrivacyReportViewer({
                   value: humanizeSnakeCase(
                     currentReport.llama_runtime.introspection.allocator_reset_signal_status
                   ),
+                },
+                {
+                  label: "observed signal count",
+                  value: String(
+                    currentReport.llama_runtime.introspection.observed_signal_count
+                  ),
+                },
+                {
+                  label: "observed signal sources",
+                  value:
+                    currentReport.llama_runtime.introspection.observed_signal_sources.length === 0
+                      ? "none"
+                      : currentReport.llama_runtime.introspection.observed_signal_sources.join(
+                          ", "
+                        ),
                 },
               ]}
             />
