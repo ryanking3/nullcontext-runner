@@ -487,6 +487,8 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub instrumentation_backend: String,
     pub lifecycle_signal_evidence_tier: String,
     pub cleanup_path_evidence_status: String,
+    pub setup_signal_coverage_status: String,
+    pub cleanup_signal_coverage_status: String,
     pub allocator_introspection_status: String,
     pub allocator_initialized_observed: bool,
     pub allocator_teardown_observed: bool,
@@ -512,6 +514,9 @@ pub struct LlamaRuntimeIntrospectionEventReport {
     pub event: String,
     pub status: String,
     pub source: String,
+    pub lifecycle_phase: String,
+    pub evidence_scope: String,
+    pub cleanup_relevance: String,
     pub details: String,
 }
 
@@ -1067,8 +1072,10 @@ fn build_allocator_kv_capability_entry(
             introspection.allocator_summary.clone(),
             introspection.kv_cache_summary.clone(),
             format!(
-                "Cleanup-path evidence status: {}. Observed signal count: {}.",
+                "Setup-signal coverage: {}. Cleanup-path evidence status: {}. Cleanup-signal coverage: {}. Observed signal count: {}.",
+                introspection.setup_signal_coverage_status.replace('_', " "),
                 introspection.cleanup_path_evidence_status.replace('_', " "),
+                introspection.cleanup_signal_coverage_status.replace('_', " "),
                 introspection.observed_signal_count
             ),
         ],
@@ -1706,6 +1713,16 @@ fn build_llama_runtime_introspection_report(
                 } else {
                     "cleanup_path_not_observed_directly".to_string()
                 },
+                setup_signal_coverage_status: if startup_failed {
+                    "setup_signal_collection_interrupted_by_startup_failure".to_string()
+                } else {
+                    "no_setup_or_reuse_signals_observed".to_string()
+                },
+                cleanup_signal_coverage_status: if startup_failed {
+                    "cleanup_signal_collection_interrupted_by_startup_failure".to_string()
+                } else {
+                    "no_cleanup_signals_observed".to_string()
+                },
                 allocator_introspection_status: "allocator_introspection_capability_load_failed"
                     .to_string(),
                 allocator_initialized_observed: false,
@@ -1798,6 +1815,12 @@ fn build_llama_runtime_introspection_report(
     let declared_allocator_introspection_status =
         capabilities.allocator_introspection_status.clone();
     let declared_kv_cache_introspection_status = capabilities.kv_cache_introspection_status.clone();
+    let observed_setup_or_reuse_signal =
+        observed_allocator_initialized || observed_kv_initialized || observed_kv_reused;
+    let observed_cleanup_signal = observed_allocator_teardown
+        || observed_allocator_reset_signal
+        || observed_kv_clear
+        || observed_model_unload_signal;
     let declared_direct_support = declared_allocator_introspection_status.contains("available")
         || declared_kv_cache_introspection_status.contains("available")
         || capabilities
@@ -1834,6 +1857,24 @@ fn build_llama_runtime_introspection_report(
     } else {
         "no_direct_runtime_signal_evidence".to_string()
     };
+    let setup_signal_coverage_status = if startup_failed && !observed_setup_or_reuse_signal {
+        "setup_signal_collection_interrupted_by_startup_failure".to_string()
+    } else if observed_allocator_initialized && observed_kv_initialized {
+        "allocator_and_kv_setup_signals_observed".to_string()
+    } else if observed_setup_or_reuse_signal {
+        "partial_setup_or_reuse_signals_observed".to_string()
+    } else {
+        "no_setup_or_reuse_signals_observed".to_string()
+    };
+    let cleanup_signal_coverage_status = if startup_failed && !observed_cleanup_signal {
+        "cleanup_signal_collection_interrupted_by_startup_failure".to_string()
+    } else if observed_allocator_reset_signal && observed_kv_clear && observed_model_unload_signal {
+        "allocator_reset_kv_clear_and_model_unload_signals_observed".to_string()
+    } else if observed_cleanup_signal {
+        "partial_cleanup_signals_observed".to_string()
+    } else {
+        "no_cleanup_signals_observed".to_string()
+    };
 
     LlamaRuntimeIntrospectionReport {
         capability_source: capabilities.capability_source.clone(),
@@ -1842,6 +1883,8 @@ fn build_llama_runtime_introspection_report(
         instrumentation_backend: capabilities.instrumentation_backend.clone(),
         lifecycle_signal_evidence_tier,
         cleanup_path_evidence_status,
+        setup_signal_coverage_status,
+        cleanup_signal_coverage_status,
         allocator_introspection_status: if observed_allocator_signal {
             "allocator_lifecycle_signals_observed".to_string()
         } else {
@@ -1951,7 +1994,49 @@ fn map_runtime_introspection_signal(
         event: signal.event.clone(),
         status: signal.status.clone(),
         source: signal.source_stream.clone(),
+        lifecycle_phase: introspection_event_phase(&signal.event).to_string(),
+        evidence_scope: introspection_event_scope(&signal.event).to_string(),
+        cleanup_relevance: introspection_event_cleanup_relevance(&signal.event).to_string(),
         details: signal.details.clone(),
+    }
+}
+
+fn introspection_event_phase(event: &str) -> &'static str {
+    match event {
+        "allocator_initialized" | "kv_cache_initialized" => "setup",
+        "kv_cache_reused" => "reuse",
+        "allocator_teardown_observed"
+        | "allocator_reset_observed"
+        | "kv_cache_clear_observed"
+        | "model_unload_observed" => "cleanup",
+        "introspection_signal_parse_failed" => "parse_failure",
+        _ => "unknown",
+    }
+}
+
+fn introspection_event_scope(event: &str) -> &'static str {
+    match event {
+        "allocator_initialized" | "allocator_teardown_observed" | "allocator_reset_observed" => {
+            "allocator"
+        }
+        "kv_cache_initialized" | "kv_cache_reused" | "kv_cache_clear_observed" => "kv_cache",
+        "model_unload_observed" => "model_lifecycle",
+        "introspection_signal_parse_failed" => "parser",
+        _ => "unknown",
+    }
+}
+
+fn introspection_event_cleanup_relevance(event: &str) -> &'static str {
+    match event {
+        "allocator_reset_observed"
+        | "kv_cache_clear_observed"
+        | "model_unload_observed"
+        | "allocator_teardown_observed" => "direct_cleanup_path_signal",
+        "allocator_initialized" | "kv_cache_initialized" | "kv_cache_reused" => {
+            "setup_or_reuse_signal_only"
+        }
+        "introspection_signal_parse_failed" => "signal_capture_failure",
+        _ => "unknown_cleanup_relevance",
     }
 }
 

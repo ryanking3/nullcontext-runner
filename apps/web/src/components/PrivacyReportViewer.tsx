@@ -938,6 +938,18 @@ export function PrivacyReportViewer({
                   ),
                 },
                 {
+                  label: "setup-signal coverage",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.introspection.setup_signal_coverage_status
+                  ),
+                },
+                {
+                  label: "cleanup-signal coverage",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.introspection.cleanup_signal_coverage_status
+                  ),
+                },
+                {
                   label: "allocator introspection",
                   value: humanizeSnakeCase(
                     currentReport.llama_runtime.introspection.allocator_introspection_status
@@ -1059,6 +1071,12 @@ export function PrivacyReportViewer({
                       </div>
                       <div className="report-path-list">
                         <div>source: {event.source}</div>
+                        <div>phase: {humanizeSnakeCase(event.lifecycle_phase)}</div>
+                        <div>scope: {humanizeSnakeCase(event.evidence_scope)}</div>
+                        <div>
+                          cleanup relevance:{" "}
+                          {humanizeSnakeCase(event.cleanup_relevance)}
+                        </div>
                         <div>{event.details || "no extra details"}</div>
                       </div>
                     </div>

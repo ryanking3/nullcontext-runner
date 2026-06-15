@@ -488,6 +488,8 @@ function legacyLlamaRuntimeIntrospectionReport() {
     instrumentation_backend: "none",
     lifecycle_signal_evidence_tier: "no_direct_runtime_signal_evidence",
     cleanup_path_evidence_status: "cleanup_path_not_observed_directly",
+    setup_signal_coverage_status: "no_setup_or_reuse_signals_observed",
+    cleanup_signal_coverage_status: "no_cleanup_signals_observed",
     allocator_introspection_status: "allocator_introspection_unavailable",
     allocator_initialized_observed: false,
     allocator_teardown_observed: false,

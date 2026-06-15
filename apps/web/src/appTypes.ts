@@ -441,6 +441,8 @@ export type LlamaRuntimeIntrospectionReport = {
   instrumentation_backend: string;
   lifecycle_signal_evidence_tier: string;
   cleanup_path_evidence_status: string;
+  setup_signal_coverage_status: string;
+  cleanup_signal_coverage_status: string;
   allocator_introspection_status: string;
   allocator_initialized_observed: boolean;
   allocator_teardown_observed: boolean;
@@ -465,6 +467,9 @@ export type LlamaRuntimeIntrospectionEventReport = {
   event: string;
   status: string;
   source: string;
+  lifecycle_phase: string;
+  evidence_scope: string;
+  cleanup_relevance: string;
   details: string;
 };
 

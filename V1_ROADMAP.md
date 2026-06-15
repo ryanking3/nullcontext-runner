@@ -79,6 +79,7 @@ NullContext already has meaningful foundations in-tree:
 - helper-stage dedicated canary scans
 - allocator / KV signal reporting through capability manifests and parsed runtime output
 - allocator / KV lifecycle evidence tiers and cleanup-path status reporting
+- phase-classified runtime introspection events and cleanup-signal coverage reporting
 
 That is strong progress.
 
@@ -170,6 +171,7 @@ Done or partially done:
 - allocator/KV summaries exist in reports
 - allocator reset / KV clear / model unload fields exist
 - explicit signal-evidence tier and cleanup-path status reporting exists
+- observed runtime events are phase-classified and carry cleanup relevance
 
 ### Remaining v1 Work
 
@@ -475,7 +477,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `5-9` commits
+- `4-8` commits
 
 Expected areas:
 
