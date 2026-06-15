@@ -25,6 +25,7 @@ export function ChatWorkspace({
   activeChatResolvedTemplate,
   activeChatContextBudget,
   activeChatContextTurnLimit,
+  activeChatStartPreflightError,
   activeChatGroundedTurns,
   effectiveTemplate,
   useModelTemplateDefault,
@@ -86,6 +87,7 @@ export function ChatWorkspace({
   activeChatResolvedTemplate: string;
   activeChatContextBudget: number | null;
   activeChatContextTurnLimit: number | null;
+  activeChatStartPreflightError: string | null;
   activeChatGroundedTurns: number;
   effectiveTemplate: string;
   useModelTemplateDefault: boolean;
@@ -252,7 +254,15 @@ export function ChatWorkspace({
           <div className="runtime-actions">
             {runtimeMode === "active-chat" &&
               (!activeChatRuntimeActive ? (
-                <button onClick={startActiveChat} disabled={runStatus === "running"}>
+                <button
+                  onClick={startActiveChat}
+                  disabled={
+                    runStatus === "running" || !!activeChatStartPreflightError
+                  }
+                  title={
+                    activeChatStartPreflightError || "Start active chat session"
+                  }
+                >
                   start session
                 </button>
               ) : (
@@ -328,6 +338,15 @@ export function ChatWorkspace({
       </section>
 
       <section className="chat-card">
+        {runtimeMode === "active-chat" &&
+          !activeChatRuntimeActive &&
+          activeChatStartPreflightError && (
+            <div className="notice-banner warning-banner">
+              Active chat preflight blocked: {activeChatStartPreflightError} Open the
+              model, corpus, or config drawers to fix it before starting.
+            </div>
+          )}
+
         {activeChatStopNotice && (
           <div className="notice-banner warning-banner">{activeChatStopNotice}</div>
         )}

@@ -82,6 +82,8 @@ NullContext already has meaningful foundations in-tree:
 - phase-classified runtime introspection events and cleanup-signal coverage reporting
 - cleanup-signal coverage matrix for allocator reset, KV clear, and model unload
 - richer manifest-declared signal contract for instrumented runtimes
+- active-chat preflight blockers are now surfaced in the UI before any network request is attempted, which makes local model/corpus/config startup failures easier to debug
+- corpus bindings can now be explicitly detached in the UI so cleaned-up corpora do not remain implicitly attached to future runs
 
 That is strong progress.
 

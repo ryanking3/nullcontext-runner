@@ -389,6 +389,20 @@ export function useSessionRunner({
     return null;
   }
 
+  function activeChatStartPreflightError() {
+    const corpusReadinessError = selectedCorpusReadinessError();
+    if (corpusReadinessError) {
+      return corpusReadinessError;
+    }
+
+    try {
+      readActiveChatConfigInputs();
+      return null;
+    } catch (error) {
+      return String(error);
+    }
+  }
+
   async function runOneShot() {
     const corpusReadinessError = selectedCorpusReadinessError();
     if (corpusReadinessError) {
@@ -450,9 +464,10 @@ export function useSessionRunner({
   }
 
   async function startActiveChat() {
-    const corpusReadinessError = selectedCorpusReadinessError();
-    if (corpusReadinessError) {
-      setStderr(corpusReadinessError);
+    const preflightError = activeChatStartPreflightError();
+    if (preflightError) {
+      setStderr(preflightError);
+      setRuntimeLogs((current) => `${current}Active chat preflight blocked: ${preflightError}\n`);
       setRunStatus("failed");
       return;
     }
@@ -772,6 +787,7 @@ export function useSessionRunner({
     activeChatHistoryPolicy,
     activeChatContextBudget,
     activeChatContextTurnLimit,
+    activeChatStartPreflightError: activeChatStartPreflightError(),
     resetRunPanels,
     startActiveChat,
     endActiveChat,

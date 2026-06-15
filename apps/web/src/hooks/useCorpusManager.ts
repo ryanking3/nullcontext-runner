@@ -69,7 +69,7 @@ export function useCorpusManager({ apiBase }: { apiBase: string }) {
           return current;
         }
 
-        return nextCorpora[0]?.corpus_id ?? "";
+        return "";
       });
     } catch (error) {
       setCorpora([]);
@@ -432,15 +432,8 @@ export function useCorpusManager({ apiBase }: { apiBase: string }) {
   }
 
   useEffect(() => {
-    if (corpora.length === 0) {
-      if (selectedCorpusId !== "") {
-        setSelectedCorpusId("");
-      }
-      return;
-    }
-
-    if (!corpora.some((corpus) => corpus.corpus_id === selectedCorpusId)) {
-      setSelectedCorpusId(corpora[0].corpus_id);
+    if (selectedCorpusId && !corpora.some((corpus) => corpus.corpus_id === selectedCorpusId)) {
+      setSelectedCorpusId("");
     }
   }, [corpora, selectedCorpusId]);
 

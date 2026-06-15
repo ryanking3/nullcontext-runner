@@ -36,6 +36,7 @@ export function CorpusDrawer({
   corpusActionPending,
   onSaveCorpusRetentionPolicy,
   onUseCorpusForOneShot,
+  onClearCorpusSelection,
   onOpenCorpusReport,
   onRunCorpusLifecycleAction,
   selectedCorpusReport,
@@ -84,6 +85,7 @@ export function CorpusDrawer({
   corpusActionPending: string | null;
   onSaveCorpusRetentionPolicy: (corpusId: string) => void;
   onUseCorpusForOneShot: (corpusId: string) => void;
+  onClearCorpusSelection: () => void;
   onOpenCorpusReport: (corpusId: string) => void;
   onRunCorpusLifecycleAction: (corpusId: string, action: "reconcile" | "cleanup") => void;
   selectedCorpusReport: string;
@@ -408,6 +410,9 @@ export function CorpusDrawer({
                       }
                     >
                       use for one-shot
+                    </button>
+                    <button onClick={onClearCorpusSelection} disabled={corpusActionPending !== null}>
+                      detach corpus
                     </button>
                     <button
                       onClick={() => onOpenCorpusReport(selectedCorpus.corpus_id)}

@@ -155,12 +155,6 @@ function App() {
     }
   }
 
-  function ensureCorpusSelection() {
-    if (!selectedCorpusId && corpora.length > 0) {
-      setSelectedCorpusId(corpora[0].corpus_id);
-    }
-  }
-
   const {
     commandMenuRef,
     chatUploadMenuRef,
@@ -196,7 +190,7 @@ function App() {
     onLoadCorpora: loadCorpora,
     onOpenModelDrawerSelectDefault: ensureModelDrawerSelection,
     onOpenRegistryDrawerSelectDefault: ensureRegistrySessionSelection,
-    onOpenCorpusDrawerSelectDefault: ensureCorpusSelection,
+    onOpenCorpusDrawerSelectDefault: () => {},
   });
 
   async function ingestUploadedCorpusFromChat(files: File[]) {
@@ -238,6 +232,7 @@ function App() {
     activeChatHistoryPolicy,
     activeChatContextBudget,
     activeChatContextTurnLimit,
+    activeChatStartPreflightError,
     startActiveChat,
     endActiveChat,
     runSession,
@@ -299,6 +294,11 @@ function App() {
 
   function handleUseCorpusForOneShot(corpusId: string) {
     setSelectedCorpusId(corpusId);
+    openConfigDrawer();
+  }
+
+  function handleClearSelectedCorpus() {
+    setSelectedCorpusId("");
     openConfigDrawer();
   }
 
@@ -379,6 +379,7 @@ function App() {
         activeChatResolvedTemplate={activeChatResolvedTemplate}
         activeChatContextBudget={activeChatContextBudget}
         activeChatContextTurnLimit={activeChatContextTurnLimit}
+        activeChatStartPreflightError={activeChatStartPreflightError}
         activeChatGroundedTurns={activeChatGroundedTurns}
         effectiveTemplate={effectiveTemplate}
         useModelTemplateDefault={useModelTemplateDefault}
@@ -519,6 +520,7 @@ function App() {
         corpusActionPending={corpusActionPending}
         onSaveCorpusRetentionPolicy={saveCorpusRetentionPolicy}
         onUseCorpusForOneShot={handleUseCorpusForOneShot}
+        onClearCorpusSelection={handleClearSelectedCorpus}
         onOpenCorpusReport={openCorpusReport}
         onRunCorpusLifecycleAction={runCorpusLifecycleAction}
         selectedCorpusReport={selectedCorpusReport}
