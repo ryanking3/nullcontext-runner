@@ -505,28 +505,38 @@ fn build_stage_recommendation(
         return default_stage_recommendation_report("no_stage_history_available");
     }
 
-    let best = stage_trends
+    let mut ranked_stages = stage_trends
         .iter()
         .map(|trend| (trend, stage_effectiveness_score(trend)))
-        .max_by(|(left_trend, left_score), (right_trend, right_score)| {
-            left_score
-                .total_cmp(right_score)
-                .then_with(|| {
-                    left_trend
-                        .avg_validation_score
-                        .total_cmp(&right_trend.avg_validation_score)
-                })
-                .then_with(|| left_trend.runs_recorded.cmp(&right_trend.runs_recorded))
-                .then_with(|| {
-                    right_trend
-                        .marker_detection_runs
-                        .cmp(&left_trend.marker_detection_runs)
-                })
-        });
+        .collect::<Vec<_>>();
+    ranked_stages.sort_by(|(left_trend, left_score), (right_trend, right_score)| {
+        right_score
+            .total_cmp(left_score)
+            .then_with(|| {
+                right_trend
+                    .avg_validation_score
+                    .total_cmp(&left_trend.avg_validation_score)
+            })
+            .then_with(|| right_trend.runs_recorded.cmp(&left_trend.runs_recorded))
+            .then_with(|| {
+                left_trend
+                    .marker_detection_runs
+                    .cmp(&right_trend.marker_detection_runs)
+            })
+    });
 
-    let Some((trend, effectiveness_score)) = best else {
+    let Some((trend, effectiveness_score)) = ranked_stages.first().copied() else {
         return default_stage_recommendation_report("no_stage_history_available");
     };
+    let runner_up = ranked_stages.get(1).copied();
+    let effectiveness_gap =
+        runner_up.map(|(_, runner_up_score)| effectiveness_score - runner_up_score);
+    let avg_validation_score_gap = runner_up.map(|(runner_up_trend, _)| {
+        trend.avg_validation_score - runner_up_trend.avg_validation_score
+    });
+    let marker_detection_gap = runner_up.map(|(runner_up_trend, _)| {
+        runner_up_trend.marker_detection_runs as i32 - trend.marker_detection_runs as i32
+    });
 
     let recommendation_status = if trend.runs_recorded < 2 {
         "recommendation_waiting_for_repeated_runs"
@@ -550,6 +560,19 @@ fn build_stage_recommendation(
         "This recommendation is comparative operator guidance, not proof of full RAM or VRAM sanitization."
             .to_string(),
     ];
+    if let Some((runner_up_trend, runner_up_score)) = runner_up {
+        notes.push(format!(
+            "Runner-up stage: {} with effectiveness score {:.1} and average validation score {:.1}/100.",
+            runner_up_trend.stage_label,
+            runner_up_score,
+            runner_up_trend.avg_validation_score
+        ));
+    } else {
+        notes.push(
+            "No runner-up stage exists yet in this scope, so the current recommendation is based on a single recorded cleanup stage trend."
+                .to_string(),
+        );
+    }
 
     if trend.marker_detection_runs > 0 {
         notes.push(
@@ -569,13 +592,32 @@ fn build_stage_recommendation(
                 .to_string(),
         );
     }
+    if let Some(gap) = effectiveness_gap {
+        if gap <= 3.0 {
+            notes.push(
+                "The lead over the runner-up is narrow, so the recommendation should be treated as tentative rather than dominant."
+                    .to_string(),
+            );
+        } else if gap >= 12.0 {
+            notes.push(
+                "The lead over the runner-up is materially wider than a small scoring fluctuation, which makes this recommendation more actionable."
+                    .to_string(),
+            );
+        }
+    }
 
     let summary = match recommendation_status {
         "recommendation_available" => format!(
-            "{} is the current best repeated cleanup stage for this scope based on {} run(s) with an average validation score of {:.1}/100 and no repeated marker detections.",
+            "{} is the current best repeated cleanup stage for this scope based on {} run(s) with an average validation score of {:.1}/100 and no repeated marker detections{}.",
             trend.stage_label,
             trend.runs_recorded,
-            trend.avg_validation_score
+            trend.avg_validation_score,
+            runner_up
+                .map(|(runner_up_trend, _)| format!(
+                    "; it currently leads {}",
+                    runner_up_trend.stage_label
+                ))
+                .unwrap_or_default()
         ),
         "recommendation_waiting_for_repeated_runs" => format!(
             "{} is the current top-scoring cleanup stage, but NullContext has only recorded {} run(s) for it in this scope so far.",
@@ -607,10 +649,19 @@ fn build_stage_recommendation(
         stage_id: Some(trend.stage_id.clone()),
         stage_label: Some(trend.stage_label.clone()),
         stage_kind: Some(trend.stage_kind.clone()),
+        runner_up_stage_id: runner_up.map(|(runner_up_trend, _)| runner_up_trend.stage_id.clone()),
+        runner_up_stage_label: runner_up
+            .map(|(runner_up_trend, _)| runner_up_trend.stage_label.clone()),
+        runner_up_stage_kind: runner_up
+            .map(|(runner_up_trend, _)| runner_up_trend.stage_kind.clone()),
         compared_stage_count: stage_trends.len() as u32,
         runs_recorded: trend.runs_recorded,
         avg_validation_score: Some(trend.avg_validation_score),
         effectiveness_score: Some(effectiveness_score),
+        runner_up_effectiveness_score: runner_up.map(|(_, score)| score),
+        effectiveness_gap,
+        avg_validation_score_gap,
+        marker_detection_gap,
         improved_runs: trend.improved_runs,
         unchanged_runs: trend.unchanged_runs,
         worsened_runs: trend.worsened_runs,
@@ -654,10 +705,17 @@ fn default_stage_recommendation_report(
         stage_id: None,
         stage_label: None,
         stage_kind: None,
+        runner_up_stage_id: None,
+        runner_up_stage_label: None,
+        runner_up_stage_kind: None,
         compared_stage_count: 0,
         runs_recorded: 0,
         avg_validation_score: None,
         effectiveness_score: None,
+        runner_up_effectiveness_score: None,
+        effectiveness_gap: None,
+        avg_validation_score_gap: None,
+        marker_detection_gap: None,
         improved_runs: 0,
         unchanged_runs: 0,
         worsened_runs: 0,

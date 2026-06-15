@@ -310,10 +310,17 @@ export type MemoryValidationStageRecommendationReportData = {
   stage_id?: string | null;
   stage_label?: string | null;
   stage_kind?: string | null;
+  runner_up_stage_id?: string | null;
+  runner_up_stage_label?: string | null;
+  runner_up_stage_kind?: string | null;
   compared_stage_count: number;
   runs_recorded: number;
   avg_validation_score?: number | null;
   effectiveness_score?: number | null;
+  runner_up_effectiveness_score?: number | null;
+  effectiveness_gap?: number | null;
+  avg_validation_score_gap?: number | null;
+  marker_detection_gap?: number | null;
   improved_runs: number;
   unchanged_runs: number;
   worsened_runs: number;

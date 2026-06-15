@@ -1581,6 +1581,23 @@ export function PrivacyReportViewer({
                         : "none",
                   },
                   {
+                    label: "runner-up stage",
+                    value:
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .runner_up_stage_label || "none",
+                  },
+                  {
+                    label: "runner-up kind",
+                    value:
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .runner_up_stage_kind
+                        ? humanizeSnakeCase(
+                            currentReport.memory_validation_history.cleanup_stage_recommendation
+                              .runner_up_stage_kind
+                          )
+                        : "none",
+                  },
+                  {
                     label: "compared stages",
                     value: String(
                       currentReport.memory_validation_history.cleanup_stage_recommendation
@@ -1614,6 +1631,53 @@ export function PrivacyReportViewer({
                         ? "unavailable"
                         : currentReport.memory_validation_history.cleanup_stage_recommendation.effectiveness_score.toFixed(
                             1
+                          ),
+                  },
+                  {
+                    label: "runner-up score",
+                    value:
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .runner_up_effectiveness_score === undefined ||
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .runner_up_effectiveness_score === null
+                        ? "unavailable"
+                        : currentReport.memory_validation_history.cleanup_stage_recommendation.runner_up_effectiveness_score.toFixed(
+                            1
+                          ),
+                  },
+                  {
+                    label: "effectiveness gap",
+                    value:
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .effectiveness_gap === undefined ||
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .effectiveness_gap === null
+                        ? "unavailable"
+                        : currentReport.memory_validation_history.cleanup_stage_recommendation.effectiveness_gap.toFixed(
+                            1
+                          ),
+                  },
+                  {
+                    label: "avg score gap",
+                    value:
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .avg_validation_score_gap === undefined ||
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .avg_validation_score_gap === null
+                        ? "unavailable"
+                        : `${currentReport.memory_validation_history.cleanup_stage_recommendation.avg_validation_score_gap.toFixed(1)}/100`,
+                  },
+                  {
+                    label: "marker-detection gap",
+                    value:
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .marker_detection_gap === undefined ||
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .marker_detection_gap === null
+                        ? "unavailable"
+                        : String(
+                            currentReport.memory_validation_history.cleanup_stage_recommendation
+                              .marker_detection_gap
                           ),
                   },
                   {

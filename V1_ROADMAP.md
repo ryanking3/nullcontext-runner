@@ -310,13 +310,15 @@ Done or largely done:
 - marker-aware cleanup comparison/scoring
 - per-stage process-scan capture
 - helper-stage dedicated canary scans
+- repeated cleanup-stage trend aggregation
+- repeated best-stage recommendation
+- runner-up stage comparison and effectiveness-gap reporting
 
 ### Remaining v1 Work
 
-- aggregate cleanup-stage outcomes across reports
-- rank cleanup stages by repeated observed effectiveness
-- aggregate helper-stage dedicated canary outcomes across reports
+- aggregate helper-stage dedicated canary outcomes across reports more explicitly
 - define what counts as a meaningful pass versus weak/inconclusive evidence
+- tighten recommendation semantics so “best stage” is clearly separated from “clean stage”
 - freeze v1 security claim wording
 
 ### v1 Exit Criteria
@@ -340,16 +342,16 @@ This is the order that best fits the actual blocker stack.
 
 Must do:
 
-- persist cleanup-stage outcome history
-- persist helper-stage canary-scan outcome history
-- summarize repeated stage effectiveness by scope:
+- keep the existing cleanup-stage outcome history and recommendation path honest as more repeated runs accumulate
+- aggregate helper-stage canary-scan outcome history more explicitly
+- define stronger release-gating thresholds for:
+  - enough repeated runs
+  - mixed versus acceptable evidence
+  - marker persistence versus recommendation eligibility
+- keep summarizing repeated stage effectiveness by scope:
   - model
   - platform
   - GPU offload requested
-- show which cleanup stages repeatedly:
-  - improved evidence
-  - stayed mixed
-  - still showed marker persistence
 
 Why first:
 
