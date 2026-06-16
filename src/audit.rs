@@ -13,7 +13,7 @@ use crate::runtime_introspection::RuntimeIntrospectionSignal;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -516,6 +516,12 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub declared_signal_ids: Vec<String>,
     pub declared_cleanup_signal_ids: Vec<String>,
     pub lifecycle_signal_evidence_tier: String,
+    pub signal_contract_status: String,
+    pub signal_contract_summary: String,
+    pub declared_signal_count: u32,
+    pub observed_signal_unique_count: u32,
+    pub missing_declared_signal_count: u32,
+    pub undeclared_observed_signal_count: u32,
     pub cleanup_path_evidence_status: String,
     pub setup_signal_coverage_status: String,
     pub cleanup_signal_coverage_status: String,
@@ -1089,6 +1095,12 @@ fn build_allocator_kv_capability_entry(
     let current_status = match introspection.lifecycle_signal_evidence_tier.as_str() {
         "direct_cleanup_path_signals_observed" => {
             "allocator_and_kv_cleanup_path_signals_active".to_string()
+        }
+        "declared_runtime_signal_contract_fully_exercised" => {
+            "allocator_and_kv_declared_signal_contract_fully_exercised".to_string()
+        }
+        "declared_runtime_signal_contract_partially_exercised" => {
+            "allocator_and_kv_declared_signal_contract_partially_exercised".to_string()
         }
         "declared_and_observed_runtime_signals"
         | "observed_runtime_signals_without_declared_manifest" => {
@@ -1759,6 +1771,22 @@ fn build_llama_runtime_introspection_report(
                 declared_cleanup_signal_ids: vec![],
                 lifecycle_signal_evidence_tier: "introspection_capability_load_failed"
                     .to_string(),
+                signal_contract_status: if startup_failed {
+                    "signal_contract_interrupted_by_startup_failure".to_string()
+                } else {
+                    "signal_contract_unavailable".to_string()
+                },
+                signal_contract_summary: if startup_failed {
+                    "Runtime startup failed before NullContext could compare declared runtime-signal support with observed runtime-signal evidence."
+                        .to_string()
+                } else {
+                    "NullContext could not derive a runtime-signal contract comparison because runtime capability loading failed."
+                        .to_string()
+                },
+                declared_signal_count: 0,
+                observed_signal_unique_count: 0,
+                missing_declared_signal_count: 0,
+                undeclared_observed_signal_count: 0,
                 cleanup_path_evidence_status: if startup_failed {
                     "cleanup_path_unavailable_due_to_startup_failure".to_string()
                 } else {
@@ -1858,6 +1886,25 @@ fn build_llama_runtime_introspection_report(
         .map(map_runtime_introspection_signal)
         .collect::<Vec<_>>();
     let observed_signal_count = observed_events.len() as u32;
+    let declared_signal_ids = capabilities
+        .declared_signal_ids
+        .iter()
+        .chain(capabilities.declared_cleanup_signal_ids.iter())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let observed_signal_ids = observed_signals
+        .iter()
+        .filter(|signal| {
+            signal.status != "failed" && signal.event != "introspection_signal_parse_failed"
+        })
+        .map(|signal| signal.event.clone())
+        .collect::<BTreeSet<_>>();
+    let declared_signal_count = declared_signal_ids.len() as u32;
+    let observed_signal_unique_count = observed_signal_ids.len() as u32;
+    let missing_declared_signal_count =
+        declared_signal_ids.difference(&observed_signal_ids).count() as u32;
+    let undeclared_observed_signal_count =
+        observed_signal_ids.difference(&declared_signal_ids).count() as u32;
     let observed_signal_sources = observed_signal_sources(observed_signals);
     let observed_kv_initialized = observed_signals
         .iter()
@@ -1924,10 +1971,79 @@ fn build_llama_runtime_introspection_report(
     } else {
         "cleanup_path_not_observed_directly".to_string()
     };
+    let signal_contract_status = if startup_failed && observed_signal_unique_count == 0 {
+        "signal_contract_interrupted_by_startup_failure".to_string()
+    } else if declared_signal_count == 0 && observed_signal_unique_count == 0 {
+        "no_declared_runtime_signal_contract".to_string()
+    } else if declared_signal_count == 0 && undeclared_observed_signal_count > 0 {
+        "observed_runtime_signals_without_declared_contract".to_string()
+    } else if missing_declared_signal_count == 0
+        && undeclared_observed_signal_count == 0
+        && declared_signal_count > 0
+    {
+        "all_declared_runtime_signals_observed".to_string()
+    } else if observed_signal_unique_count > 0 && missing_declared_signal_count > 0 {
+        "partial_declared_runtime_signals_observed".to_string()
+    } else if missing_declared_signal_count == declared_signal_count && declared_signal_count > 0 {
+        "declared_runtime_signals_unobserved".to_string()
+    } else if undeclared_observed_signal_count > 0 {
+        "mixed_declared_and_undeclared_runtime_signal_observation".to_string()
+    } else {
+        "runtime_signal_contract_mixed".to_string()
+    };
+    let signal_contract_summary = match signal_contract_status.as_str() {
+        "signal_contract_interrupted_by_startup_failure" => {
+            "Runtime startup failed before NullContext could compare declared runtime-signal support with observed runtime-signal evidence."
+                .to_string()
+        }
+        "all_declared_runtime_signals_observed" => format!(
+            "This runtime declared {} unique runtime signal(s), and NullContext observed all of them in this run.",
+            declared_signal_count
+        ),
+        "partial_declared_runtime_signals_observed" => format!(
+            "This runtime declared {} unique runtime signal(s); NullContext observed {} unique runtime signal(s) and still missed {} declared signal(s) in this run.",
+            declared_signal_count,
+            observed_signal_unique_count,
+            missing_declared_signal_count
+        ),
+        "declared_runtime_signals_unobserved" => format!(
+            "This runtime declared {} unique runtime signal(s), but NullContext did not observe any of them in this run.",
+            declared_signal_count
+        ),
+        "observed_runtime_signals_without_declared_contract" => format!(
+            "NullContext observed {} unique runtime signal(s) even though this runtime did not declare a runtime-signal contract for them.",
+            undeclared_observed_signal_count
+        ),
+        "mixed_declared_and_undeclared_runtime_signal_observation" => format!(
+            "This run mixed declared and undeclared runtime-signal evidence: {} unique observed signal(s), {} missing declared signal(s), and {} undeclared observed signal(s).",
+            observed_signal_unique_count,
+            missing_declared_signal_count,
+            undeclared_observed_signal_count
+        ),
+        "no_declared_runtime_signal_contract" => {
+            "This runtime did not declare a runtime-signal contract, and NullContext did not observe direct runtime lifecycle signals in this run."
+                .to_string()
+        }
+        _ => format!(
+            "Runtime-signal contract evidence remained mixed: declared={}, observed unique={}, missing declared={}, undeclared observed={}.",
+            declared_signal_count,
+            observed_signal_unique_count,
+            missing_declared_signal_count,
+            undeclared_observed_signal_count
+        ),
+    };
     let lifecycle_signal_evidence_tier = if startup_failed && observed_signal_count == 0 {
         "startup_failed_without_direct_runtime_signals".to_string()
     } else if observed_allocator_reset_signal && observed_kv_clear && observed_model_unload_signal {
         "direct_cleanup_path_signals_observed".to_string()
+    } else if signal_contract_status == "all_declared_runtime_signals_observed" {
+        "declared_runtime_signal_contract_fully_exercised".to_string()
+    } else if signal_contract_status == "partial_declared_runtime_signals_observed" {
+        "declared_runtime_signal_contract_partially_exercised".to_string()
+    } else if signal_contract_status == "observed_runtime_signals_without_declared_contract"
+        || signal_contract_status == "mixed_declared_and_undeclared_runtime_signal_observation"
+    {
+        "observed_runtime_signals_without_declared_manifest".to_string()
     } else if observed_signal_count > 0 && capabilities.capability_source == "sidecar_manifest" {
         "declared_and_observed_runtime_signals".to_string()
     } else if observed_signal_count > 0 {
@@ -2088,6 +2204,12 @@ fn build_llama_runtime_introspection_report(
         declared_signal_ids: capabilities.declared_signal_ids.clone(),
         declared_cleanup_signal_ids: capabilities.declared_cleanup_signal_ids.clone(),
         lifecycle_signal_evidence_tier,
+        signal_contract_status,
+        signal_contract_summary,
+        declared_signal_count,
+        observed_signal_unique_count,
+        missing_declared_signal_count,
+        undeclared_observed_signal_count,
         cleanup_path_evidence_status,
         setup_signal_coverage_status,
         cleanup_signal_coverage_status,

@@ -504,6 +504,13 @@ function legacyLlamaRuntimeIntrospectionReport() {
     declared_signal_ids: [],
     declared_cleanup_signal_ids: [],
     lifecycle_signal_evidence_tier: "no_direct_runtime_signal_evidence",
+    signal_contract_status: "signal_contract_unavailable",
+    signal_contract_summary:
+      "This older report did not compare declared runtime-signal support with observed runtime-signal evidence.",
+    declared_signal_count: 0,
+    observed_signal_unique_count: 0,
+    missing_declared_signal_count: 0,
+    undeclared_observed_signal_count: 0,
     cleanup_path_evidence_status: "cleanup_path_not_observed_directly",
     setup_signal_coverage_status: "no_setup_or_reuse_signals_observed",
     cleanup_signal_coverage_status: "no_cleanup_signals_observed",

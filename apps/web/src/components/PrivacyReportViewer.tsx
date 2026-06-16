@@ -949,6 +949,38 @@ export function PrivacyReportViewer({
                   ),
                 },
                 {
+                  label: "signal contract",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.introspection.signal_contract_status
+                  ),
+                },
+                {
+                  label: "declared runtime signals",
+                  value: String(
+                    currentReport.llama_runtime.introspection.declared_signal_count
+                  ),
+                },
+                {
+                  label: "observed unique runtime signals",
+                  value: String(
+                    currentReport.llama_runtime.introspection.observed_signal_unique_count
+                  ),
+                },
+                {
+                  label: "missing declared runtime signals",
+                  value: String(
+                    currentReport.llama_runtime.introspection
+                      .missing_declared_signal_count
+                  ),
+                },
+                {
+                  label: "undeclared observed runtime signals",
+                  value: String(
+                    currentReport.llama_runtime.introspection
+                      .undeclared_observed_signal_count
+                  ),
+                },
+                {
                   label: "cleanup-path evidence",
                   value: humanizeSnakeCase(
                     currentReport.llama_runtime.introspection.cleanup_path_evidence_status
@@ -1091,6 +1123,10 @@ export function PrivacyReportViewer({
                 <p>
                   <strong>kv/cache summary:</strong>{" "}
                   {currentReport.llama_runtime.introspection.kv_cache_summary}
+                </p>
+                <p>
+                  <strong>signal contract:</strong>{" "}
+                  {currentReport.llama_runtime.introspection.signal_contract_summary}
                 </p>
                 <p>
                   <strong>cleanup-signal contract:</strong>{" "}

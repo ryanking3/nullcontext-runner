@@ -87,6 +87,7 @@ NullContext already has meaningful foundations in-tree:
 - validation scorecards and repeated cleanup-stage trends now distinguish stage-local process-scan context from session-fallback scan context
 - validation scorecards and repeated cleanup-stage trends now also track whether cleanup outcomes were backed by direct allocator/KV/model cleanup signals or only by host-tool/process evidence
 - runtime introspection now reports the gap between declared cleanup-signal support and cleanup signals actually observed in the current run, instead of only listing declarations and observations separately
+- runtime introspection now also reports the full declared-versus-observed runtime-signal contract across allocator/KV lifecycle signals, not only the cleanup subset
 
 That is strong progress.
 
@@ -184,6 +185,7 @@ Done or partially done:
 - instrumented manifest declarations now include explicit signal IDs and cleanup-signal IDs
 - allocator/KV cleanup-path support now influences cleanup-stage scorecards and repeated stage trends instead of living only in a separate introspection panel
 - cleanup-signal contract reporting now distinguishes declared support, observed signals, missing declared signals, and undeclared observed signals
+- full runtime-signal contract reporting now distinguishes declared signals, unique observed signals, missing declared signals, and undeclared observed signals across the whole Track B surface
 
 ### Remaining v1 Work
 
@@ -460,7 +462,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `14-24` commits
+- core security/evidence work across Tracks A-E: `13-23` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -469,7 +471,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `36-61` commits
+- `35-60` commits
 
 ### Track Breakdown
 
@@ -489,7 +491,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `1-4` commits
+- `1-3` commits
 
 Expected areas:
 
