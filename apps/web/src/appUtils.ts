@@ -427,6 +427,13 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         if (scorecard.process_scan_context_scope === undefined) {
           scorecard.process_scan_context_scope = "process_scan_context_unavailable";
         }
+        if (scorecard.cleanup_signal_support_status === undefined) {
+          scorecard.cleanup_signal_support_status = "cleanup_signal_support_unavailable";
+        }
+        if (scorecard.cleanup_signal_support_summary === undefined) {
+          scorecard.cleanup_signal_support_summary =
+            "This older report did not attach allocator/KV cleanup-signal support to the stage scorecard.";
+        }
       }
     }
 
@@ -680,6 +687,9 @@ function legacyMemoryValidationStageTrendReport() {
     helper_scan_runs: 0,
     helper_scan_clear_runs: 0,
     helper_scan_marker_detection_runs: 0,
+    cleanup_signal_strong_runs: 0,
+    cleanup_signal_partial_runs: 0,
+    cleanup_signal_limited_runs: 0,
     stage_local_scan_runs: 0,
     stage_local_scan_clear_runs: 0,
     stage_local_scan_marker_detection_runs: 0,
@@ -688,6 +698,7 @@ function legacyMemoryValidationStageTrendReport() {
     latest_vram_evidence_status: "legacy_status_unknown",
     latest_validation_verdict: "legacy_status_unknown",
     latest_marker_evidence_status: "legacy_status_unknown",
+    latest_cleanup_signal_support_status: "cleanup_signal_support_unavailable",
     latest_process_scan_context_status: "process_scan_context_unavailable",
     latest_process_scan_context_scope: "process_scan_context_unavailable",
     summary: "This older report did not include cleanup-stage trend details.",

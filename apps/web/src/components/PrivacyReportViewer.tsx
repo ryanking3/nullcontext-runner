@@ -2107,6 +2107,15 @@ export function PrivacyReportViewer({
                           helper scan marker detections:{" "}
                           {trend.helper_scan_marker_detection_runs}
                         </div>
+                        <div>
+                          cleanup signal strong runs: {trend.cleanup_signal_strong_runs}
+                        </div>
+                        <div>
+                          cleanup signal partial runs: {trend.cleanup_signal_partial_runs}
+                        </div>
+                        <div>
+                          cleanup signal limited runs: {trend.cleanup_signal_limited_runs}
+                        </div>
                         <div>stage-local scan runs: {trend.stage_local_scan_runs}</div>
                         <div>
                           stage-local scan clear runs: {trend.stage_local_scan_clear_runs}
@@ -2132,6 +2141,10 @@ export function PrivacyReportViewer({
                         <div>
                           latest marker evidence:{" "}
                           {humanizeSnakeCase(trend.latest_marker_evidence_status)}
+                        </div>
+                        <div>
+                          latest cleanup signal support:{" "}
+                          {humanizeSnakeCase(trend.latest_cleanup_signal_support_status)}
                         </div>
                         <div>
                           latest process scan context:{" "}
@@ -2402,10 +2415,15 @@ export function PrivacyReportViewer({
                         {humanizeSnakeCase(scorecard.process_scan_context_scope)}
                       </div>
                       <div>
+                        cleanup signal support:{" "}
+                        {humanizeSnakeCase(scorecard.cleanup_signal_support_status)}
+                      </div>
+                      <div>
                         controlled canary:{" "}
                         {humanizeSnakeCase(scorecard.controlled_canary_signal_status)}
                       </div>
                       <div>{scorecard.summary}</div>
+                      <div>{scorecard.cleanup_signal_support_summary}</div>
                     </div>
 
                     {scorecard.strengths.length > 0 && (

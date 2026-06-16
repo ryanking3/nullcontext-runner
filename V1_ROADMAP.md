@@ -85,6 +85,7 @@ NullContext already has meaningful foundations in-tree:
 - active-chat preflight blockers are now surfaced in the UI before any network request is attempted, which makes local model/corpus/config startup failures easier to debug
 - corpus bindings can now be explicitly detached in the UI so cleaned-up corpora do not remain implicitly attached to future runs
 - validation scorecards and repeated cleanup-stage trends now distinguish stage-local process-scan context from session-fallback scan context
+- validation scorecards and repeated cleanup-stage trends now also track whether cleanup outcomes were backed by direct allocator/KV/model cleanup signals or only by host-tool/process evidence
 
 That is strong progress.
 
@@ -180,6 +181,7 @@ Done or partially done:
 - observed runtime events are phase-classified and carry cleanup relevance
 - cleanup-signal coverage is exposed as a compact matrix instead of only spread across booleans
 - instrumented manifest declarations now include explicit signal IDs and cleanup-signal IDs
+- allocator/KV cleanup-path support now influences cleanup-stage scorecards and repeated stage trends instead of living only in a separate introspection panel
 
 ### Remaining v1 Work
 
@@ -456,7 +458,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `16-26` commits
+- core security/evidence work across Tracks A-E: `15-25` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -465,7 +467,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `38-63` commits
+- `37-62` commits
 
 ### Track Breakdown
 
@@ -485,7 +487,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `2-6` commits
+- `1-5` commits
 
 Expected areas:
 

@@ -55,6 +55,10 @@ fn default_process_scan_context_scope() -> String {
     "process_scan_context_unavailable".to_string()
 }
 
+fn default_cleanup_signal_support_status() -> String {
+    "cleanup_signal_support_unavailable".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationHistoryStageResultEntry {
     pub stage_id: String,
@@ -68,6 +72,8 @@ pub struct ValidationHistoryStageResultEntry {
     pub process_scan_context_status: String,
     #[serde(default = "default_process_scan_context_scope")]
     pub process_scan_context_scope: String,
+    #[serde(default = "default_cleanup_signal_support_status")]
+    pub cleanup_signal_support_status: String,
     pub helper_process_scan_status: String,
 }
 
@@ -203,6 +209,7 @@ impl ValidationHistoryEntry {
                     marker_evidence_status: scorecard.marker_evidence_status.clone(),
                     process_scan_context_status: scorecard.process_scan_context_status.clone(),
                     process_scan_context_scope: scorecard.process_scan_context_scope.clone(),
+                    cleanup_signal_support_status: scorecard.cleanup_signal_support_status.clone(),
                     helper_process_scan_status: report
                         .llama_runtime
                         .as_ref()
@@ -390,6 +397,9 @@ struct StageTrendAccumulator {
     helper_scan_runs: u32,
     helper_scan_clear_runs: u32,
     helper_scan_marker_detection_runs: u32,
+    cleanup_signal_strong_runs: u32,
+    cleanup_signal_partial_runs: u32,
+    cleanup_signal_limited_runs: u32,
     stage_local_scan_runs: u32,
     stage_local_scan_clear_runs: u32,
     stage_local_scan_marker_detection_runs: u32,
@@ -399,6 +409,7 @@ struct StageTrendAccumulator {
     latest_vram_evidence_status: String,
     latest_validation_verdict: String,
     latest_marker_evidence_status: String,
+    latest_cleanup_signal_support_status: String,
     latest_process_scan_context_status: String,
     latest_process_scan_context_scope: String,
 }
@@ -470,6 +481,20 @@ fn build_stage_trends(
                     .helper_scan_marker_detection_runs
                     .saturating_add(1);
             }
+            match stage.cleanup_signal_support_status.as_str() {
+                "cleanup_signal_support_strong" => {
+                    accumulator.cleanup_signal_strong_runs =
+                        accumulator.cleanup_signal_strong_runs.saturating_add(1);
+                }
+                "cleanup_signal_support_partial" => {
+                    accumulator.cleanup_signal_partial_runs =
+                        accumulator.cleanup_signal_partial_runs.saturating_add(1);
+                }
+                _ => {
+                    accumulator.cleanup_signal_limited_runs =
+                        accumulator.cleanup_signal_limited_runs.saturating_add(1);
+                }
+            }
             match stage.process_scan_context_scope.as_str() {
                 "stage_local_helper_scan" | "stage_local_cleanup_phase" => {
                     accumulator.stage_local_scan_runs =
@@ -501,6 +526,8 @@ fn build_stage_trends(
                 accumulator.latest_vram_evidence_status = stage.vram_evidence_status.clone();
                 accumulator.latest_validation_verdict = stage.validation_verdict.clone();
                 accumulator.latest_marker_evidence_status = stage.marker_evidence_status.clone();
+                accumulator.latest_cleanup_signal_support_status =
+                    stage.cleanup_signal_support_status.clone();
                 accumulator.latest_process_scan_context_status =
                     stage.process_scan_context_status.clone();
                 accumulator.latest_process_scan_context_scope =
@@ -522,12 +549,14 @@ fn build_stage_trends(
             let latest_vram_evidence_status = accumulator.latest_vram_evidence_status;
             let latest_validation_verdict = accumulator.latest_validation_verdict;
             let latest_marker_evidence_status = accumulator.latest_marker_evidence_status;
+            let latest_cleanup_signal_support_status =
+                accumulator.latest_cleanup_signal_support_status;
             let latest_process_scan_context_status =
                 accumulator.latest_process_scan_context_status;
             let latest_process_scan_context_scope =
                 accumulator.latest_process_scan_context_scope;
             let summary = format!(
-                "{} was recorded in {} run(s), averaged {:.1}/100, improved {} time(s), stayed unchanged {} time(s), worsened {} time(s), and remained inconclusive {} time(s). Stage-local direct scans were recorded in {} run(s), with {} clear stage-local scan(s) and {} stage-local marker-detection run(s).",
+                "{} was recorded in {} run(s), averaged {:.1}/100, improved {} time(s), stayed unchanged {} time(s), worsened {} time(s), and remained inconclusive {} time(s). Stage-local direct scans were recorded in {} run(s), with {} clear stage-local scan(s) and {} stage-local marker-detection run(s). Strong allocator/KV cleanup-signal support was present in {} run(s).",
                 stage_label,
                 accumulator.runs_recorded,
                 avg_validation_score,
@@ -537,7 +566,8 @@ fn build_stage_trends(
                 accumulator.inconclusive_runs,
                 accumulator.stage_local_scan_runs,
                 accumulator.stage_local_scan_clear_runs,
-                accumulator.stage_local_scan_marker_detection_runs
+                accumulator.stage_local_scan_marker_detection_runs,
+                accumulator.cleanup_signal_strong_runs
             );
             let notes = vec![
                 format!(
@@ -553,6 +583,12 @@ fn build_stage_trends(
                     accumulator.helper_scan_marker_detection_runs
                 ),
                 format!(
+                    "Cleanup-signal support: {} strong, {} partial, {} limited/unavailable.",
+                    accumulator.cleanup_signal_strong_runs,
+                    accumulator.cleanup_signal_partial_runs,
+                    accumulator.cleanup_signal_limited_runs
+                ),
+                format!(
                     "Stage-local direct scans: {} total, {} clear, {} marker-detected, {} limited. Session-fallback scan usage: {} run(s).",
                     accumulator.stage_local_scan_runs,
                     accumulator.stage_local_scan_clear_runs,
@@ -561,10 +597,11 @@ fn build_stage_trends(
                     accumulator.session_fallback_scan_runs
                 ),
                 format!(
-                    "Latest VRAM evidence: {}. Latest verdict: {}. Latest marker evidence: {}. Latest process-scan context: {} via {}.",
+                    "Latest VRAM evidence: {}. Latest verdict: {}. Latest marker evidence: {}. Latest cleanup-signal support: {}. Latest process-scan context: {} via {}.",
                     latest_vram_evidence_status.replace('_', " "),
                     latest_validation_verdict.replace('_', " "),
                     latest_marker_evidence_status.replace('_', " "),
+                    latest_cleanup_signal_support_status.replace('_', " "),
                     latest_process_scan_context_status.replace('_', " "),
                     latest_process_scan_context_scope.replace('_', " ")
                 ),
@@ -586,6 +623,9 @@ fn build_stage_trends(
                 helper_scan_runs: accumulator.helper_scan_runs,
                 helper_scan_clear_runs: accumulator.helper_scan_clear_runs,
                 helper_scan_marker_detection_runs: accumulator.helper_scan_marker_detection_runs,
+                cleanup_signal_strong_runs: accumulator.cleanup_signal_strong_runs,
+                cleanup_signal_partial_runs: accumulator.cleanup_signal_partial_runs,
+                cleanup_signal_limited_runs: accumulator.cleanup_signal_limited_runs,
                 stage_local_scan_runs: accumulator.stage_local_scan_runs,
                 stage_local_scan_clear_runs: accumulator.stage_local_scan_clear_runs,
                 stage_local_scan_marker_detection_runs: accumulator
@@ -595,6 +635,7 @@ fn build_stage_trends(
                 latest_vram_evidence_status,
                 latest_validation_verdict,
                 latest_marker_evidence_status,
+                latest_cleanup_signal_support_status,
                 latest_process_scan_context_status,
                 latest_process_scan_context_scope,
                 summary,
@@ -933,6 +974,23 @@ fn build_stage_recommendation(
             trend.stage_local_scan_limited_runs
         ));
     }
+    if trend.cleanup_signal_strong_runs > 0 {
+        notes.push(format!(
+            "The leading stage is backed by strong allocator/KV/model cleanup-signal support in {} repeated run(s).",
+            trend.cleanup_signal_strong_runs
+        ));
+    } else if trend.cleanup_signal_partial_runs > 0 {
+        notes.push(format!(
+            "The leading stage only has partial allocator/KV cleanup-signal support so far: {} partial run(s), {} limited/unavailable run(s).",
+            trend.cleanup_signal_partial_runs,
+            trend.cleanup_signal_limited_runs
+        ));
+    } else {
+        notes.push(
+            "The leading stage does not yet have direct allocator/KV cleanup-signal support in its repeated history."
+                .to_string(),
+        );
+    }
     if let Some(gap) = effectiveness_gap {
         if gap <= 3.0 {
             notes.push(
@@ -1213,10 +1271,13 @@ fn stage_effectiveness_score(trend: &MemoryValidationStageTrendReport) -> f64 {
         + (trend.strong_or_moderate_runs as f64 * 4.0)
         + (trend.clear_marker_support_runs as f64 * 3.0)
         + (trend.helper_scan_clear_runs as f64 * 2.0)
+        + (trend.cleanup_signal_strong_runs as f64 * 3.0)
+        + (trend.cleanup_signal_partial_runs as f64 * 1.0)
         + (trend.stage_local_scan_clear_runs as f64 * 4.0)
         - (trend.worsened_runs as f64 * 12.0)
         - (trend.marker_detection_runs as f64 * 10.0)
         - (trend.helper_scan_marker_detection_runs as f64 * 8.0)
+        - (trend.cleanup_signal_limited_runs as f64 * 1.0)
         - (trend.stage_local_scan_marker_detection_runs as f64 * 12.0)
         - (trend.stage_local_scan_limited_runs as f64 * 2.0)
         - (trend.session_fallback_scan_runs as f64 * 1.0)

@@ -196,6 +196,10 @@ pub struct MemoryValidationStageScorecard {
     pub process_scan_context_status: String,
     #[serde(default = "default_process_scan_context_scope")]
     pub process_scan_context_scope: String,
+    #[serde(default = "default_cleanup_signal_support_status")]
+    pub cleanup_signal_support_status: String,
+    #[serde(default = "default_cleanup_signal_support_summary")]
+    pub cleanup_signal_support_summary: String,
     #[serde(default = "default_controlled_canary_signal_status")]
     pub controlled_canary_signal_status: String,
     pub validation_score: u32,
@@ -315,6 +319,12 @@ pub struct MemoryValidationStageTrendReport {
     pub helper_scan_clear_runs: u32,
     pub helper_scan_marker_detection_runs: u32,
     #[serde(default)]
+    pub cleanup_signal_strong_runs: u32,
+    #[serde(default)]
+    pub cleanup_signal_partial_runs: u32,
+    #[serde(default)]
+    pub cleanup_signal_limited_runs: u32,
+    #[serde(default)]
     pub stage_local_scan_runs: u32,
     #[serde(default)]
     pub stage_local_scan_clear_runs: u32,
@@ -327,6 +337,8 @@ pub struct MemoryValidationStageTrendReport {
     pub latest_vram_evidence_status: String,
     pub latest_validation_verdict: String,
     pub latest_marker_evidence_status: String,
+    #[serde(default = "default_cleanup_signal_support_status")]
+    pub latest_cleanup_signal_support_status: String,
     #[serde(default = "default_process_scan_context_status")]
     pub latest_process_scan_context_status: String,
     #[serde(default = "default_process_scan_context_scope")]
@@ -2641,6 +2653,15 @@ fn default_process_scan_context_status() -> String {
 
 fn default_process_scan_context_scope() -> String {
     "process_scan_context_unavailable".to_string()
+}
+
+fn default_cleanup_signal_support_status() -> String {
+    "cleanup_signal_support_unavailable".to_string()
+}
+
+fn default_cleanup_signal_support_summary() -> String {
+    "This report did not attach allocator/KV cleanup-signal support to the stage scorecard."
+        .to_string()
 }
 
 fn default_controlled_canary_validation_run_report() -> ControlledCanaryValidationRunReport {
