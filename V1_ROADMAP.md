@@ -89,6 +89,7 @@ NullContext already has meaningful foundations in-tree:
 - runtime introspection now reports the gap between declared cleanup-signal support and cleanup signals actually observed in the current run, instead of only listing declarations and observations separately
 - runtime introspection now also reports the full declared-versus-observed runtime-signal contract across allocator/KV lifecycle signals, not only the cleanup subset
 - runtime introspection now explicitly classifies whether observed allocator/KV evidence came from a manifest-declared instrumented path, a partially exercised declared path, or undeclared runtime-signal observation
+- Track B capability reporting now carries the same manifest-backed-versus-undeclared instrumentation evidence distinction as the raw runtime introspection report
 
 That is strong progress.
 
@@ -188,6 +189,7 @@ Done or partially done:
 - cleanup-signal contract reporting now distinguishes declared support, observed signals, missing declared signals, and undeclared observed signals
 - full runtime-signal contract reporting now distinguishes declared signals, unique observed signals, missing declared signals, and undeclared observed signals across the whole Track B surface
 - instrumentation evidence reporting now distinguishes trustworthy manifest-backed runtime-signal evidence from undeclared or stock-runtime signal observation
+- the allocator/KV capability matrix entry now reflects instrumentation evidence class directly instead of relying only on broader lifecycle tiers
 
 ### Remaining v1 Work
 
@@ -464,7 +466,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `12-22` commits
+- core security/evidence work across Tracks A-E: `11-21` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -473,7 +475,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `34-59` commits
+- `33-58` commits
 
 ### Track Breakdown
 
@@ -493,7 +495,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `1-2` commits
+- `0-2` commits
 
 Expected areas:
 

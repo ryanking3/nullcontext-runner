@@ -1094,28 +1094,44 @@ fn build_allocator_kv_capability_entry(
     llama_runtime: &LlamaRuntimeReport,
 ) -> PlatformCapabilityEntryReport {
     let introspection = &llama_runtime.introspection;
-    let current_status = match introspection.lifecycle_signal_evidence_tier.as_str() {
-        "direct_cleanup_path_signals_observed" => {
+    let current_status =
+        if introspection.lifecycle_signal_evidence_tier == "direct_cleanup_path_signals_observed" {
             "allocator_and_kv_cleanup_path_signals_active".to_string()
-        }
-        "declared_runtime_signal_contract_fully_exercised" => {
-            "allocator_and_kv_declared_signal_contract_fully_exercised".to_string()
-        }
-        "declared_runtime_signal_contract_partially_exercised" => {
-            "allocator_and_kv_declared_signal_contract_partially_exercised".to_string()
-        }
-        "declared_and_observed_runtime_signals"
-        | "observed_runtime_signals_without_declared_manifest" => {
-            "allocator_and_kv_signal_support_partial".to_string()
-        }
-        "declared_support_without_observed_session_signals" => {
-            "allocator_and_kv_declared_support_without_session_evidence".to_string()
-        }
-        "startup_failed_without_direct_runtime_signals" => {
-            "allocator_and_kv_signal_collection_blocked_by_startup_failure".to_string()
-        }
-        _ => "allocator_and_kv_signal_support_limited".to_string(),
-    };
+        } else {
+            match introspection.instrumentation_evidence_status.as_str() {
+                "manifest_declared_instrumentation_fully_exercised" => {
+                    "allocator_and_kv_manifest_instrumentation_fully_exercised".to_string()
+                }
+                "manifest_declared_instrumentation_partially_exercised" => {
+                    "allocator_and_kv_manifest_instrumentation_partially_exercised".to_string()
+                }
+                "manifest_declared_instrumentation_unobserved_in_run" => {
+                    "allocator_and_kv_declared_instrumentation_unobserved_in_run".to_string()
+                }
+                "runtime_signals_observed_without_manifest_declared_instrumentation" => {
+                    "allocator_and_kv_observed_without_declared_instrumentation".to_string()
+                }
+                "instrumentation_evidence_interrupted_by_startup_failure" => {
+                    "allocator_and_kv_signal_collection_blocked_by_startup_failure".to_string()
+                }
+                "stock_runtime_without_instrumented_signal_support" => {
+                    "allocator_and_kv_signal_support_limited".to_string()
+                }
+                _ => match introspection.lifecycle_signal_evidence_tier.as_str() {
+                    "declared_and_observed_runtime_signals"
+                    | "observed_runtime_signals_without_declared_manifest" => {
+                        "allocator_and_kv_signal_support_partial".to_string()
+                    }
+                    "declared_support_without_observed_session_signals" => {
+                        "allocator_and_kv_declared_support_without_session_evidence".to_string()
+                    }
+                    "startup_failed_without_direct_runtime_signals" => {
+                        "allocator_and_kv_signal_collection_blocked_by_startup_failure".to_string()
+                    }
+                    _ => "allocator_and_kv_signal_support_limited".to_string(),
+                },
+            }
+        };
     let evidence_level = introspection.lifecycle_signal_evidence_tier.clone();
 
     PlatformCapabilityEntryReport {
@@ -2098,6 +2114,7 @@ fn build_llama_runtime_introspection_report(
                 .to_string()
         }
     };
+    let instrumentation_evidence_status_label = instrumentation_evidence_status.replace('_', " ");
     let lifecycle_signal_evidence_tier = if startup_failed && observed_signal_count == 0 {
         "startup_failed_without_direct_runtime_signals".to_string()
     } else if observed_allocator_reset_signal && observed_kv_clear && observed_model_unload_signal {
@@ -2355,22 +2372,29 @@ fn build_llama_runtime_introspection_report(
         },
         summary: if startup_failed {
             format!(
-                "This runtime used '{}' capability detection on a build profiled as '{}', but startup failed before any allocator/KV signals could be observed directly. NullContext still lacks direct visibility into allocator reset, KV/cache teardown, or model-unload behavior on this path.",
-                capabilities.capability_source, capabilities.runtime_build_profile
+                "This runtime used '{}' capability detection on a build profiled as '{}', but startup failed before any allocator/KV signals could be observed directly. Instrumentation evidence status: {}. NullContext still lacks direct visibility into allocator reset, KV/cache teardown, or model-unload behavior on this path.",
+                capabilities.capability_source,
+                capabilities.runtime_build_profile,
+                instrumentation_evidence_status_label
             )
         } else if capabilities.capability_source == "sidecar_manifest" {
             format!(
-                "NullContext loaded runtime introspection capabilities from a sidecar manifest for build profile '{}'. Host-tool memory observation is still in use, and {} lifecycle signal(s) were captured from runtime output for this session.",
+                "NullContext loaded runtime introspection capabilities from a sidecar manifest for build profile '{}'. Instrumentation evidence status: {}. Host-tool memory observation is still in use, and {} lifecycle signal(s) were captured from runtime output for this session.",
                 capabilities.runtime_build_profile,
+                instrumentation_evidence_status_label,
                 observed_signal_count
             )
         } else if !observed_events.is_empty() {
             format!(
-                "NullContext captured {} runtime lifecycle signal(s) from llama-server output, even though this runtime is otherwise being treated as a stock external build.",
-                observed_signal_count
+                "NullContext captured {} runtime lifecycle signal(s) from llama-server output, even though this runtime is otherwise being treated as a stock external build. Instrumentation evidence status: {}.",
+                observed_signal_count,
+                instrumentation_evidence_status_label
             )
         } else {
-            "This runtime is being treated as a stock external llama-server build. NullContext can currently observe process- and host-tool-level evidence, but it does not yet have direct allocator, KV/cache, or model-unload introspection inside llama.cpp.".to_string()
+            format!(
+                "This runtime is being treated as a stock external llama-server build. Instrumentation evidence status: {}. NullContext can currently observe process- and host-tool-level evidence, but it does not yet have direct allocator, KV/cache, or model-unload introspection inside llama.cpp.",
+                instrumentation_evidence_status_label
+            )
         },
         observed_signal_count,
         observed_signal_sources,
