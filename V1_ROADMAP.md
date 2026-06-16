@@ -88,6 +88,7 @@ NullContext already has meaningful foundations in-tree:
 - validation scorecards and repeated cleanup-stage trends now also track whether cleanup outcomes were backed by direct allocator/KV/model cleanup signals or only by host-tool/process evidence
 - runtime introspection now reports the gap between declared cleanup-signal support and cleanup signals actually observed in the current run, instead of only listing declarations and observations separately
 - runtime introspection now also reports the full declared-versus-observed runtime-signal contract across allocator/KV lifecycle signals, not only the cleanup subset
+- runtime introspection now explicitly classifies whether observed allocator/KV evidence came from a manifest-declared instrumented path, a partially exercised declared path, or undeclared runtime-signal observation
 
 That is strong progress.
 
@@ -186,6 +187,7 @@ Done or partially done:
 - allocator/KV cleanup-path support now influences cleanup-stage scorecards and repeated stage trends instead of living only in a separate introspection panel
 - cleanup-signal contract reporting now distinguishes declared support, observed signals, missing declared signals, and undeclared observed signals
 - full runtime-signal contract reporting now distinguishes declared signals, unique observed signals, missing declared signals, and undeclared observed signals across the whole Track B surface
+- instrumentation evidence reporting now distinguishes trustworthy manifest-backed runtime-signal evidence from undeclared or stock-runtime signal observation
 
 ### Remaining v1 Work
 
@@ -462,7 +464,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `13-23` commits
+- core security/evidence work across Tracks A-E: `12-22` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -471,7 +473,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `35-60` commits
+- `34-59` commits
 
 ### Track Breakdown
 
@@ -491,7 +493,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `1-3` commits
+- `1-2` commits
 
 Expected areas:
 

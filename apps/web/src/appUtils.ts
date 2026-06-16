@@ -507,6 +507,9 @@ function legacyLlamaRuntimeIntrospectionReport() {
     signal_contract_status: "signal_contract_unavailable",
     signal_contract_summary:
       "This older report did not compare declared runtime-signal support with observed runtime-signal evidence.",
+    instrumentation_evidence_status: "instrumentation_evidence_unavailable",
+    instrumentation_evidence_summary:
+      "This older report did not classify whether runtime-signal evidence came from a trustworthy instrumented path or only from undeclared observations.",
     declared_signal_count: 0,
     observed_signal_unique_count: 0,
     missing_declared_signal_count: 0,

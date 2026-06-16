@@ -949,6 +949,12 @@ export function PrivacyReportViewer({
                   ),
                 },
                 {
+                  label: "instrumentation evidence",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.introspection.instrumentation_evidence_status
+                  ),
+                },
+                {
                   label: "signal contract",
                   value: humanizeSnakeCase(
                     currentReport.llama_runtime.introspection.signal_contract_status
@@ -1123,6 +1129,10 @@ export function PrivacyReportViewer({
                 <p>
                   <strong>kv/cache summary:</strong>{" "}
                   {currentReport.llama_runtime.introspection.kv_cache_summary}
+                </p>
+                <p>
+                  <strong>instrumentation evidence:</strong>{" "}
+                  {currentReport.llama_runtime.introspection.instrumentation_evidence_summary}
                 </p>
                 <p>
                   <strong>signal contract:</strong>{" "}

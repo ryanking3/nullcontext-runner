@@ -518,6 +518,8 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub lifecycle_signal_evidence_tier: String,
     pub signal_contract_status: String,
     pub signal_contract_summary: String,
+    pub instrumentation_evidence_status: String,
+    pub instrumentation_evidence_summary: String,
     pub declared_signal_count: u32,
     pub observed_signal_unique_count: u32,
     pub missing_declared_signal_count: u32,
@@ -1130,9 +1132,11 @@ fn build_allocator_kv_capability_entry(
         notes: vec![
             introspection.allocator_summary.clone(),
             introspection.kv_cache_summary.clone(),
+            introspection.instrumentation_evidence_summary.clone(),
             introspection.cleanup_signal_contract_summary.clone(),
             format!(
-                "Setup-signal coverage: {}. Cleanup-path evidence status: {}. Cleanup-signal coverage: {}. Cleanup-signal contract: {}. Observed signal count: {}.",
+                "Instrumentation evidence: {}. Setup-signal coverage: {}. Cleanup-path evidence status: {}. Cleanup-signal coverage: {}. Cleanup-signal contract: {}. Observed signal count: {}.",
+                introspection.instrumentation_evidence_status.replace('_', " "),
                 introspection.setup_signal_coverage_status.replace('_', " "),
                 introspection.cleanup_path_evidence_status.replace('_', " "),
                 introspection.cleanup_signal_coverage_status.replace('_', " "),
@@ -1783,6 +1787,18 @@ fn build_llama_runtime_introspection_report(
                     "NullContext could not derive a runtime-signal contract comparison because runtime capability loading failed."
                         .to_string()
                 },
+                instrumentation_evidence_status: if startup_failed {
+                    "instrumentation_evidence_interrupted_by_startup_failure".to_string()
+                } else {
+                    "instrumentation_evidence_unavailable".to_string()
+                },
+                instrumentation_evidence_summary: if startup_failed {
+                    "Runtime startup failed before NullContext could determine whether the current run exercised a trustworthy instrumented runtime path."
+                        .to_string()
+                } else {
+                    "NullContext could not determine whether this run used a trustworthy instrumented runtime path because capability loading failed."
+                        .to_string()
+                },
                 declared_signal_count: 0,
                 observed_signal_unique_count: 0,
                 missing_declared_signal_count: 0,
@@ -2032,6 +2048,56 @@ fn build_llama_runtime_introspection_report(
             undeclared_observed_signal_count
         ),
     };
+    let instrumentation_evidence_status = if startup_failed && observed_signal_unique_count == 0 {
+        "instrumentation_evidence_interrupted_by_startup_failure".to_string()
+    } else if capabilities.capability_source == "sidecar_manifest"
+        && signal_contract_status == "all_declared_runtime_signals_observed"
+    {
+        "manifest_declared_instrumentation_fully_exercised".to_string()
+    } else if capabilities.capability_source == "sidecar_manifest"
+        && observed_signal_unique_count > 0
+    {
+        "manifest_declared_instrumentation_partially_exercised".to_string()
+    } else if capabilities.capability_source == "sidecar_manifest" {
+        "manifest_declared_instrumentation_unobserved_in_run".to_string()
+    } else if observed_signal_unique_count > 0 {
+        "runtime_signals_observed_without_manifest_declared_instrumentation".to_string()
+    } else if capabilities.capability_source == "stock_runtime_fallback" {
+        "stock_runtime_without_instrumented_signal_support".to_string()
+    } else {
+        "instrumentation_evidence_mixed".to_string()
+    };
+    let instrumentation_evidence_summary = match instrumentation_evidence_status.as_str() {
+        "instrumentation_evidence_interrupted_by_startup_failure" => {
+            "Runtime startup failed before NullContext could determine whether the current run exercised a trustworthy instrumented runtime path."
+                .to_string()
+        }
+        "manifest_declared_instrumentation_fully_exercised" => format!(
+            "This run used a manifest-declared instrumented runtime path and exercised all {} declared runtime signal(s).",
+            declared_signal_count
+        ),
+        "manifest_declared_instrumentation_partially_exercised" => format!(
+            "This run used a manifest-declared instrumented runtime path, but only {} of {} declared runtime signal(s) were observed in the current run.",
+            observed_signal_unique_count,
+            declared_signal_count
+        ),
+        "manifest_declared_instrumentation_unobserved_in_run" => {
+            "This runtime declared an instrumented signal contract, but the current run did not observe direct runtime signals from it."
+                .to_string()
+        }
+        "runtime_signals_observed_without_manifest_declared_instrumentation" => {
+            "NullContext observed direct runtime lifecycle signals in this run, but they were not backed by a manifest-declared instrumented runtime contract."
+                .to_string()
+        }
+        "stock_runtime_without_instrumented_signal_support" => {
+            "This run is being treated as a stock external runtime path without declared instrumented signal support."
+                .to_string()
+        }
+        _ => {
+            "Instrumentation evidence remained mixed, so manifest-declared support and observed runtime signals should both be treated cautiously."
+                .to_string()
+        }
+    };
     let lifecycle_signal_evidence_tier = if startup_failed && observed_signal_count == 0 {
         "startup_failed_without_direct_runtime_signals".to_string()
     } else if observed_allocator_reset_signal && observed_kv_clear && observed_model_unload_signal {
@@ -2206,6 +2272,8 @@ fn build_llama_runtime_introspection_report(
         lifecycle_signal_evidence_tier,
         signal_contract_status,
         signal_contract_summary,
+        instrumentation_evidence_status,
+        instrumentation_evidence_summary,
         declared_signal_count,
         observed_signal_unique_count,
         missing_declared_signal_count,

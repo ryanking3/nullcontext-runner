@@ -458,6 +458,8 @@ export type LlamaRuntimeIntrospectionReport = {
   lifecycle_signal_evidence_tier: string;
   signal_contract_status: string;
   signal_contract_summary: string;
+  instrumentation_evidence_status: string;
+  instrumentation_evidence_summary: string;
   declared_signal_count: number;
   observed_signal_unique_count: number;
   missing_declared_signal_count: number;
