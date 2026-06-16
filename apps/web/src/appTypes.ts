@@ -459,6 +459,12 @@ export type LlamaRuntimeIntrospectionReport = {
   cleanup_path_evidence_status: string;
   setup_signal_coverage_status: string;
   cleanup_signal_coverage_status: string;
+  cleanup_signal_contract_status: string;
+  cleanup_signal_contract_summary: string;
+  declared_cleanup_signal_count: number;
+  observed_cleanup_signal_count: number;
+  missing_declared_cleanup_signal_count: number;
+  undeclared_observed_cleanup_signal_count: number;
   allocator_introspection_status: string;
   allocator_initialized_observed: boolean;
   allocator_teardown_observed: boolean;

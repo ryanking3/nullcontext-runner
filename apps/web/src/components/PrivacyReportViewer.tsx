@@ -967,6 +967,38 @@ export function PrivacyReportViewer({
                   ),
                 },
                 {
+                  label: "cleanup-signal contract",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.introspection.cleanup_signal_contract_status
+                  ),
+                },
+                {
+                  label: "declared cleanup signals",
+                  value: String(
+                    currentReport.llama_runtime.introspection.declared_cleanup_signal_count
+                  ),
+                },
+                {
+                  label: "observed cleanup signals",
+                  value: String(
+                    currentReport.llama_runtime.introspection.observed_cleanup_signal_count
+                  ),
+                },
+                {
+                  label: "missing declared signals",
+                  value: String(
+                    currentReport.llama_runtime.introspection
+                      .missing_declared_cleanup_signal_count
+                  ),
+                },
+                {
+                  label: "undeclared observed signals",
+                  value: String(
+                    currentReport.llama_runtime.introspection
+                      .undeclared_observed_cleanup_signal_count
+                  ),
+                },
+                {
                   label: "allocator introspection",
                   value: humanizeSnakeCase(
                     currentReport.llama_runtime.introspection.allocator_introspection_status
@@ -1059,6 +1091,10 @@ export function PrivacyReportViewer({
                 <p>
                   <strong>kv/cache summary:</strong>{" "}
                   {currentReport.llama_runtime.introspection.kv_cache_summary}
+                </p>
+                <p>
+                  <strong>cleanup-signal contract:</strong>{" "}
+                  {currentReport.llama_runtime.introspection.cleanup_signal_contract_summary}
                 </p>
                 {currentReport.llama_runtime.introspection.notes.map((note) => (
                   <p key={note}>{note}</p>

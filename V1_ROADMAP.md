@@ -86,6 +86,7 @@ NullContext already has meaningful foundations in-tree:
 - corpus bindings can now be explicitly detached in the UI so cleaned-up corpora do not remain implicitly attached to future runs
 - validation scorecards and repeated cleanup-stage trends now distinguish stage-local process-scan context from session-fallback scan context
 - validation scorecards and repeated cleanup-stage trends now also track whether cleanup outcomes were backed by direct allocator/KV/model cleanup signals or only by host-tool/process evidence
+- runtime introspection now reports the gap between declared cleanup-signal support and cleanup signals actually observed in the current run, instead of only listing declarations and observations separately
 
 That is strong progress.
 
@@ -182,6 +183,7 @@ Done or partially done:
 - cleanup-signal coverage is exposed as a compact matrix instead of only spread across booleans
 - instrumented manifest declarations now include explicit signal IDs and cleanup-signal IDs
 - allocator/KV cleanup-path support now influences cleanup-stage scorecards and repeated stage trends instead of living only in a separate introspection panel
+- cleanup-signal contract reporting now distinguishes declared support, observed signals, missing declared signals, and undeclared observed signals
 
 ### Remaining v1 Work
 
@@ -458,7 +460,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `15-25` commits
+- core security/evidence work across Tracks A-E: `14-24` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -467,7 +469,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `37-62` commits
+- `36-61` commits
 
 ### Track Breakdown
 
@@ -487,7 +489,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `1-5` commits
+- `1-4` commits
 
 Expected areas:
 

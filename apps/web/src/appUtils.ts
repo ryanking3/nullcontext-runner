@@ -507,6 +507,13 @@ function legacyLlamaRuntimeIntrospectionReport() {
     cleanup_path_evidence_status: "cleanup_path_not_observed_directly",
     setup_signal_coverage_status: "no_setup_or_reuse_signals_observed",
     cleanup_signal_coverage_status: "no_cleanup_signals_observed",
+    cleanup_signal_contract_status: "cleanup_signal_contract_unavailable",
+    cleanup_signal_contract_summary:
+      "This older report did not compare declared cleanup-signal support with observed cleanup-signal evidence.",
+    declared_cleanup_signal_count: 0,
+    observed_cleanup_signal_count: 0,
+    missing_declared_cleanup_signal_count: 0,
+    undeclared_observed_cleanup_signal_count: 0,
     allocator_introspection_status: "allocator_introspection_unavailable",
     allocator_initialized_observed: false,
     allocator_teardown_observed: false,

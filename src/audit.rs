@@ -519,6 +519,12 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub cleanup_path_evidence_status: String,
     pub setup_signal_coverage_status: String,
     pub cleanup_signal_coverage_status: String,
+    pub cleanup_signal_contract_status: String,
+    pub cleanup_signal_contract_summary: String,
+    pub declared_cleanup_signal_count: u32,
+    pub observed_cleanup_signal_count: u32,
+    pub missing_declared_cleanup_signal_count: u32,
+    pub undeclared_observed_cleanup_signal_count: u32,
     pub allocator_introspection_status: String,
     pub allocator_initialized_observed: bool,
     pub allocator_teardown_observed: bool,
@@ -1112,11 +1118,13 @@ fn build_allocator_kv_capability_entry(
         notes: vec![
             introspection.allocator_summary.clone(),
             introspection.kv_cache_summary.clone(),
+            introspection.cleanup_signal_contract_summary.clone(),
             format!(
-                "Setup-signal coverage: {}. Cleanup-path evidence status: {}. Cleanup-signal coverage: {}. Observed signal count: {}.",
+                "Setup-signal coverage: {}. Cleanup-path evidence status: {}. Cleanup-signal coverage: {}. Cleanup-signal contract: {}. Observed signal count: {}.",
                 introspection.setup_signal_coverage_status.replace('_', " "),
                 introspection.cleanup_path_evidence_status.replace('_', " "),
                 introspection.cleanup_signal_coverage_status.replace('_', " "),
+                introspection.cleanup_signal_contract_status.replace('_', " "),
                 introspection.observed_signal_count
             ),
         ],
@@ -1766,6 +1774,22 @@ fn build_llama_runtime_introspection_report(
                 } else {
                     "no_cleanup_signals_observed".to_string()
                 },
+                cleanup_signal_contract_status: if startup_failed {
+                    "cleanup_signal_contract_interrupted_by_startup_failure".to_string()
+                } else {
+                    "cleanup_signal_contract_unavailable".to_string()
+                },
+                cleanup_signal_contract_summary: if startup_failed {
+                    "Runtime startup failed before NullContext could compare declared cleanup-signal support with observed cleanup-signal evidence."
+                        .to_string()
+                } else {
+                    "NullContext could not derive a cleanup-signal contract comparison because runtime capability loading failed."
+                        .to_string()
+                },
+                declared_cleanup_signal_count: 0,
+                observed_cleanup_signal_count: 0,
+                missing_declared_cleanup_signal_count: 0,
+                undeclared_observed_cleanup_signal_count: 0,
                 allocator_introspection_status: "allocator_introspection_capability_load_failed"
                     .to_string(),
                 allocator_initialized_observed: false,
@@ -1970,6 +1994,91 @@ fn build_llama_runtime_introspection_report(
             startup_failed,
         ),
     ];
+    let declared_cleanup_signal_count = cleanup_signal_matrix
+        .iter()
+        .filter(|entry| entry.declared_support_status == "declared_supported")
+        .count() as u32;
+    let observed_cleanup_signal_count = cleanup_signal_matrix
+        .iter()
+        .filter(|entry| entry.observation_status == "signal_observed")
+        .count() as u32;
+    let missing_declared_cleanup_signal_count = cleanup_signal_matrix
+        .iter()
+        .filter(|entry| {
+            entry.declared_support_status == "declared_supported"
+                && entry.observation_status != "signal_observed"
+        })
+        .count() as u32;
+    let undeclared_observed_cleanup_signal_count = cleanup_signal_matrix
+        .iter()
+        .filter(|entry| {
+            entry.declared_support_status != "declared_supported"
+                && entry.observation_status == "signal_observed"
+        })
+        .count() as u32;
+    let cleanup_signal_contract_status = if startup_failed {
+        "cleanup_signal_contract_interrupted_by_startup_failure".to_string()
+    } else if declared_cleanup_signal_count == 0 && observed_cleanup_signal_count == 0 {
+        "no_declared_cleanup_signal_contract".to_string()
+    } else if declared_cleanup_signal_count == 0 && undeclared_observed_cleanup_signal_count > 0 {
+        "observed_cleanup_signals_without_declared_contract".to_string()
+    } else if missing_declared_cleanup_signal_count == 0
+        && undeclared_observed_cleanup_signal_count == 0
+        && declared_cleanup_signal_count > 0
+    {
+        "all_declared_cleanup_signals_observed".to_string()
+    } else if observed_cleanup_signal_count > 0 && missing_declared_cleanup_signal_count > 0 {
+        "partial_declared_cleanup_signals_observed".to_string()
+    } else if missing_declared_cleanup_signal_count == declared_cleanup_signal_count
+        && declared_cleanup_signal_count > 0
+    {
+        "declared_cleanup_signals_unobserved".to_string()
+    } else if undeclared_observed_cleanup_signal_count > 0 {
+        "mixed_declared_and_undeclared_cleanup_signal_observation".to_string()
+    } else {
+        "cleanup_signal_contract_mixed".to_string()
+    };
+    let cleanup_signal_contract_summary = match cleanup_signal_contract_status.as_str() {
+        "cleanup_signal_contract_interrupted_by_startup_failure" => {
+            "Runtime startup failed before NullContext could compare declared cleanup-signal support with observed cleanup-signal evidence."
+                .to_string()
+        }
+        "all_declared_cleanup_signals_observed" => format!(
+            "This runtime declared {} cleanup signal(s), and NullContext observed all of them in this run.",
+            declared_cleanup_signal_count
+        ),
+        "partial_declared_cleanup_signals_observed" => format!(
+            "This runtime declared {} cleanup signal(s); NullContext observed {} of them and still missed {} declared cleanup signal(s) in this run.",
+            declared_cleanup_signal_count,
+            observed_cleanup_signal_count,
+            missing_declared_cleanup_signal_count
+        ),
+        "declared_cleanup_signals_unobserved" => format!(
+            "This runtime declared {} cleanup signal(s), but NullContext did not observe any of them in this run.",
+            declared_cleanup_signal_count
+        ),
+        "observed_cleanup_signals_without_declared_contract" => format!(
+            "NullContext observed {} cleanup signal(s) even though this runtime did not declare a cleanup-signal contract for them.",
+            undeclared_observed_cleanup_signal_count
+        ),
+        "mixed_declared_and_undeclared_cleanup_signal_observation" => format!(
+            "This run mixed declared and undeclared cleanup-signal evidence: {} declared signal(s) were observed, {} declared signal(s) were missed, and {} undeclared cleanup signal(s) were still observed.",
+            observed_cleanup_signal_count.saturating_sub(undeclared_observed_cleanup_signal_count),
+            missing_declared_cleanup_signal_count,
+            undeclared_observed_cleanup_signal_count
+        ),
+        "no_declared_cleanup_signal_contract" => {
+            "This runtime did not declare a cleanup-signal contract, and NullContext did not observe direct cleanup signals in this run."
+                .to_string()
+        }
+        _ => format!(
+            "Cleanup-signal contract evidence remained mixed: declared={}, observed={}, missing declared={}, undeclared observed={}.",
+            declared_cleanup_signal_count,
+            observed_cleanup_signal_count,
+            missing_declared_cleanup_signal_count,
+            undeclared_observed_cleanup_signal_count
+        ),
+    };
 
     LlamaRuntimeIntrospectionReport {
         capability_source: capabilities.capability_source.clone(),
@@ -1982,6 +2091,12 @@ fn build_llama_runtime_introspection_report(
         cleanup_path_evidence_status,
         setup_signal_coverage_status,
         cleanup_signal_coverage_status,
+        cleanup_signal_contract_status,
+        cleanup_signal_contract_summary,
+        declared_cleanup_signal_count,
+        observed_cleanup_signal_count,
+        missing_declared_cleanup_signal_count,
+        undeclared_observed_cleanup_signal_count,
         allocator_introspection_status: if observed_allocator_signal {
             "allocator_lifecycle_signals_observed".to_string()
         } else {
