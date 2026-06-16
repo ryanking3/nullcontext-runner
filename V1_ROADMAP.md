@@ -84,6 +84,7 @@ NullContext already has meaningful foundations in-tree:
 - richer manifest-declared signal contract for instrumented runtimes
 - active-chat preflight blockers are now surfaced in the UI before any network request is attempted, which makes local model/corpus/config startup failures easier to debug
 - corpus bindings can now be explicitly detached in the UI so cleaned-up corpora do not remain implicitly attached to future runs
+- validation scorecards and repeated cleanup-stage trends now distinguish stage-local process-scan context from session-fallback scan context
 
 That is strong progress.
 
@@ -125,12 +126,13 @@ Done or largely done:
 - repeated controlled canary scans exist
 - cleanup-stage process scans exist where PID visibility still allows them
 - helper-stage canary scans exist for helper relaunch/churn stages
+- stage-local versus session-fallback process-scan attribution is now explicit in cleanup-stage scorecards and repeated stage trends
 
 ### Remaining v1 Work
 
 - aggregate cleanup-stage scan outcomes across runs, not just per report
 - make stage-level evidence easier to compare over time
-- reduce places where fallback session-wide scan context is still used instead of truly stage-local evidence
+- reduce the remaining places where fallback session-wide scan context is still used instead of truly stage-local evidence
 - expand beyond Windows when feasible, but only if it does not stall higher-priority truth work
 
 ### v1 Exit Criteria
@@ -454,7 +456,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `17-27` commits
+- core security/evidence work across Tracks A-E: `16-26` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -463,7 +465,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `39-64` commits
+- `38-63` commits
 
 ### Track Breakdown
 
@@ -471,7 +473,7 @@ Estimated total remaining before `v1`:
 
 Estimated remaining:
 
-- `3-5` commits
+- `2-4` commits
 
 Expected areas:
 

@@ -194,6 +194,8 @@ pub struct MemoryValidationStageScorecard {
     #[serde(default = "default_vram_cleanup_marker_evidence_status")]
     pub marker_evidence_status: String,
     pub process_scan_context_status: String,
+    #[serde(default = "default_process_scan_context_scope")]
+    pub process_scan_context_scope: String,
     #[serde(default = "default_controlled_canary_signal_status")]
     pub controlled_canary_signal_status: String,
     pub validation_score: u32,
@@ -312,9 +314,23 @@ pub struct MemoryValidationStageTrendReport {
     pub helper_scan_runs: u32,
     pub helper_scan_clear_runs: u32,
     pub helper_scan_marker_detection_runs: u32,
+    #[serde(default)]
+    pub stage_local_scan_runs: u32,
+    #[serde(default)]
+    pub stage_local_scan_clear_runs: u32,
+    #[serde(default)]
+    pub stage_local_scan_marker_detection_runs: u32,
+    #[serde(default)]
+    pub stage_local_scan_limited_runs: u32,
+    #[serde(default)]
+    pub session_fallback_scan_runs: u32,
     pub latest_vram_evidence_status: String,
     pub latest_validation_verdict: String,
     pub latest_marker_evidence_status: String,
+    #[serde(default = "default_process_scan_context_status")]
+    pub latest_process_scan_context_status: String,
+    #[serde(default = "default_process_scan_context_scope")]
+    pub latest_process_scan_context_scope: String,
     pub summary: String,
     pub notes: Vec<String>,
 }
@@ -2617,6 +2633,14 @@ fn default_vram_cleanup_marker_evidence_status() -> String {
 fn default_vram_cleanup_marker_evidence_summary() -> String {
     "This report had not yet attached RAM-side marker-persistence context to the VRAM cleanup comparison."
         .to_string()
+}
+
+fn default_process_scan_context_status() -> String {
+    "process_scan_context_unavailable".to_string()
+}
+
+fn default_process_scan_context_scope() -> String {
+    "process_scan_context_unavailable".to_string()
 }
 
 fn default_controlled_canary_validation_run_report() -> ControlledCanaryValidationRunReport {

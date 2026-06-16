@@ -228,17 +228,28 @@ fn build_stage_scorecard(
     let mut score = 0_u32;
     let mut strengths = Vec::new();
     let mut gaps = Vec::new();
-    let process_scan_signal_status = stage
-        .helper_process_scan_report
-        .as_ref()
-        .map(derive_process_scan_signal_status_from_report)
-        .or_else(|| {
-            stage
-                .process_scan_phase
-                .as_ref()
-                .map(derive_process_scan_signal_status_from_phase)
-        })
-        .unwrap_or_else(|| fallback_process_scan_signal_status.to_string());
+    let (process_scan_signal_status, process_scan_context_scope) =
+        if let Some(report) = stage.helper_process_scan_report.as_ref() {
+            (
+                derive_process_scan_signal_status_from_report(report),
+                "stage_local_helper_scan".to_string(),
+            )
+        } else if let Some(phase) = stage.process_scan_phase.as_ref() {
+            (
+                derive_process_scan_signal_status_from_phase(phase),
+                "stage_local_cleanup_phase".to_string(),
+            )
+        } else if fallback_process_scan_signal_status != "process_scan_context_unavailable" {
+            (
+                fallback_process_scan_signal_status.to_string(),
+                "session_fallback".to_string(),
+            )
+        } else {
+            (
+                fallback_process_scan_signal_status.to_string(),
+                "process_scan_context_unavailable".to_string(),
+            )
+        };
 
     match stage.evidence_improvement_status.as_str() {
         "evidence_improved_pid_no_longer_observed_after_strategy" => {
@@ -375,7 +386,7 @@ fn build_stage_scorecard(
 
     match process_scan_signal_status.as_str() {
         "marker_persistence_detected" => gaps.push(
-            "Session-scoped direct process scanning still detected configured markers in readable llama-server memory."
+            "Direct process scanning still detected configured markers in readable llama-server memory."
                 .to_string(),
         ),
         "marker_scan_inconclusive"
@@ -383,7 +394,23 @@ fn build_stage_scorecard(
         | "marker_scan_not_completed"
         | "process_scan_context_unavailable"
         | "marker_scan_context_mixed" => gaps.push(
-            "Session-scoped direct process-scan evidence remained limited, incomplete, or unavailable."
+            "Direct process-scan evidence remained limited, incomplete, or unavailable."
+                .to_string(),
+        ),
+        _ => {}
+    }
+
+    match process_scan_context_scope.as_str() {
+        "stage_local_helper_scan" => strengths.push(
+            "This stage carried its own helper-stage direct process scan instead of relying only on session-level fallback context."
+                .to_string(),
+        ),
+        "stage_local_cleanup_phase" => strengths.push(
+            "This stage carried its own cleanup-phase direct process scan context instead of relying only on session-level fallback context."
+                .to_string(),
+        ),
+        "session_fallback" => gaps.push(
+            "This stage did not have truly stage-local process-scan evidence, so its RAM-side context still relied on the broader session scan."
                 .to_string(),
         ),
         _ => {}
@@ -424,6 +451,7 @@ fn build_stage_scorecard(
         vram_evidence_status: stage.evidence_improvement_status.clone(),
         marker_evidence_status: stage.marker_evidence_status.clone(),
         process_scan_context_status: process_scan_signal_status,
+        process_scan_context_scope,
         controlled_canary_signal_status: controlled_canary_signal_status.to_string(),
         validation_score,
         validation_verdict,

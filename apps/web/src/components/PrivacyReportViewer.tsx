@@ -2107,6 +2107,20 @@ export function PrivacyReportViewer({
                           helper scan marker detections:{" "}
                           {trend.helper_scan_marker_detection_runs}
                         </div>
+                        <div>stage-local scan runs: {trend.stage_local_scan_runs}</div>
+                        <div>
+                          stage-local scan clear runs: {trend.stage_local_scan_clear_runs}
+                        </div>
+                        <div>
+                          stage-local scan marker detections:{" "}
+                          {trend.stage_local_scan_marker_detection_runs}
+                        </div>
+                        <div>
+                          stage-local scan limited runs: {trend.stage_local_scan_limited_runs}
+                        </div>
+                        <div>
+                          session fallback scan runs: {trend.session_fallback_scan_runs}
+                        </div>
                         <div>
                           latest vram evidence:{" "}
                           {humanizeSnakeCase(trend.latest_vram_evidence_status)}
@@ -2118,6 +2132,14 @@ export function PrivacyReportViewer({
                         <div>
                           latest marker evidence:{" "}
                           {humanizeSnakeCase(trend.latest_marker_evidence_status)}
+                        </div>
+                        <div>
+                          latest process scan context:{" "}
+                          {humanizeSnakeCase(trend.latest_process_scan_context_status)}
+                        </div>
+                        <div>
+                          latest process scan scope:{" "}
+                          {humanizeSnakeCase(trend.latest_process_scan_context_scope)}
                         </div>
                         <div>{trend.summary}</div>
                         {trend.notes.map((note) => (
@@ -2374,6 +2396,10 @@ export function PrivacyReportViewer({
                       <div>
                         process scan context:{" "}
                         {humanizeSnakeCase(scorecard.process_scan_context_status)}
+                      </div>
+                      <div>
+                        process scan scope:{" "}
+                        {humanizeSnakeCase(scorecard.process_scan_context_scope)}
                       </div>
                       <div>
                         controlled canary:{" "}

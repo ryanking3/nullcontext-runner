@@ -424,6 +424,9 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         if (scorecard.marker_evidence_status === undefined) {
           scorecard.marker_evidence_status = "marker_evidence_not_yet_contextualized";
         }
+        if (scorecard.process_scan_context_scope === undefined) {
+          scorecard.process_scan_context_scope = "process_scan_context_unavailable";
+        }
       }
     }
 
@@ -677,9 +680,16 @@ function legacyMemoryValidationStageTrendReport() {
     helper_scan_runs: 0,
     helper_scan_clear_runs: 0,
     helper_scan_marker_detection_runs: 0,
+    stage_local_scan_runs: 0,
+    stage_local_scan_clear_runs: 0,
+    stage_local_scan_marker_detection_runs: 0,
+    stage_local_scan_limited_runs: 0,
+    session_fallback_scan_runs: 0,
     latest_vram_evidence_status: "legacy_status_unknown",
     latest_validation_verdict: "legacy_status_unknown",
     latest_marker_evidence_status: "legacy_status_unknown",
+    latest_process_scan_context_status: "process_scan_context_unavailable",
+    latest_process_scan_context_scope: "process_scan_context_unavailable",
     summary: "This older report did not include cleanup-stage trend details.",
     notes: [],
   };
