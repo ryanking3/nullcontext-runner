@@ -90,6 +90,7 @@ NullContext already has meaningful foundations in-tree:
 - runtime introspection now also reports the full declared-versus-observed runtime-signal contract across allocator/KV lifecycle signals, not only the cleanup subset
 - runtime introspection now explicitly classifies whether observed allocator/KV evidence came from a manifest-declared instrumented path, a partially exercised declared path, or undeclared runtime-signal observation
 - Track B capability reporting now carries the same manifest-backed-versus-undeclared instrumentation evidence distinction as the raw runtime introspection report
+- runtime reports and the Track C capability matrix now classify whether Windows/NVIDIA GPU evidence came from NVML-backed byte visibility, PID-only host-tool evidence, or visibility-limited fallback paths
 
 That is strong progress.
 
@@ -234,6 +235,7 @@ Done or partially done:
 - allocation-byte visibility is separated from PID visibility
 - post-shutdown GPU evidence is more structured than before
 - capability matrix shows the current platform truth
+- live and post-shutdown GPU evidence classes now distinguish NVML-backed bytes from PID-only or visibility-limited host-tool evidence
 
 ### Remaining v1 Work
 
@@ -466,7 +468,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `11-21` commits
+- core security/evidence work across Tracks A-E: `10-20` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -475,7 +477,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `33-58` commits
+- `32-57` commits
 
 ### Track Breakdown
 
@@ -508,7 +510,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `5-8` commits
+- `4-7` commits
 
 Expected areas:
 

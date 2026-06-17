@@ -396,6 +396,8 @@ pub struct LlamaRuntimeReport {
     pub observed_gpu_pid: Option<bool>,
     pub observed_gpu_memory_bytes: Option<u64>,
     pub live_gpu_visibility_status: String,
+    #[serde(default = "default_live_gpu_evidence_class")]
+    pub live_gpu_evidence_class: String,
     pub gpu_observation_backend: Option<String>,
     pub gpu_memory_source: Option<String>,
     pub process_present_after_shutdown: Option<bool>,
@@ -416,6 +418,10 @@ pub struct LlamaRuntimeReport {
     pub gpu_samples_with_pid_observed_after_shutdown: u32,
     pub gpu_last_pid_observed_at_ms: Option<u64>,
     pub post_shutdown_gpu_visibility_status: String,
+    #[serde(default = "default_post_shutdown_gpu_evidence_class")]
+    pub post_shutdown_gpu_evidence_class: String,
+    #[serde(default = "default_gpu_evidence_summary")]
+    pub gpu_evidence_summary: String,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub inspection_status: String,
@@ -1172,17 +1178,37 @@ fn build_gpu_inspection_capability_entry(
     } else if !llama_runtime.gpu_offload_requested {
         "windows_nvidia_gpu_inspection_not_exercised_in_this_report".to_string()
     } else if llama_runtime
-        .gpu_observation_backend
-        .as_deref()
-        .map(|backend| backend.contains("nvidia"))
-        .unwrap_or(false)
+        .live_gpu_evidence_class
+        .contains("nvml_pid_and_allocation_bytes_visible")
         || llama_runtime
-            .gpu_check_backend
-            .as_deref()
-            .map(|backend| backend.contains("nvidia"))
-            .unwrap_or(false)
+            .post_shutdown_gpu_evidence_class
+            .contains("nvml_pid_and_allocation_bytes_visible")
     {
-        "windows_nvidia_gpu_inspection_supported_with_host_tool_evidence".to_string()
+        "windows_nvidia_gpu_inspection_supported_with_nvml_bytes".to_string()
+    } else if llama_runtime
+        .live_gpu_evidence_class
+        .contains("pid_and_allocation_bytes_visible")
+        || llama_runtime
+            .post_shutdown_gpu_evidence_class
+            .contains("pid_and_allocation_bytes_visible")
+    {
+        "windows_nvidia_gpu_inspection_supported_with_pid_and_bytes_visibility".to_string()
+    } else if llama_runtime
+        .live_gpu_evidence_class
+        .contains("pid_visible")
+        || llama_runtime
+            .post_shutdown_gpu_evidence_class
+            .contains("pid_visible")
+    {
+        "windows_nvidia_gpu_inspection_pid_visible_but_bytes_limited".to_string()
+    } else if llama_runtime
+        .live_gpu_evidence_class
+        .contains("visibility_limited")
+        || llama_runtime
+            .post_shutdown_gpu_evidence_class
+            .contains("visibility_limited")
+    {
+        "windows_nvidia_gpu_inspection_visibility_limited".to_string()
     } else {
         "windows_nvidia_gpu_inspection_limited".to_string()
     };
@@ -1191,7 +1217,10 @@ fn build_gpu_inspection_capability_entry(
     } else if !llama_runtime.gpu_offload_requested {
         "gpu_offload_not_exercised".to_string()
     } else {
-        llama_runtime.vram_inspection_status.clone()
+        format!(
+            "{}__{}",
+            llama_runtime.live_gpu_evidence_class, llama_runtime.post_shutdown_gpu_evidence_class
+        )
     };
 
     PlatformCapabilityEntryReport {
@@ -1206,6 +1235,7 @@ fn build_gpu_inspection_capability_entry(
                 .to_string(),
         summary: llama_runtime.inspection_summary.clone(),
         notes: vec![
+            llama_runtime.gpu_evidence_summary.clone(),
             llama_runtime.cleanup_summary.clone(),
             llama_runtime.residual_risk_summary.clone(),
         ],
@@ -1493,8 +1523,11 @@ pub fn build_llama_runtime_report(
     let inspection_status = runtime_inspection_status(post_shutdown);
     let ram_inspection_status = ram_inspection_status(post_shutdown);
     let live_gpu_visibility_status = live_gpu_visibility_status(gpu_offload_requested, usage);
+    let live_gpu_evidence_class = live_gpu_evidence_class(gpu_offload_requested, usage);
     let post_shutdown_gpu_visibility_status =
         post_shutdown_gpu_visibility_status(gpu_offload_requested, post_shutdown);
+    let post_shutdown_gpu_evidence_class =
+        post_shutdown_gpu_evidence_class(gpu_offload_requested, post_shutdown);
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
     let vram_cleanup = build_vram_cleanup_strategy_report(
         gpu_offload_requested,
@@ -1531,6 +1564,7 @@ pub fn build_llama_runtime_report(
         observed_gpu_pid: usage.gpu_pid_observed,
         observed_gpu_memory_bytes: usage.gpu_memory_bytes,
         live_gpu_visibility_status,
+        live_gpu_evidence_class: live_gpu_evidence_class.clone(),
         gpu_observation_backend: usage.gpu_observation_backend.clone(),
         gpu_memory_source: usage.gpu_memory_source.clone(),
         process_present_after_shutdown: post_shutdown.process_present_after_shutdown,
@@ -1556,6 +1590,13 @@ pub fn build_llama_runtime_report(
             .gpu_samples_with_pid_observed_after_shutdown,
         gpu_last_pid_observed_at_ms: post_shutdown.gpu_last_pid_observed_at_ms,
         post_shutdown_gpu_visibility_status,
+        post_shutdown_gpu_evidence_class: post_shutdown_gpu_evidence_class.clone(),
+        gpu_evidence_summary: gpu_evidence_summary(
+            &live_gpu_evidence_class,
+            &post_shutdown_gpu_evidence_class,
+            usage.gpu_observation_backend.as_deref(),
+            post_shutdown.gpu_check_backend.as_deref(),
+        ),
         gpu_check_backend: post_shutdown.gpu_check_backend.clone(),
         gpu_check_source: post_shutdown.gpu_check_source.clone(),
         inspection_status,
@@ -1633,6 +1674,11 @@ pub fn build_failed_launch_llama_runtime_report(
         } else {
             "gpu_offload_not_requested".to_string()
         },
+        live_gpu_evidence_class: if gpu_offload_requested {
+            "gpu_evidence_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
         gpu_observation_backend: None,
         gpu_memory_source: None,
         process_present_after_shutdown: failure
@@ -1686,6 +1732,18 @@ pub fn build_failed_launch_llama_runtime_report(
             "post_shutdown_gpu_visibility_unavailable_due_to_startup_failure".to_string()
         } else {
             "gpu_offload_not_requested".to_string()
+        },
+        post_shutdown_gpu_evidence_class: if gpu_offload_requested {
+            "post_shutdown_gpu_evidence_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "post_shutdown_gpu_offload_not_requested".to_string()
+        },
+        gpu_evidence_summary: if gpu_offload_requested {
+            "Runtime startup failed before NullContext could classify live or post-shutdown Windows/NVIDIA GPU evidence for this run."
+                .to_string()
+        } else {
+            "GPU offload was not requested, so no Windows/NVIDIA GPU evidence class applied."
+                .to_string()
         },
         gpu_check_backend: failure.post_cleanup_observation.gpu_check_backend.clone(),
         gpu_check_source: failure.post_cleanup_observation.gpu_check_source.clone(),
@@ -2618,6 +2676,16 @@ fn live_gpu_visibility_status(gpu_offload_requested: bool, usage: &RuntimeUsageS
     }
 }
 
+fn live_gpu_evidence_class(gpu_offload_requested: bool, usage: &RuntimeUsageSnapshot) -> String {
+    gpu_evidence_class_from_window(
+        gpu_offload_requested,
+        usage.gpu_pid_observed,
+        usage.gpu_memory_bytes,
+        usage.gpu_observation_backend.as_deref(),
+        false,
+    )
+}
+
 fn post_shutdown_gpu_visibility_status(
     gpu_offload_requested: bool,
     post_shutdown: &RuntimePostShutdownObservation,
@@ -2627,6 +2695,78 @@ fn post_shutdown_gpu_visibility_status(
         post_shutdown.gpu_entry_present_after_shutdown,
         post_shutdown.gpu_memory_bytes_after_shutdown,
         post_shutdown.gpu_check_backend.as_deref(),
+    )
+}
+
+fn post_shutdown_gpu_evidence_class(
+    gpu_offload_requested: bool,
+    post_shutdown: &RuntimePostShutdownObservation,
+) -> String {
+    gpu_evidence_class_from_window(
+        gpu_offload_requested,
+        post_shutdown.gpu_entry_present_after_shutdown,
+        post_shutdown.gpu_memory_bytes_after_shutdown,
+        post_shutdown.gpu_check_backend.as_deref(),
+        true,
+    )
+}
+
+fn gpu_evidence_class_from_window(
+    gpu_offload_requested: bool,
+    gpu_pid_observed: Option<bool>,
+    gpu_memory_bytes: Option<u64>,
+    gpu_backend: Option<&str>,
+    post_shutdown: bool,
+) -> String {
+    let prefix = if post_shutdown { "post_shutdown_" } else { "" };
+
+    if !gpu_offload_requested {
+        return format!("{prefix}gpu_offload_not_requested");
+    }
+
+    let backend = gpu_backend.unwrap_or_default();
+    let backend_class = if backend.contains("nvml") {
+        "nvml"
+    } else if backend.contains("compute_apps") {
+        "nvidia_smi_compute_apps"
+    } else if backend.contains("pmon") {
+        "nvidia_smi_pmon"
+    } else if backend.is_empty() {
+        "unknown_backend"
+    } else {
+        "host_tool"
+    };
+
+    match gpu_pid_observed {
+        Some(true) if gpu_memory_bytes.is_some() => {
+            format!("{prefix}{backend_class}_pid_and_allocation_bytes_visible")
+        }
+        Some(true) => {
+            format!("{prefix}{backend_class}_pid_visible_but_allocation_bytes_unavailable")
+        }
+        Some(false) => {
+            if gpu_post_shutdown_visibility_limited_from_backend(gpu_pid_observed, gpu_backend) {
+                format!("{prefix}{backend_class}_pid_not_observed_visibility_limited")
+            } else {
+                format!("{prefix}{backend_class}_pid_not_observed")
+            }
+        }
+        None => format!("{prefix}gpu_evidence_unavailable"),
+    }
+}
+
+fn gpu_evidence_summary(
+    live_class: &str,
+    post_shutdown_class: &str,
+    live_backend: Option<&str>,
+    post_shutdown_backend: Option<&str>,
+) -> String {
+    format!(
+        "Live GPU evidence class: {} via {}. Post-shutdown GPU evidence class: {} via {}.",
+        live_class.replace('_', " "),
+        live_backend.unwrap_or("none"),
+        post_shutdown_class.replace('_', " "),
+        post_shutdown_backend.unwrap_or("none")
     )
 }
 
@@ -2982,6 +3122,18 @@ fn default_process_scan_context_status() -> String {
 
 fn default_process_scan_context_scope() -> String {
     "process_scan_context_unavailable".to_string()
+}
+
+fn default_live_gpu_evidence_class() -> String {
+    "gpu_evidence_class_unavailable".to_string()
+}
+
+fn default_post_shutdown_gpu_evidence_class() -> String {
+    "post_shutdown_gpu_evidence_class_unavailable".to_string()
+}
+
+fn default_gpu_evidence_summary() -> String {
+    "This report did not yet classify the specific GPU evidence class behind the recorded NVIDIA visibility results.".to_string()
 }
 
 fn default_cleanup_signal_support_status() -> String {

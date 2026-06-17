@@ -325,6 +325,15 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.llama_runtime.introspection = legacyLlamaRuntimeIntrospectionReport();
     }
 
+    if (parsed.llama_runtime) {
+      parsed.llama_runtime.live_gpu_evidence_class ??=
+        "gpu_evidence_class_unavailable_in_legacy_report";
+      parsed.llama_runtime.post_shutdown_gpu_evidence_class ??=
+        "post_shutdown_gpu_evidence_class_unavailable_in_legacy_report";
+      parsed.llama_runtime.gpu_evidence_summary ??=
+        "This older report did not classify the exact GPU evidence class behind the recorded NVIDIA visibility results.";
+    }
+
     if (parsed.llama_runtime?.introspection) {
       parsed.llama_runtime.introspection = {
         ...legacyLlamaRuntimeIntrospectionReport(),

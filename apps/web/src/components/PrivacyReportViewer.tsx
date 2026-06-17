@@ -340,6 +340,10 @@ export function PrivacyReportViewer({
                 gpu live:{" "}
                 {humanizeSnakeCase(currentReport.llama_runtime.live_gpu_visibility_status)}
               </span>
+              <span>
+                gpu evidence:{" "}
+                {humanizeSnakeCase(currentReport.llama_runtime.live_gpu_evidence_class)}
+              </span>
               <span>window: {currentReport.llama_runtime.verification_window_ms} ms</span>
               <span>
                 shutdown: {humanizeSnakeCase(currentReport.llama_runtime.shutdown_method)}
@@ -443,6 +447,10 @@ export function PrivacyReportViewer({
               {
                 label: "live gpu visibility",
                 value: humanizeSnakeCase(currentReport.llama_runtime.live_gpu_visibility_status),
+              },
+              {
+                label: "live gpu evidence class",
+                value: humanizeSnakeCase(currentReport.llama_runtime.live_gpu_evidence_class),
               },
               {
                 label: "process memory source",
@@ -553,6 +561,12 @@ export function PrivacyReportViewer({
                 ),
               },
               {
+                label: "post-shutdown gpu evidence class",
+                value: humanizeSnakeCase(
+                  currentReport.llama_runtime.post_shutdown_gpu_evidence_class
+                ),
+              },
+              {
                 label: "process check source",
                 value: currentReport.llama_runtime.process_check_source || "none",
               },
@@ -576,6 +590,10 @@ export function PrivacyReportViewer({
           />
 
           <div className="report-risk-block">
+            <p>
+              <strong>gpu evidence:</strong>{" "}
+              {currentReport.llama_runtime.gpu_evidence_summary}
+            </p>
             <p>
               <strong>cleanup boundary:</strong> {currentReport.llama_runtime.cleanup_summary}
             </p>

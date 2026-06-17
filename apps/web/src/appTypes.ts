@@ -595,6 +595,7 @@ export type LlamaRuntimeReportData = {
   observed_gpu_pid?: boolean | null;
   observed_gpu_memory_bytes?: number | null;
   live_gpu_visibility_status: string;
+  live_gpu_evidence_class: string;
   gpu_observation_backend?: string | null;
   gpu_memory_source?: string | null;
   process_present_after_shutdown?: boolean | null;
@@ -615,6 +616,8 @@ export type LlamaRuntimeReportData = {
   gpu_samples_with_pid_observed_after_shutdown: number;
   gpu_last_pid_observed_at_ms?: number | null;
   post_shutdown_gpu_visibility_status: string;
+  post_shutdown_gpu_evidence_class: string;
+  gpu_evidence_summary: string;
   gpu_check_backend?: string | null;
   gpu_check_source?: string | null;
   inspection_status: string;
