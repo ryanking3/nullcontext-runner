@@ -565,6 +565,8 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub summary: String,
     pub observed_signal_count: u32,
     pub observed_signal_sources: Vec<String>,
+    #[serde(default)]
+    pub runtime_signal_matrix: Vec<LlamaRuntimeCleanupSignalEntryReport>,
     pub cleanup_signal_matrix: Vec<LlamaRuntimeCleanupSignalEntryReport>,
     pub observed_events: Vec<LlamaRuntimeIntrospectionEventReport>,
     pub notes: Vec<String>,
@@ -2014,18 +2016,43 @@ fn build_llama_runtime_introspection_report(
                 ),
                 observed_signal_count: observed_signals.len() as u32,
                 observed_signal_sources: observed_signal_sources(observed_signals),
-                cleanup_signal_matrix: vec![
-                    fallback_cleanup_signal_entry(
+                runtime_signal_matrix: vec![
+                    fallback_signal_entry(
+                        "allocator_initialized",
+                        "Allocator Initialized",
+                        startup_failed,
+                    ),
+                    fallback_signal_entry(
+                        "allocator_teardown",
+                        "Allocator Teardown",
+                        startup_failed,
+                    ),
+                    fallback_signal_entry(
                         "allocator_reset",
                         "Allocator Reset",
                         startup_failed,
                     ),
-                    fallback_cleanup_signal_entry(
+                    fallback_signal_entry(
+                        "kv_cache_initialized",
+                        "KV Cache Initialized",
+                        startup_failed,
+                    ),
+                    fallback_signal_entry("kv_cache_reused", "KV Cache Reused", startup_failed),
+                    fallback_signal_entry(
                         "kv_cache_clear",
                         "KV Cache Clear",
                         startup_failed,
                     ),
-                    fallback_cleanup_signal_entry("model_unload", "Model Unload", startup_failed),
+                    fallback_signal_entry("model_unload", "Model Unload", startup_failed),
+                ],
+                cleanup_signal_matrix: vec![
+                    fallback_signal_entry(
+                        "allocator_reset",
+                        "Allocator Reset",
+                        startup_failed,
+                    ),
+                    fallback_signal_entry("kv_cache_clear", "KV Cache Clear", startup_failed),
+                    fallback_signal_entry("model_unload", "Model Unload", startup_failed),
                 ],
                 observed_events: observed_signals
                     .iter()
@@ -2285,8 +2312,30 @@ fn build_llama_runtime_introspection_report(
     } else {
         "no_cleanup_signals_observed".to_string()
     };
-    let cleanup_signal_matrix = vec![
-        cleanup_signal_entry(
+    let runtime_signal_matrix = vec![
+        signal_entry(
+            "allocator_initialized",
+            "Allocator Initialized",
+            signal_declared(
+                &capabilities.declared_cleanup_signal_ids,
+                &capabilities.declared_signal_ids,
+                "allocator_initialized",
+            ) || declared_allocator_introspection_status.contains("available"),
+            observed_allocator_initialized,
+            startup_failed,
+        ),
+        signal_entry(
+            "allocator_teardown",
+            "Allocator Teardown",
+            signal_declared(
+                &capabilities.declared_cleanup_signal_ids,
+                &capabilities.declared_signal_ids,
+                "allocator_teardown_observed",
+            ) || declared_allocator_introspection_status.contains("available"),
+            observed_allocator_teardown,
+            startup_failed,
+        ),
+        signal_entry(
             "allocator_reset",
             "Allocator Reset",
             signal_declared(
@@ -2299,7 +2348,29 @@ fn build_llama_runtime_introspection_report(
             observed_allocator_reset_signal,
             startup_failed,
         ),
-        cleanup_signal_entry(
+        signal_entry(
+            "kv_cache_initialized",
+            "KV Cache Initialized",
+            signal_declared(
+                &capabilities.declared_cleanup_signal_ids,
+                &capabilities.declared_signal_ids,
+                "kv_cache_initialized",
+            ) || declared_kv_cache_introspection_status.contains("available"),
+            observed_kv_initialized,
+            startup_failed,
+        ),
+        signal_entry(
+            "kv_cache_reused",
+            "KV Cache Reused",
+            signal_declared(
+                &capabilities.declared_cleanup_signal_ids,
+                &capabilities.declared_signal_ids,
+                "kv_cache_reused",
+            ) || declared_kv_cache_introspection_status.contains("available"),
+            observed_kv_reused,
+            startup_failed,
+        ),
+        signal_entry(
             "kv_cache_clear",
             "KV Cache Clear",
             signal_declared(
@@ -2310,7 +2381,46 @@ fn build_llama_runtime_introspection_report(
             observed_kv_clear,
             startup_failed,
         ),
-        cleanup_signal_entry(
+        signal_entry(
+            "model_unload",
+            "Model Unload",
+            signal_declared(
+                &capabilities.declared_cleanup_signal_ids,
+                &capabilities.declared_signal_ids,
+                "model_unload_observed",
+            ) || capabilities
+                .model_unload_signal_status
+                .contains("available"),
+            observed_model_unload_signal,
+            startup_failed,
+        ),
+    ];
+    let cleanup_signal_matrix = vec![
+        signal_entry(
+            "allocator_reset",
+            "Allocator Reset",
+            signal_declared(
+                &capabilities.declared_cleanup_signal_ids,
+                &capabilities.declared_signal_ids,
+                "allocator_reset_observed",
+            ) || capabilities
+                .allocator_reset_signal_status
+                .contains("available"),
+            observed_allocator_reset_signal,
+            startup_failed,
+        ),
+        signal_entry(
+            "kv_cache_clear",
+            "KV Cache Clear",
+            signal_declared(
+                &capabilities.declared_cleanup_signal_ids,
+                &capabilities.declared_signal_ids,
+                "kv_cache_clear_observed",
+            ) || declared_kv_cache_introspection_status.contains("available"),
+            observed_kv_clear,
+            startup_failed,
+        ),
+        signal_entry(
             "model_unload",
             "Model Unload",
             signal_declared(
@@ -2529,13 +2639,14 @@ fn build_llama_runtime_introspection_report(
         },
         observed_signal_count,
         observed_signal_sources,
+        runtime_signal_matrix,
         cleanup_signal_matrix,
         observed_events,
         notes,
     }
 }
 
-fn fallback_cleanup_signal_entry(
+fn fallback_signal_entry(
     signal_id: &str,
     signal_label: &str,
     startup_failed: bool,
@@ -2564,14 +2675,14 @@ fn fallback_cleanup_signal_entry(
             )
         } else {
             format!(
-                "{} remained on the stock fallback path, so NullContext could not verify direct support for this cleanup signal.",
+                "{} remained on the stock fallback path, so NullContext could not verify direct support for this runtime signal.",
                 signal_label
             )
         },
     }
 }
 
-fn cleanup_signal_entry(
+fn signal_entry(
     signal_id: &str,
     signal_label: &str,
     declared_support: bool,

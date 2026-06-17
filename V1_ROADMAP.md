@@ -90,6 +90,7 @@ NullContext already has meaningful foundations in-tree:
 - runtime introspection now also reports the full declared-versus-observed runtime-signal contract across allocator/KV lifecycle signals, not only the cleanup subset
 - runtime introspection now explicitly classifies whether observed allocator/KV evidence came from a manifest-declared instrumented path, a partially exercised declared path, or undeclared runtime-signal observation
 - Track B capability reporting now carries the same manifest-backed-versus-undeclared instrumentation evidence distinction as the raw runtime introspection report
+- runtime introspection now also exposes a row-by-row runtime-signal contract matrix for allocator setup/teardown/reset and KV/model lifecycle signals, not only aggregate counts and cleanup-only entries
 - runtime reports and the Track C capability matrix now classify whether Windows/NVIDIA GPU evidence came from NVML-backed byte visibility, PID-only host-tool evidence, or visibility-limited fallback paths
 - runtime reports and the Track C capability matrix now also classify backend-specific GPU limitation causes such as WDDM-style byte hiding, PID-only backends, and visibility-limited fallback paths
 - runtime reports and the Track C capability matrix now also carry a single GPU trust-boundary verdict that states how far current Windows/NVIDIA evidence reaches and where allocator-level VRAM truth still stops
@@ -194,6 +195,7 @@ Done or partially done:
 - full runtime-signal contract reporting now distinguishes declared signals, unique observed signals, missing declared signals, and undeclared observed signals across the whole Track B surface
 - instrumentation evidence reporting now distinguishes trustworthy manifest-backed runtime-signal evidence from undeclared or stock-runtime signal observation
 - the allocator/KV capability matrix entry now reflects instrumentation evidence class directly instead of relying only on broader lifecycle tiers
+- the runtime report now surfaces the full runtime-signal contract as first-class rows, so setup, reuse, teardown, reset, and unload evidence can be inspected without reverse-engineering aggregate counts
 
 ### Remaining v1 Work
 
@@ -483,7 +485,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `29-54` commits
+- `28-53` commits
 
 ### Track Breakdown
 
@@ -503,7 +505,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `0-2` commits
+- `0-1` commits
 
 Expected areas:
 

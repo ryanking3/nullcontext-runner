@@ -1198,6 +1198,41 @@ export function PrivacyReportViewer({
 
             <details className="report-detail" open>
               <summary>
+                <span>runtime signal contract matrix</span>
+                <span className="pill neutral">
+                  {currentReport.llama_runtime.introspection.runtime_signal_matrix.length}
+                </span>
+              </summary>
+              {currentReport.llama_runtime.introspection.runtime_signal_matrix.length === 0 ? (
+                <p className="muted-text">no runtime-signal contract entries were recorded</p>
+              ) : (
+                <div className="report-list">
+                  {currentReport.llama_runtime.introspection.runtime_signal_matrix.map((entry) => (
+                    <div className="report-item" key={entry.signal_id}>
+                      <div className="report-item-header">
+                        <strong>{entry.signal_label}</strong>
+                        <span className={inspectionStatusClass(entry.evidence_status)}>
+                          {humanizeSnakeCase(entry.evidence_status)}
+                        </span>
+                      </div>
+                      <div className="report-path-list">
+                        <div>
+                          declared support:{" "}
+                          {humanizeSnakeCase(entry.declared_support_status)}
+                        </div>
+                        <div>
+                          observation: {humanizeSnakeCase(entry.observation_status)}
+                        </div>
+                        <div>{entry.summary}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </details>
+
+            <details className="report-detail" open>
+              <summary>
                 <span>cleanup signal coverage matrix</span>
                 <span className="pill neutral">
                   {currentReport.llama_runtime.introspection.cleanup_signal_matrix.length}

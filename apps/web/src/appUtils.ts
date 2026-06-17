@@ -354,6 +354,11 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
           ...legacyLlamaRuntimeCleanupSignalEntryReport(),
           ...entry,
         }));
+      parsed.llama_runtime.introspection.runtime_signal_matrix =
+        parsed.llama_runtime.introspection.runtime_signal_matrix.map((entry) => ({
+          ...legacyLlamaRuntimeCleanupSignalEntryReport(),
+          ...entry,
+        }));
     }
 
     if (parsed.llama_runtime && !parsed.llama_runtime.vram_cleanup.comparison) {
@@ -562,6 +567,7 @@ function legacyLlamaRuntimeIntrospectionReport() {
       "This older report did not include the newer runtime introspection evidence-tier summary.",
     observed_signal_count: 0,
     observed_signal_sources: [],
+    runtime_signal_matrix: [],
     cleanup_signal_matrix: [],
     observed_events: [],
     notes: [],
