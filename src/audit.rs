@@ -398,6 +398,8 @@ pub struct LlamaRuntimeReport {
     pub live_gpu_visibility_status: String,
     #[serde(default = "default_live_gpu_evidence_class")]
     pub live_gpu_evidence_class: String,
+    #[serde(default = "default_live_gpu_limitation_status")]
+    pub live_gpu_limitation_status: String,
     pub gpu_observation_backend: Option<String>,
     pub gpu_memory_source: Option<String>,
     pub process_present_after_shutdown: Option<bool>,
@@ -420,8 +422,12 @@ pub struct LlamaRuntimeReport {
     pub post_shutdown_gpu_visibility_status: String,
     #[serde(default = "default_post_shutdown_gpu_evidence_class")]
     pub post_shutdown_gpu_evidence_class: String,
+    #[serde(default = "default_post_shutdown_gpu_limitation_status")]
+    pub post_shutdown_gpu_limitation_status: String,
     #[serde(default = "default_gpu_evidence_summary")]
     pub gpu_evidence_summary: String,
+    #[serde(default = "default_gpu_limitation_summary")]
+    pub gpu_limitation_summary: String,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub inspection_status: String,
@@ -1202,6 +1208,14 @@ fn build_gpu_inspection_capability_entry(
     {
         "windows_nvidia_gpu_inspection_pid_visible_but_bytes_limited".to_string()
     } else if llama_runtime
+        .live_gpu_limitation_status
+        .contains("wddm_or_driver_hides_allocation_bytes")
+        || llama_runtime
+            .post_shutdown_gpu_limitation_status
+            .contains("wddm_or_driver_hides_allocation_bytes")
+    {
+        "windows_nvidia_gpu_inspection_wddm_or_driver_byte_limit".to_string()
+    } else if llama_runtime
         .live_gpu_evidence_class
         .contains("visibility_limited")
         || llama_runtime
@@ -1236,6 +1250,7 @@ fn build_gpu_inspection_capability_entry(
         summary: llama_runtime.inspection_summary.clone(),
         notes: vec![
             llama_runtime.gpu_evidence_summary.clone(),
+            llama_runtime.gpu_limitation_summary.clone(),
             llama_runtime.cleanup_summary.clone(),
             llama_runtime.residual_risk_summary.clone(),
         ],
@@ -1524,10 +1539,22 @@ pub fn build_llama_runtime_report(
     let ram_inspection_status = ram_inspection_status(post_shutdown);
     let live_gpu_visibility_status = live_gpu_visibility_status(gpu_offload_requested, usage);
     let live_gpu_evidence_class = live_gpu_evidence_class(gpu_offload_requested, usage);
+    let live_gpu_limitation_status = gpu_limitation_status(
+        gpu_offload_requested,
+        &live_gpu_evidence_class,
+        usage.gpu_observation_backend.as_deref(),
+        false,
+    );
     let post_shutdown_gpu_visibility_status =
         post_shutdown_gpu_visibility_status(gpu_offload_requested, post_shutdown);
     let post_shutdown_gpu_evidence_class =
         post_shutdown_gpu_evidence_class(gpu_offload_requested, post_shutdown);
+    let post_shutdown_gpu_limitation_status = gpu_limitation_status(
+        gpu_offload_requested,
+        &post_shutdown_gpu_evidence_class,
+        post_shutdown.gpu_check_backend.as_deref(),
+        true,
+    );
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
     let vram_cleanup = build_vram_cleanup_strategy_report(
         gpu_offload_requested,
@@ -1565,6 +1592,7 @@ pub fn build_llama_runtime_report(
         observed_gpu_memory_bytes: usage.gpu_memory_bytes,
         live_gpu_visibility_status,
         live_gpu_evidence_class: live_gpu_evidence_class.clone(),
+        live_gpu_limitation_status: live_gpu_limitation_status.clone(),
         gpu_observation_backend: usage.gpu_observation_backend.clone(),
         gpu_memory_source: usage.gpu_memory_source.clone(),
         process_present_after_shutdown: post_shutdown.process_present_after_shutdown,
@@ -1591,9 +1619,16 @@ pub fn build_llama_runtime_report(
         gpu_last_pid_observed_at_ms: post_shutdown.gpu_last_pid_observed_at_ms,
         post_shutdown_gpu_visibility_status,
         post_shutdown_gpu_evidence_class: post_shutdown_gpu_evidence_class.clone(),
+        post_shutdown_gpu_limitation_status: post_shutdown_gpu_limitation_status.clone(),
         gpu_evidence_summary: gpu_evidence_summary(
             &live_gpu_evidence_class,
             &post_shutdown_gpu_evidence_class,
+            usage.gpu_observation_backend.as_deref(),
+            post_shutdown.gpu_check_backend.as_deref(),
+        ),
+        gpu_limitation_summary: gpu_limitation_summary(
+            &live_gpu_limitation_status,
+            &post_shutdown_gpu_limitation_status,
             usage.gpu_observation_backend.as_deref(),
             post_shutdown.gpu_check_backend.as_deref(),
         ),
@@ -1679,6 +1714,11 @@ pub fn build_failed_launch_llama_runtime_report(
         } else {
             "gpu_offload_not_requested".to_string()
         },
+        live_gpu_limitation_status: if gpu_offload_requested {
+            "gpu_backend_unavailable_or_inconclusive_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
         gpu_observation_backend: None,
         gpu_memory_source: None,
         process_present_after_shutdown: failure
@@ -1738,11 +1778,24 @@ pub fn build_failed_launch_llama_runtime_report(
         } else {
             "post_shutdown_gpu_offload_not_requested".to_string()
         },
+        post_shutdown_gpu_limitation_status: if gpu_offload_requested {
+            "post_shutdown_gpu_backend_unavailable_or_inconclusive_due_to_startup_failure"
+                .to_string()
+        } else {
+            "post_shutdown_gpu_offload_not_requested".to_string()
+        },
         gpu_evidence_summary: if gpu_offload_requested {
             "Runtime startup failed before NullContext could classify live or post-shutdown Windows/NVIDIA GPU evidence for this run."
                 .to_string()
         } else {
             "GPU offload was not requested, so no Windows/NVIDIA GPU evidence class applied."
+                .to_string()
+        },
+        gpu_limitation_summary: if gpu_offload_requested {
+            "Runtime startup failed before NullContext could classify backend-specific GPU visibility limitations for this run."
+                .to_string()
+        } else {
+            "GPU offload was not requested, so no Windows/NVIDIA limitation class applied."
                 .to_string()
         },
         gpu_check_backend: failure.post_cleanup_observation.gpu_check_backend.clone(),
@@ -2770,6 +2823,70 @@ fn gpu_evidence_summary(
     )
 }
 
+fn gpu_limitation_status(
+    gpu_offload_requested: bool,
+    evidence_class: &str,
+    gpu_backend: Option<&str>,
+    post_shutdown: bool,
+) -> String {
+    let prefix = if post_shutdown { "post_shutdown_" } else { "" };
+
+    if !gpu_offload_requested {
+        return format!("{prefix}gpu_offload_not_requested");
+    }
+
+    if evidence_class.contains("nvml_pid_visible_but_allocation_bytes_unavailable")
+        || evidence_class
+            .contains("nvidia_smi_compute_apps_pid_visible_but_allocation_bytes_unavailable")
+    {
+        return format!("{prefix}wddm_or_driver_hides_allocation_bytes");
+    }
+
+    if evidence_class.contains("nvidia_smi_pmon_pid_visible_but_allocation_bytes_unavailable") {
+        return format!("{prefix}pid_visibility_only_backend");
+    }
+
+    if evidence_class.contains("visibility_limited") {
+        return format!("{prefix}backend_visibility_limited");
+    }
+
+    if evidence_class.contains("gpu_evidence_unavailable")
+        || evidence_class.contains("unavailable_due_to_startup_failure")
+    {
+        return format!("{prefix}gpu_backend_unavailable_or_inconclusive");
+    }
+
+    if evidence_class.contains("pid_and_allocation_bytes_visible") {
+        return format!("{prefix}allocation_bytes_visible");
+    }
+
+    if evidence_class.contains("pid_not_observed") {
+        let backend = gpu_backend.unwrap_or_default();
+        if backend.is_empty() {
+            return format!("{prefix}gpu_backend_unavailable_or_inconclusive");
+        }
+
+        return format!("{prefix}pid_not_observed");
+    }
+
+    format!("{prefix}gpu_limitation_status_mixed")
+}
+
+fn gpu_limitation_summary(
+    live_status: &str,
+    post_shutdown_status: &str,
+    live_backend: Option<&str>,
+    post_shutdown_backend: Option<&str>,
+) -> String {
+    format!(
+        "Live GPU limitation: {} via {}. Post-shutdown GPU limitation: {} via {}.",
+        live_status.replace('_', " "),
+        live_backend.unwrap_or("none"),
+        post_shutdown_status.replace('_', " "),
+        post_shutdown_backend.unwrap_or("none")
+    )
+}
+
 fn post_shutdown_gpu_visibility_status_from_gpu_window(
     gpu_offload_requested: bool,
     gpu_entry_present: Option<bool>,
@@ -3132,8 +3249,21 @@ fn default_post_shutdown_gpu_evidence_class() -> String {
     "post_shutdown_gpu_evidence_class_unavailable".to_string()
 }
 
+fn default_live_gpu_limitation_status() -> String {
+    "gpu_limitation_status_unavailable".to_string()
+}
+
+fn default_post_shutdown_gpu_limitation_status() -> String {
+    "post_shutdown_gpu_limitation_status_unavailable".to_string()
+}
+
 fn default_gpu_evidence_summary() -> String {
     "This report did not yet classify the specific GPU evidence class behind the recorded NVIDIA visibility results.".to_string()
+}
+
+fn default_gpu_limitation_summary() -> String {
+    "This report did not yet classify the backend-specific limitation behind the recorded GPU evidence."
+        .to_string()
 }
 
 fn default_cleanup_signal_support_status() -> String {

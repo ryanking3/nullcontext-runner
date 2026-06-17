@@ -344,6 +344,10 @@ export function PrivacyReportViewer({
                 gpu evidence:{" "}
                 {humanizeSnakeCase(currentReport.llama_runtime.live_gpu_evidence_class)}
               </span>
+              <span>
+                gpu limit:{" "}
+                {humanizeSnakeCase(currentReport.llama_runtime.live_gpu_limitation_status)}
+              </span>
               <span>window: {currentReport.llama_runtime.verification_window_ms} ms</span>
               <span>
                 shutdown: {humanizeSnakeCase(currentReport.llama_runtime.shutdown_method)}
@@ -451,6 +455,10 @@ export function PrivacyReportViewer({
               {
                 label: "live gpu evidence class",
                 value: humanizeSnakeCase(currentReport.llama_runtime.live_gpu_evidence_class),
+              },
+              {
+                label: "live gpu limitation",
+                value: humanizeSnakeCase(currentReport.llama_runtime.live_gpu_limitation_status),
               },
               {
                 label: "process memory source",
@@ -567,6 +575,12 @@ export function PrivacyReportViewer({
                 ),
               },
               {
+                label: "post-shutdown gpu limitation",
+                value: humanizeSnakeCase(
+                  currentReport.llama_runtime.post_shutdown_gpu_limitation_status
+                ),
+              },
+              {
                 label: "process check source",
                 value: currentReport.llama_runtime.process_check_source || "none",
               },
@@ -593,6 +607,10 @@ export function PrivacyReportViewer({
             <p>
               <strong>gpu evidence:</strong>{" "}
               {currentReport.llama_runtime.gpu_evidence_summary}
+            </p>
+            <p>
+              <strong>gpu limitation:</strong>{" "}
+              {currentReport.llama_runtime.gpu_limitation_summary}
             </p>
             <p>
               <strong>cleanup boundary:</strong> {currentReport.llama_runtime.cleanup_summary}
