@@ -621,6 +621,8 @@ export type LlamaRuntimeReportData = {
   gpu_evidence_summary: string;
   post_shutdown_gpu_limitation_status: string;
   gpu_limitation_summary: string;
+  gpu_trust_boundary_status: string;
+  gpu_trust_boundary_summary: string;
   gpu_check_backend?: string | null;
   gpu_check_source?: string | null;
   inspection_status: string;

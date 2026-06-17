@@ -348,6 +348,10 @@ export function PrivacyReportViewer({
                 gpu limit:{" "}
                 {humanizeSnakeCase(currentReport.llama_runtime.live_gpu_limitation_status)}
               </span>
+              <span>
+                gpu boundary:{" "}
+                {humanizeSnakeCase(currentReport.llama_runtime.gpu_trust_boundary_status)}
+              </span>
               <span>window: {currentReport.llama_runtime.verification_window_ms} ms</span>
               <span>
                 shutdown: {humanizeSnakeCase(currentReport.llama_runtime.shutdown_method)}
@@ -459,6 +463,10 @@ export function PrivacyReportViewer({
               {
                 label: "live gpu limitation",
                 value: humanizeSnakeCase(currentReport.llama_runtime.live_gpu_limitation_status),
+              },
+              {
+                label: "gpu trust boundary",
+                value: humanizeSnakeCase(currentReport.llama_runtime.gpu_trust_boundary_status),
               },
               {
                 label: "process memory source",
@@ -611,6 +619,10 @@ export function PrivacyReportViewer({
             <p>
               <strong>gpu limitation:</strong>{" "}
               {currentReport.llama_runtime.gpu_limitation_summary}
+            </p>
+            <p>
+              <strong>gpu trust boundary:</strong>{" "}
+              {currentReport.llama_runtime.gpu_trust_boundary_summary}
             </p>
             <p>
               <strong>cleanup boundary:</strong> {currentReport.llama_runtime.cleanup_summary}

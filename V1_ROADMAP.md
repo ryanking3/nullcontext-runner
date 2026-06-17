@@ -92,6 +92,8 @@ NullContext already has meaningful foundations in-tree:
 - Track B capability reporting now carries the same manifest-backed-versus-undeclared instrumentation evidence distinction as the raw runtime introspection report
 - runtime reports and the Track C capability matrix now classify whether Windows/NVIDIA GPU evidence came from NVML-backed byte visibility, PID-only host-tool evidence, or visibility-limited fallback paths
 - runtime reports and the Track C capability matrix now also classify backend-specific GPU limitation causes such as WDDM-style byte hiding, PID-only backends, and visibility-limited fallback paths
+- runtime reports and the Track C capability matrix now also carry a single GPU trust-boundary verdict that states how far current Windows/NVIDIA evidence reaches and where allocator-level VRAM truth still stops
+- runtime-specific residual-risk wording for GPU-offloaded runs now keys off that same trust-boundary verdict instead of falling back to a generic “possible VRAM buffers remain” sentence
 
 That is strong progress.
 
@@ -238,6 +240,8 @@ Done or partially done:
 - capability matrix shows the current platform truth
 - live and post-shutdown GPU evidence classes now distinguish NVML-backed bytes from PID-only or visibility-limited host-tool evidence
 - live and post-shutdown GPU limitation classes now distinguish byte-hiding backends from broader visibility-limited fallback conditions
+- reports now collapse those live/post observations into one explicit GPU trust-boundary verdict so the operator can see, at a glance, whether the run reached byte visibility, PID-only visibility, or only weak host-tool evidence
+- the top-level runtime residual-risk summary now reflects that same trust-boundary verdict, keeping the GPU narrative aligned from detailed evidence through final operator wording
 
 ### Remaining v1 Work
 
@@ -479,7 +483,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `31-56` commits
+- `29-54` commits
 
 ### Track Breakdown
 
@@ -512,7 +516,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `3-6` commits
+- `1-4` commits
 
 Expected areas:
 

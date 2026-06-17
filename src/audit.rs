@@ -428,6 +428,10 @@ pub struct LlamaRuntimeReport {
     pub gpu_evidence_summary: String,
     #[serde(default = "default_gpu_limitation_summary")]
     pub gpu_limitation_summary: String,
+    #[serde(default = "default_gpu_trust_boundary_status")]
+    pub gpu_trust_boundary_status: String,
+    #[serde(default = "default_gpu_trust_boundary_summary")]
+    pub gpu_trust_boundary_summary: String,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub inspection_status: String,
@@ -1231,10 +1235,7 @@ fn build_gpu_inspection_capability_entry(
     } else if !llama_runtime.gpu_offload_requested {
         "gpu_offload_not_exercised".to_string()
     } else {
-        format!(
-            "{}__{}",
-            llama_runtime.live_gpu_evidence_class, llama_runtime.post_shutdown_gpu_evidence_class
-        )
+        llama_runtime.gpu_trust_boundary_status.clone()
     };
 
     PlatformCapabilityEntryReport {
@@ -1249,6 +1250,7 @@ fn build_gpu_inspection_capability_entry(
                 .to_string(),
         summary: llama_runtime.inspection_summary.clone(),
         notes: vec![
+            llama_runtime.gpu_trust_boundary_summary.clone(),
             llama_runtime.gpu_evidence_summary.clone(),
             llama_runtime.gpu_limitation_summary.clone(),
             llama_runtime.cleanup_summary.clone(),
@@ -1555,6 +1557,13 @@ pub fn build_llama_runtime_report(
         post_shutdown.gpu_check_backend.as_deref(),
         true,
     );
+    let gpu_trust_boundary_status = gpu_trust_boundary_status(
+        gpu_offload_requested,
+        &live_gpu_evidence_class,
+        &post_shutdown_gpu_evidence_class,
+        &live_gpu_limitation_status,
+        &post_shutdown_gpu_limitation_status,
+    );
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
     let vram_cleanup = build_vram_cleanup_strategy_report(
         gpu_offload_requested,
@@ -1632,6 +1641,12 @@ pub fn build_llama_runtime_report(
             usage.gpu_observation_backend.as_deref(),
             post_shutdown.gpu_check_backend.as_deref(),
         ),
+        gpu_trust_boundary_status: gpu_trust_boundary_status.clone(),
+        gpu_trust_boundary_summary: gpu_trust_boundary_summary(
+            &gpu_trust_boundary_status,
+            &live_gpu_evidence_class,
+            &post_shutdown_gpu_evidence_class,
+        ),
         gpu_check_backend: post_shutdown.gpu_check_backend.clone(),
         gpu_check_source: post_shutdown.gpu_check_source.clone(),
         inspection_status,
@@ -1649,13 +1664,10 @@ pub fn build_llama_runtime_report(
             "NullContext stopped llama-server by force-killing the child process and waiting for exit. Process termination is currently the strongest cleanup action applied to llama.cpp-owned memory domains."
                 .to_string()
         },
-        residual_risk_summary: if gpu_offload_requested {
-            "Allocator state, KV/cache contents, model-weight residency, and possible VRAM-resident buffers remain unverified even after the recorded shutdown path."
-                .to_string()
-        } else {
-            "Allocator state, KV/cache contents, and model-weight residency in the external llama.cpp process remain unverified even after the recorded shutdown path."
-                .to_string()
-        },
+        residual_risk_summary: runtime_residual_risk_summary(
+            gpu_offload_requested,
+            &gpu_trust_boundary_status,
+        ),
         introspection,
         vram_cleanup,
         memory_domains,
@@ -1798,6 +1810,18 @@ pub fn build_failed_launch_llama_runtime_report(
             "GPU offload was not requested, so no Windows/NVIDIA limitation class applied."
                 .to_string()
         },
+        gpu_trust_boundary_status: if gpu_offload_requested {
+            "gpu_trust_boundary_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
+        gpu_trust_boundary_summary: if gpu_offload_requested {
+            "Runtime startup failed before NullContext could establish how far Windows/NVIDIA GPU evidence reached for this run, so allocator-level VRAM truth remains unknown."
+                .to_string()
+        } else {
+            "GPU offload was not requested, so no Windows/NVIDIA GPU trust-boundary verdict applied."
+                .to_string()
+        },
         gpu_check_backend: failure.post_cleanup_observation.gpu_check_backend.clone(),
         gpu_check_source: failure.post_cleanup_observation.gpu_check_source.clone(),
         inspection_status: "runtime_startup_failed_before_ready".to_string(),
@@ -1849,11 +1873,7 @@ pub fn build_failed_launch_llama_runtime_report(
         } else {
             "NullContext could not confirm automatic cleanup of the failed startup runtime, so process-owned memory boundaries remain weakly bounded.".to_string()
         },
-        residual_risk_summary: if gpu_offload_requested {
-            "Because runtime startup failed before readiness, allocator state, RAM residency, and any possible GPU-offloaded setup state were not inspected through the normal shutdown path.".to_string()
-        } else {
-            "Because runtime startup failed before readiness, allocator state and RAM residency were not inspected through the normal shutdown path.".to_string()
-        },
+        residual_risk_summary: failed_start_runtime_residual_risk_summary(gpu_offload_requested),
         introspection,
         vram_cleanup,
         memory_domains: vec![
@@ -2887,6 +2907,176 @@ fn gpu_limitation_summary(
     )
 }
 
+fn gpu_trust_boundary_status(
+    gpu_offload_requested: bool,
+    live_class: &str,
+    post_shutdown_class: &str,
+    live_limitation_status: &str,
+    post_shutdown_limitation_status: &str,
+) -> String {
+    if !gpu_offload_requested {
+        return "gpu_offload_not_requested".to_string();
+    }
+
+    let classes = [live_class, post_shutdown_class];
+    let limitations = [live_limitation_status, post_shutdown_limitation_status];
+
+    if classes
+        .iter()
+        .any(|class| class.contains("nvml_pid_and_allocation_bytes_visible"))
+    {
+        return "gpu_trust_boundary_nvml_backed_per_process_bytes".to_string();
+    }
+
+    if classes
+        .iter()
+        .any(|class| class.contains("pid_and_allocation_bytes_visible"))
+    {
+        return "gpu_trust_boundary_host_tool_per_process_bytes".to_string();
+    }
+
+    if limitations
+        .iter()
+        .any(|status| status.contains("wddm_or_driver_hides_allocation_bytes"))
+    {
+        return "gpu_trust_boundary_pid_visible_but_byte_visibility_blocked".to_string();
+    }
+
+    if classes
+        .iter()
+        .any(|class| class.contains("pid_visible_but_allocation_bytes_unavailable"))
+    {
+        return "gpu_trust_boundary_pid_visible_without_allocation_bytes".to_string();
+    }
+
+    if classes
+        .iter()
+        .any(|class| class.contains("visibility_limited"))
+        || limitations
+            .iter()
+            .any(|status| status.contains("backend_visibility_limited"))
+    {
+        return "gpu_trust_boundary_visibility_limited".to_string();
+    }
+
+    if classes.iter().any(|class| {
+        class.contains("gpu_evidence_unavailable")
+            || class.contains("unavailable_due_to_startup_failure")
+    }) || limitations.iter().any(|status| {
+        status.contains("gpu_backend_unavailable_or_inconclusive")
+            || status.contains("unavailable_due_to_startup_failure")
+    }) {
+        return "gpu_trust_boundary_unavailable_or_inconclusive".to_string();
+    }
+
+    if classes
+        .iter()
+        .any(|class| class.contains("pid_not_observed"))
+    {
+        return "gpu_trust_boundary_pid_not_observed".to_string();
+    }
+
+    "gpu_trust_boundary_mixed".to_string()
+}
+
+fn gpu_trust_boundary_summary(
+    trust_boundary_status: &str,
+    live_class: &str,
+    post_shutdown_class: &str,
+) -> String {
+    let window_summary = format!(
+        "Live class {}. Post-shutdown class {}.",
+        live_class.replace('_', " "),
+        post_shutdown_class.replace('_', " ")
+    );
+
+    match trust_boundary_status {
+        "gpu_offload_not_requested" => {
+            "GPU offload was not requested, so no Windows/NVIDIA VRAM trust-boundary verdict applied."
+                .to_string()
+        }
+        "gpu_trust_boundary_nvml_backed_per_process_bytes" => format!(
+            "Windows/NVIDIA GPU evidence reached NVML-backed per-process byte visibility in at least one observation window, which is stronger than PID-only host-tool evidence but still not allocator-level VRAM truth. {}",
+            window_summary
+        ),
+        "gpu_trust_boundary_host_tool_per_process_bytes" => format!(
+            "Windows/NVIDIA GPU evidence reached per-process allocation-byte visibility through host tooling in at least one observation window, which is useful evidence but still not direct allocator-level VRAM introspection. {}",
+            window_summary
+        ),
+        "gpu_trust_boundary_pid_visible_but_byte_visibility_blocked" => format!(
+            "Windows/NVIDIA GPU evidence only reached per-process PID visibility while the driver/runtime hid allocation-byte totals, so NullContext still cannot tell how much VRAM remained allocated. {}",
+            window_summary
+        ),
+        "gpu_trust_boundary_pid_visible_without_allocation_bytes" => format!(
+            "Windows/NVIDIA GPU evidence only reached PID visibility without allocation-byte truth, so the report can confirm process presence on the GPU boundary but not residual VRAM volume. {}",
+            window_summary
+        ),
+        "gpu_trust_boundary_visibility_limited" => format!(
+            "Windows/NVIDIA GPU visibility was limited by the available backend, so the report cannot make a strong statement about post-run VRAM state beyond the host-tool boundary. {}",
+            window_summary
+        ),
+        "gpu_trust_boundary_unavailable_or_inconclusive" => format!(
+            "Windows/NVIDIA GPU evidence was unavailable or inconclusive in this run, so allocator-level VRAM state remains unknown. {}",
+            window_summary
+        ),
+        "gpu_trust_boundary_pid_not_observed" => format!(
+            "Windows/NVIDIA GPU inspection did not observe the runtime PID in the sampled windows, which may indicate cleanup or may reflect backend blind spots rather than allocator-level absence. {}",
+            window_summary
+        ),
+        _ => format!(
+            "Windows/NVIDIA GPU evidence was mixed across the live and post-shutdown windows, so this report should be read as host-tool evidence with unresolved allocator-level uncertainty. {}",
+            window_summary
+        ),
+    }
+}
+
+fn runtime_residual_risk_summary(
+    gpu_offload_requested: bool,
+    gpu_trust_boundary_status: &str,
+) -> String {
+    if !gpu_offload_requested {
+        return "Allocator state, KV/cache contents, and model-weight residency in the external llama.cpp process remain unverified even after the recorded shutdown path."
+            .to_string();
+    }
+
+    let gpu_clause = match gpu_trust_boundary_status {
+        "gpu_trust_boundary_nvml_backed_per_process_bytes" => {
+            "GPU evidence reached per-process allocation-byte visibility, but allocator-level VRAM contents and cleanup guarantees still remain unverified"
+        }
+        "gpu_trust_boundary_host_tool_per_process_bytes" => {
+            "GPU evidence reached host-tool allocation-byte visibility, but allocator-level VRAM contents and cleanup guarantees still remain unverified"
+        }
+        "gpu_trust_boundary_pid_visible_but_byte_visibility_blocked"
+        | "gpu_trust_boundary_pid_visible_without_allocation_bytes" => {
+            "GPU evidence only reached process-presence visibility, so residual VRAM volume and contents remain unverified"
+        }
+        "gpu_trust_boundary_visibility_limited"
+        | "gpu_trust_boundary_unavailable_or_inconclusive"
+        | "gpu_trust_boundary_unavailable_due_to_startup_failure" => {
+            "GPU evidence did not reach a strong visibility boundary, so VRAM residency and contents remain unverified"
+        }
+        "gpu_trust_boundary_pid_not_observed" => {
+            "the runtime PID was not observed in sampled GPU windows, but VRAM absence still cannot be guaranteed from that alone"
+        }
+        _ => "GPU evidence remained mixed, so VRAM residency and contents remain unverified",
+    };
+
+    format!(
+        "Allocator state, KV/cache contents, model-weight residency, and possible VRAM-resident buffers remain unverified even after the recorded shutdown path; {}.",
+        gpu_clause
+    )
+}
+
+fn failed_start_runtime_residual_risk_summary(gpu_offload_requested: bool) -> String {
+    if gpu_offload_requested {
+        "Because runtime startup failed before readiness, allocator state, RAM residency, and any possible GPU-offloaded setup state were not inspected through the normal shutdown path."
+            .to_string()
+    } else {
+        "Because runtime startup failed before readiness, allocator state and RAM residency were not inspected through the normal shutdown path."
+            .to_string()
+    }
+}
+
 fn post_shutdown_gpu_visibility_status_from_gpu_window(
     gpu_offload_requested: bool,
     gpu_entry_present: Option<bool>,
@@ -3263,6 +3453,15 @@ fn default_gpu_evidence_summary() -> String {
 
 fn default_gpu_limitation_summary() -> String {
     "This report did not yet classify the backend-specific limitation behind the recorded GPU evidence."
+        .to_string()
+}
+
+fn default_gpu_trust_boundary_status() -> String {
+    "gpu_trust_boundary_unavailable".to_string()
+}
+
+fn default_gpu_trust_boundary_summary() -> String {
+    "This report did not yet classify how far the recorded GPU evidence reached beyond host-tool visibility."
         .to_string()
 }
 

@@ -338,6 +338,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         "post_shutdown_gpu_limitation_status_unavailable_in_legacy_report";
       parsed.llama_runtime.gpu_limitation_summary ??=
         "This older report did not classify backend-specific GPU visibility limitations.";
+      parsed.llama_runtime.gpu_trust_boundary_status ??=
+        "gpu_trust_boundary_unavailable_in_legacy_report";
+      parsed.llama_runtime.gpu_trust_boundary_summary ??=
+        "This older report did not classify how far the recorded GPU evidence reached beyond host-tool visibility.";
     }
 
     if (parsed.llama_runtime?.introspection) {
