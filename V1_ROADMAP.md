@@ -97,6 +97,7 @@ NullContext already has meaningful foundations in-tree:
 - runtime reports and the Track C capability matrix now also carry a single GPU trust-boundary verdict that states how far current Windows/NVIDIA evidence reaches and where allocator-level VRAM truth still stops
 - runtime-specific residual-risk wording for GPU-offloaded runs now keys off that same trust-boundary verdict instead of falling back to a generic “possible VRAM buffers remain” sentence
 - runtime reports now also classify backend provenance explicitly, distinguishing NVML driver-API evidence from nvidia-smi CLI evidence and mixed fallback chains
+- runtime reports and the Track C capability matrix now also collapse all of that into one GPU evidence tier that says whether the run reached driver-backed bytes, CLI-backed bytes, PID-only visibility, visibility-limited evidence, or no usable GPU truth
 
 That is strong progress.
 
@@ -248,6 +249,7 @@ Done or partially done:
 - reports now collapse those live/post observations into one explicit GPU trust-boundary verdict so the operator can see, at a glance, whether the run reached byte visibility, PID-only visibility, or only weak host-tool evidence
 - the top-level runtime residual-risk summary now reflects that same trust-boundary verdict, keeping the GPU narrative aligned from detailed evidence through final operator wording
 - the runtime report now also says whether the GPU evidence came from NVML driver APIs, nvidia-smi compute-apps, nvidia-smi pmon, or a mixed backend chain
+- the runtime report now also exposes one final GPU evidence tier so the operator does not have to mentally combine provenance and trust-boundary fields
 
 ### Remaining v1 Work
 
@@ -489,7 +491,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `26-51` commits
+- `25-50` commits
 
 ### Track Breakdown
 
@@ -522,7 +524,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `0-3` commits
+- `0-2` commits
 
 Expected areas:
 
