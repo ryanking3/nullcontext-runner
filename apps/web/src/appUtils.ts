@@ -342,6 +342,14 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         "gpu_trust_boundary_unavailable_in_legacy_report";
       parsed.llama_runtime.gpu_trust_boundary_summary ??=
         "This older report did not classify how far the recorded GPU evidence reached beyond host-tool visibility.";
+      parsed.llama_runtime.gpu_backend_provenance_status ??=
+        "gpu_backend_provenance_unavailable_in_legacy_report";
+      parsed.llama_runtime.gpu_backend_provenance_summary ??=
+        "This older report did not classify whether its GPU evidence came from NVML driver APIs, nvidia-smi CLI paths, or a mixed backend chain.";
+      parsed.llama_runtime.allocator_kv_cleanup_boundary_status ??=
+        "allocator_kv_cleanup_boundary_unavailable_in_legacy_report";
+      parsed.llama_runtime.allocator_kv_cleanup_boundary_summary ??=
+        "This older report did not classify how far direct allocator/KV cleanup-path evidence changed the runtime cleanup story.";
     }
 
     if (parsed.llama_runtime?.introspection) {

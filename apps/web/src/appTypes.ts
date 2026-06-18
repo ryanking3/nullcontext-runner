@@ -624,6 +624,8 @@ export type LlamaRuntimeReportData = {
   gpu_limitation_summary: string;
   gpu_trust_boundary_status: string;
   gpu_trust_boundary_summary: string;
+  gpu_backend_provenance_status: string;
+  gpu_backend_provenance_summary: string;
   gpu_check_backend?: string | null;
   gpu_check_source?: string | null;
   inspection_status: string;
@@ -631,6 +633,8 @@ export type LlamaRuntimeReportData = {
   vram_inspection_status: string;
   inspection_summary: string;
   observation_notes: string[];
+  allocator_kv_cleanup_boundary_status: string;
+  allocator_kv_cleanup_boundary_summary: string;
   cleanup_summary: string;
   residual_risk_summary: string;
   introspection: LlamaRuntimeIntrospectionReport;

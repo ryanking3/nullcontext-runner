@@ -91,10 +91,12 @@ NullContext already has meaningful foundations in-tree:
 - runtime introspection now explicitly classifies whether observed allocator/KV evidence came from a manifest-declared instrumented path, a partially exercised declared path, or undeclared runtime-signal observation
 - Track B capability reporting now carries the same manifest-backed-versus-undeclared instrumentation evidence distinction as the raw runtime introspection report
 - runtime introspection now also exposes a row-by-row runtime-signal contract matrix for allocator setup/teardown/reset and KV/model lifecycle signals, not only aggregate counts and cleanup-only entries
+- allocator/KV cleanup-path evidence now feeds the main runtime cleanup boundary wording and the model-weight memory-domain interpretation instead of living only in the introspection section
 - runtime reports and the Track C capability matrix now classify whether Windows/NVIDIA GPU evidence came from NVML-backed byte visibility, PID-only host-tool evidence, or visibility-limited fallback paths
 - runtime reports and the Track C capability matrix now also classify backend-specific GPU limitation causes such as WDDM-style byte hiding, PID-only backends, and visibility-limited fallback paths
 - runtime reports and the Track C capability matrix now also carry a single GPU trust-boundary verdict that states how far current Windows/NVIDIA evidence reaches and where allocator-level VRAM truth still stops
 - runtime-specific residual-risk wording for GPU-offloaded runs now keys off that same trust-boundary verdict instead of falling back to a generic “possible VRAM buffers remain” sentence
+- runtime reports now also classify backend provenance explicitly, distinguishing NVML driver-API evidence from nvidia-smi CLI evidence and mixed fallback chains
 
 That is strong progress.
 
@@ -196,6 +198,7 @@ Done or partially done:
 - instrumentation evidence reporting now distinguishes trustworthy manifest-backed runtime-signal evidence from undeclared or stock-runtime signal observation
 - the allocator/KV capability matrix entry now reflects instrumentation evidence class directly instead of relying only on broader lifecycle tiers
 - the runtime report now surfaces the full runtime-signal contract as first-class rows, so setup, reuse, teardown, reset, and unload evidence can be inspected without reverse-engineering aggregate counts
+- the main runtime cleanup summary now explicitly says whether direct allocator/KV/model cleanup-path signals were observed, declared-but-unobserved, or absent on the stock runtime path
 
 ### Remaining v1 Work
 
@@ -244,6 +247,7 @@ Done or partially done:
 - live and post-shutdown GPU limitation classes now distinguish byte-hiding backends from broader visibility-limited fallback conditions
 - reports now collapse those live/post observations into one explicit GPU trust-boundary verdict so the operator can see, at a glance, whether the run reached byte visibility, PID-only visibility, or only weak host-tool evidence
 - the top-level runtime residual-risk summary now reflects that same trust-boundary verdict, keeping the GPU narrative aligned from detailed evidence through final operator wording
+- the runtime report now also says whether the GPU evidence came from NVML driver APIs, nvidia-smi compute-apps, nvidia-smi pmon, or a mixed backend chain
 
 ### Remaining v1 Work
 
@@ -485,7 +489,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `28-53` commits
+- `26-51` commits
 
 ### Track Breakdown
 
@@ -505,7 +509,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `0-1` commits
+- `0` commits
 
 Expected areas:
 
@@ -518,7 +522,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `1-4` commits
+- `0-3` commits
 
 Expected areas:
 

@@ -469,6 +469,18 @@ export function PrivacyReportViewer({
                 value: humanizeSnakeCase(currentReport.llama_runtime.gpu_trust_boundary_status),
               },
               {
+                label: "gpu backend provenance",
+                value: humanizeSnakeCase(
+                  currentReport.llama_runtime.gpu_backend_provenance_status
+                ),
+              },
+              {
+                label: "allocator/kv cleanup boundary",
+                value: humanizeSnakeCase(
+                  currentReport.llama_runtime.allocator_kv_cleanup_boundary_status
+                ),
+              },
+              {
                 label: "process memory source",
                 value: currentReport.llama_runtime.process_memory_source || "none",
               },
@@ -623,6 +635,14 @@ export function PrivacyReportViewer({
             <p>
               <strong>gpu trust boundary:</strong>{" "}
               {currentReport.llama_runtime.gpu_trust_boundary_summary}
+            </p>
+            <p>
+              <strong>gpu backend provenance:</strong>{" "}
+              {currentReport.llama_runtime.gpu_backend_provenance_summary}
+            </p>
+            <p>
+              <strong>allocator/kv cleanup boundary:</strong>{" "}
+              {currentReport.llama_runtime.allocator_kv_cleanup_boundary_summary}
             </p>
             <p>
               <strong>cleanup boundary:</strong> {currentReport.llama_runtime.cleanup_summary}

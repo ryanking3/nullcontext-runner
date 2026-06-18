@@ -432,6 +432,10 @@ pub struct LlamaRuntimeReport {
     pub gpu_trust_boundary_status: String,
     #[serde(default = "default_gpu_trust_boundary_summary")]
     pub gpu_trust_boundary_summary: String,
+    #[serde(default = "default_gpu_backend_provenance_status")]
+    pub gpu_backend_provenance_status: String,
+    #[serde(default = "default_gpu_backend_provenance_summary")]
+    pub gpu_backend_provenance_summary: String,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub inspection_status: String,
@@ -439,6 +443,10 @@ pub struct LlamaRuntimeReport {
     pub vram_inspection_status: String,
     pub inspection_summary: String,
     pub observation_notes: Vec<String>,
+    #[serde(default = "default_allocator_kv_cleanup_boundary_status")]
+    pub allocator_kv_cleanup_boundary_status: String,
+    #[serde(default = "default_allocator_kv_cleanup_boundary_summary")]
+    pub allocator_kv_cleanup_boundary_summary: String,
     pub cleanup_summary: String,
     pub residual_risk_summary: String,
     pub introspection: LlamaRuntimeIntrospectionReport,
@@ -1166,6 +1174,7 @@ fn build_allocator_kv_capability_entry(
         notes: vec![
             introspection.allocator_summary.clone(),
             introspection.kv_cache_summary.clone(),
+            llama_runtime.allocator_kv_cleanup_boundary_summary.clone(),
             introspection.instrumentation_evidence_summary.clone(),
             introspection.cleanup_signal_contract_summary.clone(),
             format!(
@@ -1253,6 +1262,7 @@ fn build_gpu_inspection_capability_entry(
         summary: llama_runtime.inspection_summary.clone(),
         notes: vec![
             llama_runtime.gpu_trust_boundary_summary.clone(),
+            llama_runtime.gpu_backend_provenance_summary.clone(),
             llama_runtime.gpu_evidence_summary.clone(),
             llama_runtime.gpu_limitation_summary.clone(),
             llama_runtime.cleanup_summary.clone(),
@@ -1387,6 +1397,12 @@ pub fn build_llama_runtime_report(
         false,
         &shutdown.introspection_signals,
     );
+    let allocator_kv_cleanup_boundary_status =
+        allocator_kv_cleanup_boundary_status(&introspection, false);
+    let allocator_kv_cleanup_boundary_summary = allocator_kv_cleanup_boundary_summary(
+        &allocator_kv_cleanup_boundary_status,
+        &introspection,
+    );
 
     let mut memory_domains = vec![
         LlamaMemoryDomainReport {
@@ -1451,12 +1467,18 @@ pub fn build_llama_runtime_report(
         LlamaMemoryDomainReport {
             domain: "model_weights_ram".to_string(),
             exposure_scope: "loaded GGUF weight residency in external process RAM".to_string(),
-            cleanup_status: "warning".to_string(),
-            notes: "Process termination ends normal access to model-weight memory, but NullContext does not verify whether released OS pages were zeroed or later reused.".to_string(),
+            cleanup_status: if introspection.model_unload_observed {
+                "successful".to_string()
+            } else {
+                "warning".to_string()
+            },
+            notes: model_weights_cleanup_summary(&introspection),
         },
         LlamaMemoryDomainReport {
             domain: "kv_cache_state".to_string(),
-            exposure_scope: "prompt context, KV/cache state, and decoded token history inside llama.cpp".to_string(),
+            exposure_scope:
+                "prompt context, KV/cache state, and decoded token history inside llama.cpp"
+                    .to_string(),
             cleanup_status: if introspection.kv_cache_clear_observed {
                 "successful".to_string()
             } else if introspection.kv_cache_initialized_observed
@@ -1566,6 +1588,11 @@ pub fn build_llama_runtime_report(
         &live_gpu_limitation_status,
         &post_shutdown_gpu_limitation_status,
     );
+    let gpu_backend_provenance_status = gpu_backend_provenance_status(
+        gpu_offload_requested,
+        usage.gpu_observation_backend.as_deref(),
+        post_shutdown.gpu_check_backend.as_deref(),
+    );
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
     let vram_cleanup = build_vram_cleanup_strategy_report(
         gpu_offload_requested,
@@ -1649,6 +1676,12 @@ pub fn build_llama_runtime_report(
             &live_gpu_evidence_class,
             &post_shutdown_gpu_evidence_class,
         ),
+        gpu_backend_provenance_status: gpu_backend_provenance_status.clone(),
+        gpu_backend_provenance_summary: gpu_backend_provenance_summary(
+            &gpu_backend_provenance_status,
+            usage.gpu_observation_backend.as_deref(),
+            post_shutdown.gpu_check_backend.as_deref(),
+        ),
         gpu_check_backend: post_shutdown.gpu_check_backend.clone(),
         gpu_check_source: post_shutdown.gpu_check_source.clone(),
         inspection_status,
@@ -1656,15 +1689,23 @@ pub fn build_llama_runtime_report(
         vram_inspection_status,
         inspection_summary,
         observation_notes,
+        allocator_kv_cleanup_boundary_status: allocator_kv_cleanup_boundary_status.clone(),
+        allocator_kv_cleanup_boundary_summary: allocator_kv_cleanup_boundary_summary.clone(),
         cleanup_summary: if !process_exited_cleanly {
-            "NullContext could not confirm llama-server shutdown, so runtime-owned memory domains remain more weakly bounded than intended."
-                .to_string()
+            format!(
+                "NullContext could not confirm llama-server shutdown, so runtime-owned memory domains remain more weakly bounded than intended. {}",
+                allocator_kv_cleanup_boundary_summary
+            )
         } else if shutdown.shutdown_method == "already_exited" {
-            "The llama-server process had already exited before the final shutdown step. Process exit is still the strongest cleanup boundary currently available for llama.cpp-owned memory domains."
-                .to_string()
+            format!(
+                "The llama-server process had already exited before the final shutdown step. Process exit is still the strongest cleanup boundary currently available for llama.cpp-owned memory domains. {}",
+                allocator_kv_cleanup_boundary_summary
+            )
         } else {
-            "NullContext stopped llama-server by force-killing the child process and waiting for exit. Process termination is currently the strongest cleanup action applied to llama.cpp-owned memory domains."
-                .to_string()
+            format!(
+                "NullContext stopped llama-server by force-killing the child process and waiting for exit. Process termination is currently the strongest cleanup action applied to llama.cpp-owned memory domains. {}",
+                allocator_kv_cleanup_boundary_summary
+            )
         },
         residual_risk_summary: runtime_residual_risk_summary(
             gpu_offload_requested,
@@ -1692,6 +1733,12 @@ pub fn build_failed_launch_llama_runtime_report(
         &config.llama_path,
         true,
         &failure.introspection_signals,
+    );
+    let allocator_kv_cleanup_boundary_status =
+        allocator_kv_cleanup_boundary_status(&introspection, true);
+    let allocator_kv_cleanup_boundary_summary = allocator_kv_cleanup_boundary_summary(
+        &allocator_kv_cleanup_boundary_status,
+        &introspection,
     );
 
     LlamaRuntimeReport {
@@ -1824,6 +1871,18 @@ pub fn build_failed_launch_llama_runtime_report(
             "GPU offload was not requested, so no Windows/NVIDIA GPU trust-boundary verdict applied."
                 .to_string()
         },
+        gpu_backend_provenance_status: if gpu_offload_requested {
+            "gpu_backend_provenance_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
+        gpu_backend_provenance_summary: if gpu_offload_requested {
+            "Runtime startup failed before NullContext could establish whether this run relied on NVML driver APIs, nvidia-smi CLI paths, or a mixed backend chain for GPU evidence."
+                .to_string()
+        } else {
+            "GPU offload was not requested, so no Windows/NVIDIA GPU backend-provenance verdict applied."
+                .to_string()
+        },
         gpu_check_backend: failure.post_cleanup_observation.gpu_check_backend.clone(),
         gpu_check_source: failure.post_cleanup_observation.gpu_check_source.clone(),
         inspection_status: "runtime_startup_failed_before_ready".to_string(),
@@ -1864,16 +1923,22 @@ pub fn build_failed_launch_llama_runtime_report(
 
             notes
         },
+        allocator_kv_cleanup_boundary_status: allocator_kv_cleanup_boundary_status.clone(),
+        allocator_kv_cleanup_boundary_summary: allocator_kv_cleanup_boundary_summary.clone(),
         cleanup_summary: if failure.cleanup_succeeded {
             format!(
-                "NullContext terminated the failed startup process using {} before inference began, but no normal post-shutdown observation window was completed.",
+                "NullContext terminated the failed startup process using {} before inference began, but no normal post-shutdown observation window was completed. {}",
                 failure
                     .cleanup_shutdown_method
                     .as_deref()
-                    .unwrap_or("unknown shutdown method")
+                    .unwrap_or("unknown shutdown method"),
+                allocator_kv_cleanup_boundary_summary
             )
         } else {
-            "NullContext could not confirm automatic cleanup of the failed startup runtime, so process-owned memory boundaries remain weakly bounded.".to_string()
+            format!(
+                "NullContext could not confirm automatic cleanup of the failed startup runtime, so process-owned memory boundaries remain weakly bounded. {}",
+                allocator_kv_cleanup_boundary_summary
+            )
         },
         residual_risk_summary: failed_start_runtime_residual_risk_summary(gpu_offload_requested),
         introspection,
@@ -3141,6 +3206,206 @@ fn gpu_trust_boundary_summary(
     }
 }
 
+fn gpu_backend_provenance_status(
+    gpu_offload_requested: bool,
+    live_backend: Option<&str>,
+    post_shutdown_backend: Option<&str>,
+) -> String {
+    if !gpu_offload_requested {
+        return "gpu_offload_not_requested".to_string();
+    }
+
+    let backend_chain = format!(
+        "{} {}",
+        live_backend.unwrap_or_default(),
+        post_shutdown_backend.unwrap_or_default()
+    );
+    let has_nvml = backend_chain.contains("nvml");
+    let has_compute_apps = backend_chain.contains("compute_apps");
+    let has_pmon = backend_chain.contains("pmon");
+
+    if backend_chain.trim().is_empty() {
+        return "gpu_backend_provenance_unavailable".to_string();
+    }
+
+    if has_nvml && (has_compute_apps || has_pmon) {
+        return "gpu_backend_provenance_mixed_nvml_and_cli".to_string();
+    }
+
+    if has_nvml {
+        return "gpu_backend_provenance_nvml_driver_api".to_string();
+    }
+
+    if has_compute_apps && has_pmon {
+        return "gpu_backend_provenance_nvidia_smi_compute_apps_and_pmon".to_string();
+    }
+
+    if has_compute_apps {
+        return "gpu_backend_provenance_nvidia_smi_compute_apps".to_string();
+    }
+
+    if has_pmon {
+        return "gpu_backend_provenance_nvidia_smi_pmon_only".to_string();
+    }
+
+    "gpu_backend_provenance_unknown_host_tool_chain".to_string()
+}
+
+fn gpu_backend_provenance_summary(
+    provenance_status: &str,
+    live_backend: Option<&str>,
+    post_shutdown_backend: Option<&str>,
+) -> String {
+    let backend_window_summary = format!(
+        "Live backend {}. Post-shutdown backend {}.",
+        live_backend.unwrap_or("none"),
+        post_shutdown_backend.unwrap_or("none")
+    );
+
+    match provenance_status {
+        "gpu_offload_not_requested" => {
+            "GPU offload was not requested, so no Windows/NVIDIA backend-provenance verdict applied."
+                .to_string()
+        }
+        "gpu_backend_provenance_nvml_driver_api" => format!(
+            "Windows/NVIDIA GPU evidence in this run came from NVML-backed driver API inspection rather than only from nvidia-smi CLI output. {}",
+            backend_window_summary
+        ),
+        "gpu_backend_provenance_mixed_nvml_and_cli" => format!(
+            "Windows/NVIDIA GPU evidence in this run mixed NVML-backed driver API inspection with nvidia-smi CLI fallback paths, so the strongest observations may be driver-backed while other windows still depended on host tooling. {}",
+            backend_window_summary
+        ),
+        "gpu_backend_provenance_nvidia_smi_compute_apps_and_pmon" => format!(
+            "Windows/NVIDIA GPU evidence in this run came from nvidia-smi CLI paths only, combining compute-apps byte visibility with pmon PID-only fallback visibility. {}",
+            backend_window_summary
+        ),
+        "gpu_backend_provenance_nvidia_smi_compute_apps" => format!(
+            "Windows/NVIDIA GPU evidence in this run came from the nvidia-smi compute-apps CLI path, which can expose per-process bytes but is still host-tool evidence rather than direct allocator-level truth. {}",
+            backend_window_summary
+        ),
+        "gpu_backend_provenance_nvidia_smi_pmon_only" => format!(
+            "Windows/NVIDIA GPU evidence in this run came only from the nvidia-smi pmon CLI path, which is limited to PID visibility and does not expose per-process allocation bytes. {}",
+            backend_window_summary
+        ),
+        "gpu_backend_provenance_unavailable_due_to_startup_failure" => {
+            "Runtime startup failed before NullContext could classify which GPU inspection backend chain was actually exercised for this run."
+                .to_string()
+        }
+        "gpu_backend_provenance_unavailable" => {
+            "NullContext did not capture a usable GPU backend provenance chain for this run, so the report cannot tell whether evidence came from NVML, nvidia-smi CLI paths, or another backend."
+                .to_string()
+        }
+        _ => format!(
+            "Windows/NVIDIA GPU evidence came from an unknown or mixed host-tool backend chain that NullContext does not yet classify more precisely. {}",
+            backend_window_summary
+        ),
+    }
+}
+
+fn allocator_kv_cleanup_boundary_status(
+    introspection: &LlamaRuntimeIntrospectionReport,
+    startup_failed: bool,
+) -> String {
+    if startup_failed && introspection.observed_signal_count == 0 {
+        return "allocator_kv_cleanup_boundary_unavailable_due_to_startup_failure".to_string();
+    }
+
+    if introspection.allocator_reset_observed
+        && introspection.kv_cache_clear_observed
+        && introspection.model_unload_observed
+    {
+        return "allocator_kv_cleanup_boundary_allocator_kv_and_model_cleanup_observed".to_string();
+    }
+
+    if introspection.allocator_reset_observed && introspection.kv_cache_clear_observed {
+        return "allocator_kv_cleanup_boundary_allocator_and_kv_cleanup_observed".to_string();
+    }
+
+    if introspection.allocator_reset_observed
+        || introspection.kv_cache_clear_observed
+        || introspection.model_unload_observed
+    {
+        return "allocator_kv_cleanup_boundary_partial_cleanup_signals_observed".to_string();
+    }
+
+    if introspection.allocator_initialized_observed
+        || introspection.allocator_teardown_observed
+        || introspection.kv_cache_initialized_observed
+        || introspection.kv_cache_reused_observed
+    {
+        return "allocator_kv_cleanup_boundary_setup_or_teardown_only".to_string();
+    }
+
+    if introspection
+        .instrumentation_evidence_status
+        .contains("manifest_declared")
+    {
+        return "allocator_kv_cleanup_boundary_declared_but_unobserved".to_string();
+    }
+
+    if introspection.instrumentation_evidence_status
+        == "stock_runtime_without_instrumented_signal_support"
+    {
+        return "allocator_kv_cleanup_boundary_stock_runtime_only".to_string();
+    }
+
+    "allocator_kv_cleanup_boundary_mixed".to_string()
+}
+
+fn allocator_kv_cleanup_boundary_summary(
+    boundary_status: &str,
+    introspection: &LlamaRuntimeIntrospectionReport,
+) -> String {
+    match boundary_status {
+        "allocator_kv_cleanup_boundary_unavailable_due_to_startup_failure" => {
+            "Allocator/KV cleanup-path evidence was unavailable because startup failed before normal runtime lifecycle collection completed.".to_string()
+        }
+        "allocator_kv_cleanup_boundary_allocator_kv_and_model_cleanup_observed" => {
+            "NullContext observed allocator reset, KV/cache clear, and model unload signals in this run, which is the strongest current direct llama.cpp cleanup-path evidence short of proving freed-page overwrite or zeroization.".to_string()
+        }
+        "allocator_kv_cleanup_boundary_allocator_and_kv_cleanup_observed" => {
+            "NullContext observed allocator reset and KV/cache clear signals in this run, but it did not also observe an explicit model unload signal.".to_string()
+        }
+        "allocator_kv_cleanup_boundary_partial_cleanup_signals_observed" => {
+            "NullContext observed some direct allocator/KV/model cleanup-path signals in this run, but the internal cleanup story remained partial rather than complete.".to_string()
+        }
+        "allocator_kv_cleanup_boundary_setup_or_teardown_only" => {
+            "NullContext observed setup, reuse, or teardown lifecycle signals, but it did not observe a full allocator/KV cleanup-path signal set before shutdown.".to_string()
+        }
+        "allocator_kv_cleanup_boundary_declared_but_unobserved" => format!(
+            "This runtime declared allocator/KV instrumentation support, but the current run did not emit direct cleanup-path signals. Instrumentation evidence status: {}.",
+            introspection.instrumentation_evidence_status.replace('_', " ")
+        ),
+        "allocator_kv_cleanup_boundary_stock_runtime_only" => {
+            "This run stayed on the stock external runtime path, so internal allocator/KV cleanup is still primarily bounded by process exit rather than by direct llama.cpp cleanup-path evidence.".to_string()
+        }
+        _ => format!(
+            "Allocator/KV cleanup-path evidence remained mixed for this run. Cleanup-path evidence status: {}. Instrumentation evidence status: {}.",
+            introspection.cleanup_path_evidence_status.replace('_', " "),
+            introspection.instrumentation_evidence_status.replace('_', " ")
+        ),
+    }
+}
+
+fn model_weights_cleanup_summary(introspection: &LlamaRuntimeIntrospectionReport) -> String {
+    if introspection.model_unload_observed {
+        "NullContext observed an explicit model unload signal from the runtime for this session. That is stronger evidence than process-lifetime inference alone, but it still does not prove released OS pages were overwritten or zeroized."
+            .to_string()
+    } else if introspection
+        .model_unload_signal_status
+        .contains("available")
+        || introspection
+            .instrumentation_evidence_status
+            .contains("manifest_declared")
+    {
+        "This runtime exposed or declared model-unload signal support, but the current run did not produce a direct model unload observation. Model-weight cleanup should still be treated as primarily bounded by process exit."
+            .to_string()
+    } else {
+        "Process termination ends normal access to model-weight memory, but NullContext does not currently have direct model-unload evidence for this run and does not verify whether released OS pages were zeroed or later reused."
+            .to_string()
+    }
+}
+
 fn runtime_residual_risk_summary(
     gpu_offload_requested: bool,
     gpu_trust_boundary_status: &str,
@@ -3573,6 +3838,24 @@ fn default_gpu_trust_boundary_status() -> String {
 
 fn default_gpu_trust_boundary_summary() -> String {
     "This report did not yet classify how far the recorded GPU evidence reached beyond host-tool visibility."
+        .to_string()
+}
+
+fn default_gpu_backend_provenance_status() -> String {
+    "gpu_backend_provenance_unavailable".to_string()
+}
+
+fn default_gpu_backend_provenance_summary() -> String {
+    "This report did not yet classify whether its GPU evidence came from NVML driver APIs, nvidia-smi CLI paths, or a mixed backend chain."
+        .to_string()
+}
+
+fn default_allocator_kv_cleanup_boundary_status() -> String {
+    "allocator_kv_cleanup_boundary_unavailable".to_string()
+}
+
+fn default_allocator_kv_cleanup_boundary_summary() -> String {
+    "This report did not yet classify how far direct allocator/KV cleanup-path evidence changed the runtime cleanup story."
         .to_string()
 }
 
