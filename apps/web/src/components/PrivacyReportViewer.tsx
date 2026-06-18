@@ -473,6 +473,10 @@ export function PrivacyReportViewer({
                 value: humanizeSnakeCase(currentReport.llama_runtime.gpu_evidence_tier_status),
               },
               {
+                label: "gpu claim boundary",
+                value: humanizeSnakeCase(currentReport.llama_runtime.gpu_claim_boundary_status),
+              },
+              {
                 label: "gpu backend provenance",
                 value: humanizeSnakeCase(
                   currentReport.llama_runtime.gpu_backend_provenance_status
@@ -643,6 +647,10 @@ export function PrivacyReportViewer({
             <p>
               <strong>gpu evidence tier:</strong>{" "}
               {currentReport.llama_runtime.gpu_evidence_tier_summary}
+            </p>
+            <p>
+              <strong>gpu claim boundary:</strong>{" "}
+              {currentReport.llama_runtime.gpu_claim_boundary_summary}
             </p>
             <p>
               <strong>gpu backend provenance:</strong>{" "}

@@ -440,6 +440,10 @@ pub struct LlamaRuntimeReport {
     pub gpu_evidence_tier_status: String,
     #[serde(default = "default_gpu_evidence_tier_summary")]
     pub gpu_evidence_tier_summary: String,
+    #[serde(default = "default_gpu_claim_boundary_status")]
+    pub gpu_claim_boundary_status: String,
+    #[serde(default = "default_gpu_claim_boundary_summary")]
+    pub gpu_claim_boundary_summary: String,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub inspection_status: String,
@@ -1260,12 +1264,11 @@ fn build_gpu_inspection_capability_entry(
         current_status,
         evidence_level,
         v1_blocker: true,
-        claim_boundary:
-            "Current GPU evidence may still come from host tools rather than true CUDA/NVML allocator-level inspection."
-                .to_string(),
+        claim_boundary: llama_runtime.gpu_claim_boundary_summary.clone(),
         summary: llama_runtime.inspection_summary.clone(),
         notes: vec![
             llama_runtime.gpu_evidence_tier_summary.clone(),
+            llama_runtime.gpu_claim_boundary_summary.clone(),
             llama_runtime.gpu_trust_boundary_summary.clone(),
             llama_runtime.gpu_backend_provenance_summary.clone(),
             llama_runtime.gpu_evidence_summary.clone(),
@@ -1603,6 +1606,11 @@ pub fn build_llama_runtime_report(
         &gpu_trust_boundary_status,
         &gpu_backend_provenance_status,
     );
+    let gpu_claim_boundary_status = gpu_claim_boundary_status(
+        gpu_offload_requested,
+        &gpu_evidence_tier_status,
+        &gpu_trust_boundary_status,
+    );
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
     let vram_cleanup = build_vram_cleanup_strategy_report(
         gpu_offload_requested,
@@ -1696,6 +1704,12 @@ pub fn build_llama_runtime_report(
         gpu_evidence_tier_summary: gpu_evidence_tier_summary(
             &gpu_evidence_tier_status,
             &gpu_trust_boundary_status,
+            &gpu_backend_provenance_status,
+        ),
+        gpu_claim_boundary_status: gpu_claim_boundary_status.clone(),
+        gpu_claim_boundary_summary: gpu_claim_boundary_summary(
+            &gpu_claim_boundary_status,
+            &gpu_evidence_tier_status,
             &gpu_backend_provenance_status,
         ),
         gpu_check_backend: post_shutdown.gpu_check_backend.clone(),
@@ -1909,6 +1923,18 @@ pub fn build_failed_launch_llama_runtime_report(
                 .to_string()
         } else {
             "GPU offload was not requested, so no Windows/NVIDIA GPU evidence tier applied."
+                .to_string()
+        },
+        gpu_claim_boundary_status: if gpu_offload_requested {
+            "gpu_claim_boundary_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
+        gpu_claim_boundary_summary: if gpu_offload_requested {
+            "Runtime startup failed before NullContext could state what Windows/NVIDIA GPU claims were justified for this run."
+                .to_string()
+        } else {
+            "GPU offload was not requested, so no Windows/NVIDIA GPU claim boundary applied."
                 .to_string()
         },
         gpu_check_backend: failure.post_cleanup_observation.gpu_check_backend.clone(),
@@ -3432,6 +3458,95 @@ fn gpu_evidence_tier_summary(
     }
 }
 
+fn gpu_claim_boundary_status(
+    gpu_offload_requested: bool,
+    evidence_tier_status: &str,
+    trust_boundary_status: &str,
+) -> String {
+    if !gpu_offload_requested {
+        return "gpu_offload_not_requested".to_string();
+    }
+
+    match evidence_tier_status {
+        "gpu_evidence_tier_driver_api_per_process_bytes" => {
+            "gpu_claim_boundary_driver_api_bytes_not_allocator_truth".to_string()
+        }
+        "gpu_evidence_tier_mixed_driver_and_cli_bytes"
+        | "gpu_evidence_tier_cli_per_process_bytes" => {
+            "gpu_claim_boundary_per_process_bytes_not_allocator_truth".to_string()
+        }
+        "gpu_evidence_tier_pid_visible_without_bytes"
+        | "gpu_evidence_tier_cli_pid_only_visibility" => {
+            "gpu_claim_boundary_pid_visibility_only".to_string()
+        }
+        "gpu_evidence_tier_visibility_limited" => {
+            "gpu_claim_boundary_visibility_limited".to_string()
+        }
+        "gpu_evidence_tier_unavailable_or_inconclusive" => {
+            "gpu_claim_boundary_unavailable_or_inconclusive".to_string()
+        }
+        "gpu_evidence_tier_pid_not_observed" => {
+            "gpu_claim_boundary_pid_not_observed_not_clean_claim".to_string()
+        }
+        _ if trust_boundary_status == "gpu_trust_boundary_unavailable_due_to_startup_failure" => {
+            "gpu_claim_boundary_unavailable_due_to_startup_failure".to_string()
+        }
+        _ => "gpu_claim_boundary_mixed".to_string(),
+    }
+}
+
+fn gpu_claim_boundary_summary(
+    claim_boundary_status: &str,
+    evidence_tier_status: &str,
+    provenance_status: &str,
+) -> String {
+    match claim_boundary_status {
+        "gpu_offload_not_requested" => {
+            "GPU offload was not requested, so no Windows/NVIDIA GPU claim boundary applied."
+                .to_string()
+        }
+        "gpu_claim_boundary_driver_api_bytes_not_allocator_truth" => format!(
+            "This run justifies a Windows/NVIDIA claim that per-process GPU allocation bytes were visible through NVML-backed driver APIs, but it still does not justify allocator-level VRAM sanitization or contents claims. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_claim_boundary_per_process_bytes_not_allocator_truth" => format!(
+            "This run justifies a Windows/NVIDIA claim that per-process GPU allocation bytes were visible, but only at the host-tool or mixed backend boundary; it does not justify allocator-level VRAM sanitization or contents claims. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_claim_boundary_pid_visibility_only" => format!(
+            "This run justifies only a process-presence claim on the Windows/NVIDIA GPU boundary. It does not justify per-process byte claims or allocator-level VRAM cleanup claims. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_claim_boundary_visibility_limited" => format!(
+            "This run only justifies a visibility-limited Windows/NVIDIA claim: the backend path was too constrained to support strong PID, byte, or allocator-level conclusions. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_claim_boundary_unavailable_or_inconclusive" => format!(
+            "This run does not justify a meaningful Windows/NVIDIA GPU cleanup claim because the evidence remained unavailable or inconclusive. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_claim_boundary_pid_not_observed_not_clean_claim" => format!(
+            "This run justifies only a narrow claim that the runtime PID was not observed in sampled GPU windows. It does not justify a clean VRAM absence or sanitization claim because backend blind spots may still exist. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_claim_boundary_unavailable_due_to_startup_failure" => {
+            "Runtime startup failed before NullContext could establish a justified Windows/NVIDIA GPU claim boundary for this run."
+                .to_string()
+        }
+        _ => format!(
+            "This run landed in a mixed Windows/NVIDIA GPU claim boundary that still requires manual reading of evidence tier, provenance, and trust-boundary details before making any strong cleanup claim. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+    }
+}
+
 fn allocator_kv_cleanup_boundary_status(
     introspection: &LlamaRuntimeIntrospectionReport,
     startup_failed: bool,
@@ -3986,6 +4101,15 @@ fn default_gpu_evidence_tier_status() -> String {
 
 fn default_gpu_evidence_tier_summary() -> String {
     "This report did not yet collapse its GPU evidence into a stable Windows/NVIDIA evidence tier."
+        .to_string()
+}
+
+fn default_gpu_claim_boundary_status() -> String {
+    "gpu_claim_boundary_unavailable".to_string()
+}
+
+fn default_gpu_claim_boundary_summary() -> String {
+    "This report did not yet state which Windows/NVIDIA GPU claims were actually justified by the recorded evidence."
         .to_string()
 }
 

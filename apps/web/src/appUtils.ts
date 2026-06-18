@@ -350,6 +350,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         "gpu_evidence_tier_unavailable_in_legacy_report";
       parsed.llama_runtime.gpu_evidence_tier_summary ??=
         "This older report did not collapse its GPU evidence into a stable Windows/NVIDIA evidence tier.";
+      parsed.llama_runtime.gpu_claim_boundary_status ??=
+        "gpu_claim_boundary_unavailable_in_legacy_report";
+      parsed.llama_runtime.gpu_claim_boundary_summary ??=
+        "This older report did not state which Windows/NVIDIA GPU claims were actually justified by the recorded evidence.";
       parsed.llama_runtime.allocator_kv_cleanup_boundary_status ??=
         "allocator_kv_cleanup_boundary_unavailable_in_legacy_report";
       parsed.llama_runtime.allocator_kv_cleanup_boundary_summary ??=

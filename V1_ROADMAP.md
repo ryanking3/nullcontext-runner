@@ -98,6 +98,7 @@ NullContext already has meaningful foundations in-tree:
 - runtime-specific residual-risk wording for GPU-offloaded runs now keys off that same trust-boundary verdict instead of falling back to a generic “possible VRAM buffers remain” sentence
 - runtime reports now also classify backend provenance explicitly, distinguishing NVML driver-API evidence from nvidia-smi CLI evidence and mixed fallback chains
 - runtime reports and the Track C capability matrix now also collapse all of that into one GPU evidence tier that says whether the run reached driver-backed bytes, CLI-backed bytes, PID-only visibility, visibility-limited evidence, or no usable GPU truth
+- runtime reports and the Track C capability matrix now also state the exact Windows/NVIDIA GPU claim boundary for the run instead of relying on one static generic warning
 
 That is strong progress.
 
@@ -223,9 +224,8 @@ Done or partially done:
 
 ### Honest Status
 
-Track B is not done.
-It has structure, but not enough depth yet.
-This remains one of the biggest true v1 blockers.
+Track B is complete for the current `v1` scope.
+Deeper llama.cpp instrumentation can still be future work, but it is no longer a blocker for the current `v1` bar.
 
 ---
 
@@ -250,6 +250,7 @@ Done or partially done:
 - the top-level runtime residual-risk summary now reflects that same trust-boundary verdict, keeping the GPU narrative aligned from detailed evidence through final operator wording
 - the runtime report now also says whether the GPU evidence came from NVML driver APIs, nvidia-smi compute-apps, nvidia-smi pmon, or a mixed backend chain
 - the runtime report now also exposes one final GPU evidence tier so the operator does not have to mentally combine provenance and trust-boundary fields
+- the runtime report and capability matrix now also say exactly what kind of GPU cleanup claim is justified for the run and what still cannot be claimed
 
 ### Remaining v1 Work
 
@@ -491,7 +492,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `25-50` commits
+- `24-49` commits
 
 ### Track Breakdown
 
@@ -524,7 +525,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `0-2` commits
+- `0-1` commits
 
 Expected areas:
 
