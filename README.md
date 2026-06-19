@@ -83,7 +83,12 @@ No cloud inference is required.
 - Windows PowerShell-based process memory observation
 - NVIDIA `nvidia-smi` compute-apps and `pmon` fallback inspection paths
 - allocator / KV lifecycle capability reporting
+- runtime-signal and cleanup-signal contract reporting
 - cleanup-stage VRAM comparison and memory-validation scorecards
+- repeated cleanup-stage trend aggregation
+- cleanup-stage recommendation evidence classes
+- repeated validation release-gating guidance
+- Windows/NVIDIA GPU provenance, trust-boundary, evidence-tier, claim-boundary, and context-visibility reporting
 - audit operation tracking
 - sanitization operation reporting
 - structured privacy reports
@@ -153,7 +158,9 @@ The current browser UI supports:
 - one-shot prompt execution
 - one-shot corpus selection for grounded runs
 - active chat session start, stream, stop, and end
+- active chat preflight blockers before network start when model/corpus/config state is invalid
 - active chat corpus binding for grounded sessions
+- explicit corpus detach actions for stale or cleaned-up corpus bindings
 - dedicated model registry browser
 - dedicated corpus registry browser
 - path-based corpus ingestion
@@ -475,8 +482,9 @@ NullContext does not currently guarantee:
 
 Active chat also keeps a long-lived llama.cpp runtime and in-memory context alive until the user explicitly ends the session.
 Corpus ingestion can recover text from many PDFs, including scanned pages via OCR, but complex layouts, tables, and poor scans may still extract imperfectly.
-NullContext now performs best-effort llama runtime inspection, including shutdown-path reporting, live RAM/VRAM observation, post-shutdown verification, direct Windows process-memory scanning for configured markers, repeated canary-based validation, cleanup-stage comparison, macOS `vmmap` inspection when available, and Windows/NVIDIA fallback observation paths. These inspections improve visibility, but they are not proof of allocator zeroization or full RAM/VRAM sanitization.
-On Windows in particular, PowerShell process metrics, direct marker scanning coverage, and NVIDIA tooling can still be incomplete or driver-mode dependent, especially for per-process VRAM visibility under WDDM and for allocator-level GPU truth.
+NullContext now performs best-effort llama runtime inspection, including shutdown-path reporting, runtime-signal contract reporting, live RAM/VRAM observation, post-shutdown verification, direct Windows process-memory scanning for configured markers, repeated canary-based validation, cleanup-stage comparison, macOS `vmmap` inspection when available, and Windows/NVIDIA fallback observation paths. These inspections improve visibility, but they are not proof of allocator zeroization or full RAM/VRAM sanitization.
+Cleanup-stage recommendations now distinguish whether the current best stage is marker-backed, cleanup-signal-backed, GPU/process-trend-backed, or still limited, but that guidance is still comparative evidence rather than proof of allocator or driver cleanup.
+On Windows in particular, PowerShell process metrics, direct marker scanning coverage, and NVIDIA tooling can still be incomplete or driver-mode dependent, especially for per-process VRAM visibility under WDDM, CUDA-context visibility, and allocator-level GPU truth.
 
 The privacy reports intentionally expose these residual risks.
 

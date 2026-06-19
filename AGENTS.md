@@ -54,7 +54,11 @@ The project currently supports:
 - Windows PowerShell-based process memory observation
 - NVIDIA `nvidia-smi` compute-apps and `pmon` fallback inspection paths
 - allocator / KV lifecycle capability reporting
-- cleanup-stage VRAM comparison, marker-aware scorecards, and helper-stage canary scans
+- runtime-signal and cleanup-signal contract reporting
+- cleanup-stage VRAM comparison, marker-aware scorecards, repeated stage trends, recommendation evidence classes, release gating, and helper-stage canary scans
+- Windows/NVIDIA GPU provenance, trust-boundary, evidence-tier, claim-boundary, and context-visibility reporting
+- active-chat preflight blockers before session start when model/corpus/config state is invalid
+- explicit corpus detach controls for stale or cleaned-up chat bindings
 - active chat final reporting
 
 The project is functional but still early-stage. It should not be described as a hardened secure inference system.
@@ -123,6 +127,9 @@ Important backend files:
 - `src/runtime_introspection.rs`  
   Parsed allocator/KV/runtime lifecycle signals from llama runtime output.
 
+- `src/gpu_inspection.rs`  
+  Windows/NVIDIA GPU observation backends, evidence classification, and host-tool versus stronger-visibility reporting.
+
 - `src/memory_validation.rs`  
   Derived validation scorecards combining process-scan, cleanup-stage, and canary evidence.
 
@@ -130,7 +137,7 @@ Important backend files:
   Repeated controlled canary helper validation runs and representative-pass selection.
 
 - `src/validation_history.rs`  
-  Cross-session validation-history persistence and scope summaries.
+  Cross-session validation-history persistence, repeated cleanup-stage trends, recommendation evidence classes, and release-gate summaries.
 
 - `src/cleanup.rs`  
   Artifact scanning, cleanup reporting, sanitization operation records.
@@ -495,9 +502,11 @@ Manual verification should include:
 - platform capability matrix renders current track readiness truthfully
 - cleanup-stage reports show marker-aware evidence status and helper-stage scan summaries when available
 - cross-session validation history updates after repeated runs in the same scope
+- cleanup-stage recommendation reporting distinguishes best-stage ranking from evidence-support class and clean-claim status
 - macOS runtime reports show vmmap footprint and resident-region evidence when available
 - Windows runtime reports show PowerShell process-memory evidence when available
 - NVIDIA-backed runs report either compute-apps VRAM bytes or `pmon` PID visibility notes when available
+- Windows/NVIDIA runtime reports show GPU provenance, trust boundary, evidence tier, claim boundary, and context-visibility wording consistent with the raw evidence
 - Windows/NVIDIA validation compares the report against live `Get-Process`, `Win32_Process`, `nvidia-smi compute-apps`, and `nvidia-smi pmon` output for the same llama-server PID
 - lifecycle registry actions work for retained sessions
 - scheduled retention cleanup works
@@ -616,6 +625,6 @@ Do not commit:
 - OCR currently relies on local CLI availability and does not implement full document-layout fidelity.
 - llama runtime RAM inspection is strongest on macOS right now and still relies on best-effort host tooling rather than direct allocator introspection.
 - Windows direct process scanning is currently the strongest platform-specific marker backend; broader parity is still incomplete.
-- cleanup-stage and helper-stage evidence now exists per report, but repeated cross-run stage effectiveness aggregation is still incomplete.
+- cleanup-stage and helper-stage evidence now exists per report, and repeated cross-run aggregation exists, but threshold tuning and broader real-history calibration are still incomplete.
 - allocator / KV introspection is still only partial and needs deeper instrumented-runtime evidence.
 - Windows/NVIDIA runtime inspection needs live validation against real driver/runtime combinations, and current VRAM evidence is still host-tooling based rather than true allocator introspection or sanitization.

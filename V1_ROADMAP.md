@@ -226,8 +226,8 @@ Done or partially done:
 
 ### Honest Status
 
-Track B is complete for the current `v1` scope.
-Deeper llama.cpp instrumentation can still be future work, but it is no longer a blocker for the current `v1` bar.
+Track B is structurally strong now, but it is not actually finished for the stricter `v1` security bar.
+It remains a real blocker until allocator/KV evidence depends less on declarations and more on stronger observed runtime truth.
 
 ---
 
@@ -493,7 +493,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `8-18` commits
+- core security/evidence work across Tracks A-E: `10-21` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -502,7 +502,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `22-47` commits
+- `32-58` commits
 
 ### Track Breakdown
 
@@ -522,7 +522,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `0` commits
+- `2-4` commits
 
 Expected areas:
 
@@ -535,7 +535,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `0` commits
+- `3-6` commits
 
 Expected areas:
 
