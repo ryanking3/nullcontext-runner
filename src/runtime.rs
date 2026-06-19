@@ -153,7 +153,7 @@ const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
 const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
 const VRAM_CLEANUP_STRATEGY_ID: &str = "multi_stage_cleanup_experiments";
 const VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS: u64 = 1000;
-const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 7] = [
+const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 9] = [
     VramCleanupStrategyStagePlan {
         stage_id: "short_cooldown_recheck",
         stage_label: "Short Cooldown Recheck",
@@ -197,9 +197,23 @@ const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 7] = [
         perform_helper_relaunch_probe: false,
     },
     VramCleanupStrategyStagePlan {
+        stage_id: "host_ram_then_page_discard_probe",
+        stage_label: "Host RAM Then Page Discard Probe",
+        stage_kind: "host_ram_then_page_discard_probe",
+        cooldown_ms_before_stage: 250,
+        perform_helper_relaunch_probe: false,
+    },
+    VramCleanupStrategyStagePlan {
         stage_id: "cuda_memory_pressure_probe",
         stage_label: "CUDA Memory Pressure Probe",
         stage_kind: "cuda_memory_pressure_probe",
+        cooldown_ms_before_stage: 250,
+        perform_helper_relaunch_probe: false,
+    },
+    VramCleanupStrategyStagePlan {
+        stage_id: "cuda_then_host_ram_pressure_probe",
+        stage_label: "CUDA Then Host RAM Pressure Probe",
+        stage_kind: "cuda_then_host_ram_pressure_probe",
         cooldown_ms_before_stage: 250,
         perform_helper_relaunch_probe: false,
     },
@@ -782,6 +796,32 @@ fn execute_vram_cleanup_strategy_stage(
                 process_scan_report: None,
             }
         }
+        "host_ram_then_page_discard_probe" => {
+            let host_ram_report = run_host_ram_pressure_probe();
+            let page_discard_report = run_host_page_discard_probe();
+            build_composite_probe_outcome(
+                stage_plan.stage_id,
+                &[
+                    ("host RAM pressure", host_ram_report.status, host_ram_report.notes),
+                    (
+                        "host page discard",
+                        page_discard_report.status,
+                        page_discard_report.notes,
+                    ),
+                ],
+            )
+        }
+        "cuda_then_host_ram_pressure_probe" => {
+            let cuda_report = run_cuda_memory_pressure_probe();
+            let host_ram_report = run_host_ram_pressure_probe();
+            build_composite_probe_outcome(
+                stage_plan.stage_id,
+                &[
+                    ("CUDA memory pressure", cuda_report.status, cuda_report.notes),
+                    ("host RAM pressure", host_ram_report.status, host_ram_report.notes),
+                ],
+            )
+        }
         _ if stage_plan.perform_helper_relaunch_probe => match strategy_config {
             Some(config) => execute_helper_runtime_probe_stage(config, stage_plan),
             None => HelperRuntimeProbeOutcome {
@@ -798,6 +838,67 @@ fn execute_vram_cleanup_strategy_stage(
             notes: vec![],
             process_scan_report: None,
         },
+    }
+}
+
+fn build_composite_probe_outcome(
+    stage_id: &str,
+    components: &[(&str, String, Vec<String>)],
+) -> HelperRuntimeProbeOutcome {
+    let mut notes = Vec::new();
+    let mut statuses = Vec::new();
+    let mut saw_failed = false;
+    let mut saw_limited = false;
+    let mut saw_warning = false;
+    let mut saw_success = false;
+
+    for (label, status, component_notes) in components {
+        statuses.push(format!("{label}: {status}"));
+
+        if status.contains("failed") {
+            saw_failed = true;
+        } else if status.contains("unsupported")
+            || status.contains("unavailable")
+            || status.contains("skipped")
+            || status.contains("no_allocations")
+        {
+            saw_limited = true;
+        } else if status.contains("warning") {
+            saw_warning = true;
+        } else if status.contains("completed") {
+            saw_success = true;
+        }
+
+        notes.push(format!(
+            "Composite cleanup stage {stage_id} ran {label} with status {status}."
+        ));
+        notes.extend(component_notes.clone());
+    }
+
+    notes.insert(
+        0,
+        format!(
+            "Composite cleanup stage {stage_id} combined {}.",
+            statuses.join("; ")
+        ),
+    );
+
+    let action_status = if saw_failed {
+        format!("{stage_id}_completed_with_failures")
+    } else if saw_limited && saw_success {
+        format!("{stage_id}_completed_with_limited_support")
+    } else if saw_limited {
+        format!("{stage_id}_limited_or_skipped")
+    } else if saw_warning {
+        format!("{stage_id}_completed_with_warnings")
+    } else {
+        format!("{stage_id}_completed")
+    };
+
+    HelperRuntimeProbeOutcome {
+        action_status,
+        notes,
+        process_scan_report: None,
     }
 }
 

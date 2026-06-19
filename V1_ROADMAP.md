@@ -72,7 +72,9 @@ NullContext already has meaningful foundations in-tree:
   - cooldown rechecks
   - host RAM pressure
   - host page discard/decommit pressure
+  - composite host RAM plus page-discard pressure
   - CUDA memory pressure
+  - composite CUDA plus host-RAM pressure
   - helper-runtime relaunch probe
   - helper-runtime allocation churn probe
 - stage-aware marker evidence in scoring
@@ -316,7 +318,9 @@ Current in-tree cleanup stages:
 - helper runtime allocation churn probe
 - host RAM pressure probe
 - host page discard probe
+- host RAM then page discard probe
 - CUDA memory pressure probe
+- CUDA then host RAM pressure probe
 
 ### Remaining v1 Work
 
@@ -504,7 +508,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `5-16` commits
+- core security/evidence work across Tracks A-E: `4-15` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -513,7 +517,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `27-53` commits
+- `26-52` commits
 
 ### Track Breakdown
 
@@ -558,7 +562,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `0-2` commits
+- `0-1` commits
 
 Expected areas:
 
