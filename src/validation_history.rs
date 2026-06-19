@@ -919,6 +919,25 @@ fn build_stage_recommendation(
     } else {
         "clean_claim_eligible_under_current_thresholds"
     };
+    let evidence_support_status = if trend.runs_recorded < 2 {
+        "recommendation_evidence_waiting_for_repeated_runs"
+    } else if trend.marker_detection_runs > 0 {
+        "recommendation_evidence_limited_by_marker_persistence"
+    } else if trend.clear_marker_support_runs > 0 && trend.stage_local_scan_clear_runs > 0 {
+        "recommendation_evidence_supported_by_stage_local_marker_clearance"
+    } else if trend.clear_marker_support_runs > 0 || trend.helper_scan_clear_runs > 0 {
+        "recommendation_evidence_supported_by_marker_clearance_history"
+    } else if trend.inconclusive_runs * 2 >= trend.runs_recorded {
+        "recommendation_evidence_limited_by_inconclusive_history"
+    } else if trend.stage_local_scan_runs == 0 && trend.session_fallback_scan_runs > 0 {
+        "recommendation_evidence_limited_to_session_fallback_scans"
+    } else if trend.cleanup_signal_strong_runs > 0 || trend.cleanup_signal_partial_runs > 0 {
+        "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance"
+    } else if trend.strong_or_moderate_runs > 0 || trend.improved_runs > 0 {
+        "recommendation_evidence_gpu_only_without_marker_support"
+    } else {
+        "recommendation_evidence_limited_mixed_history"
+    };
 
     let mut notes = vec![
         format!(
@@ -959,6 +978,37 @@ fn build_stage_recommendation(
             "Some recorded runs for this stage were still inconclusive, which means the recommendation remains visibility-limited."
                 .to_string(),
         );
+    }
+    match evidence_support_status {
+        "recommendation_evidence_supported_by_stage_local_marker_clearance" => notes.push(
+            "The leading stage is backed by repeated stage-local clear marker scans, which is the strongest current recommendation-evidence class in this report."
+                .to_string(),
+        ),
+        "recommendation_evidence_supported_by_marker_clearance_history" => notes.push(
+            "The leading stage is backed by repeated clear marker history, but some of that support still comes from helper or broader repeated evidence instead of only stage-local scans."
+                .to_string(),
+        ),
+        "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance" => notes.push(
+            "The leading stage is currently supported more by allocator/KV/model cleanup-path signals than by repeated direct marker-clearance evidence."
+                .to_string(),
+        ),
+        "recommendation_evidence_gpu_only_without_marker_support" => notes.push(
+            "The leading stage is currently recommended mostly from GPU/process evidence trends rather than repeated direct marker-clearance evidence."
+                .to_string(),
+        ),
+        "recommendation_evidence_limited_to_session_fallback_scans" => notes.push(
+            "The leading stage still leans on session-fallback scan context, so the recommendation is not yet backed by consistently isolated stage-local marker evidence."
+                .to_string(),
+        ),
+        "recommendation_evidence_limited_by_inconclusive_history" => notes.push(
+            "Too much of the repeated history for the leading stage is still inconclusive to treat the recommendation evidence as strong."
+                .to_string(),
+        ),
+        "recommendation_evidence_limited_by_marker_persistence" => notes.push(
+            "Marker persistence is still present in the leading stage history, so the recommendation evidence is explicitly not clean."
+                .to_string(),
+        ),
+        _ => {}
     }
     if trend.stage_local_scan_runs == 0 && trend.session_fallback_scan_runs > 0 {
         notes.push(
@@ -1072,10 +1122,50 @@ fn build_stage_recommendation(
             trend.stage_label
         ),
     };
+    let evidence_support_summary = match evidence_support_status {
+        "recommendation_evidence_supported_by_stage_local_marker_clearance" => format!(
+            "{} is currently backed by repeated stage-local clear marker scans, so the recommendation rests on direct marker-clearance evidence instead of GPU-only improvement trends.",
+            trend.stage_label
+        ),
+        "recommendation_evidence_supported_by_marker_clearance_history" => format!(
+            "{} is currently backed by repeated clear marker history, but that support is not yet entirely stage-local in every repeated run.",
+            trend.stage_label
+        ),
+        "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance" => format!(
+            "{} is currently supported by repeated allocator/KV/model cleanup-path signals, but it still lacks equally strong repeated direct marker-clearance evidence.",
+            trend.stage_label
+        ),
+        "recommendation_evidence_gpu_only_without_marker_support" => format!(
+            "{} is currently recommended mostly from repeated GPU/process improvement trends; direct repeated marker-clearance support is still missing.",
+            trend.stage_label
+        ),
+        "recommendation_evidence_limited_by_marker_persistence" => format!(
+            "{} still has repeated marker persistence in its history, so the recommendation cannot be treated as clean evidence yet.",
+            trend.stage_label
+        ),
+        "recommendation_evidence_limited_by_inconclusive_history" => format!(
+            "{} still has too much inconclusive repeated history for NullContext to treat the recommendation evidence as strong yet.",
+            trend.stage_label
+        ),
+        "recommendation_evidence_limited_to_session_fallback_scans" => format!(
+            "{} is still recommended partly from session-fallback scan context rather than consistently isolated stage-local marker evidence.",
+            trend.stage_label
+        ),
+        "recommendation_evidence_waiting_for_repeated_runs" => format!(
+            "{} is the current leading stage, but NullContext does not yet have enough repeated runs to classify its recommendation evidence strongly.",
+            trend.stage_label
+        ),
+        _ => format!(
+            "{} currently leads, but the repeated evidence is still mixed enough that NullContext cannot classify the recommendation support as strong yet.",
+            trend.stage_label
+        ),
+    };
 
     MemoryValidationStageRecommendationReport {
         recommendation_status: recommendation_status.to_string(),
         clean_claim_status: clean_claim_status.to_string(),
+        evidence_support_status: evidence_support_status.to_string(),
+        evidence_support_summary,
         stage_id: Some(trend.stage_id.clone()),
         stage_label: Some(trend.stage_label.clone()),
         stage_kind: Some(trend.stage_kind.clone()),
@@ -1302,6 +1392,10 @@ fn default_stage_recommendation_report(
     MemoryValidationStageRecommendationReport {
         recommendation_status: recommendation_status.to_string(),
         clean_claim_status: "clean_claim_not_derived".to_string(),
+        evidence_support_status: "recommendation_evidence_not_derived".to_string(),
+        evidence_support_summary:
+            "NullContext does not yet have enough repeated cleanup-stage history to classify whether the recommendation is marker-backed, only GPU-backed, or still too limited."
+                .to_string(),
         stage_id: None,
         stage_label: None,
         stage_kind: None,

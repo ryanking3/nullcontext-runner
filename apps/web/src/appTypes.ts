@@ -346,6 +346,8 @@ export type ControlledCanaryHistoryReportData = {
 export type MemoryValidationStageRecommendationReportData = {
   recommendation_status: string;
   clean_claim_status: string;
+  evidence_support_status: string;
+  evidence_support_summary: string;
   stage_id?: string | null;
   stage_label?: string | null;
   stage_kind?: string | null;

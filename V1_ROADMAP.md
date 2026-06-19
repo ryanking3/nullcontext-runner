@@ -100,6 +100,7 @@ NullContext already has meaningful foundations in-tree:
 - runtime reports and the Track C capability matrix now also collapse all of that into one GPU evidence tier that says whether the run reached driver-backed bytes, CLI-backed bytes, PID-only visibility, visibility-limited evidence, or no usable GPU truth
 - runtime reports and the Track C capability matrix now also state the exact Windows/NVIDIA GPU claim boundary for the run instead of relying on one static generic warning
 - runtime reports now also say explicitly that current GPU evidence is still only process-level visibility and does not provide CUDA-context-level or allocator-ownership truth
+- repeated cleanup-stage recommendations now explicitly classify whether the current “best stage” is backed by stage-local clear marker scans, broader marker-clearance history, cleanup-signal-only support, GPU-only improvement trends, or still-limited repeated evidence
 
 That is strong progress.
 
@@ -113,7 +114,7 @@ The main remaining blockers are:
 
 1. Track B still needs deeper allocator / KV introspection.
 2. Track C still needs stronger CUDA / NVIDIA API-level truth.
-3. Track D and Track E still need repeated-run aggregation that tells us which cleanup stages actually help.
+3. Track D and Track E still need more repeated-run evidence and threshold tuning that tells us which cleanup stages actually help consistently.
 4. v1 claim wording still needs to be frozen around the real final evidence level.
 
 Those are the remaining hard blockers.
@@ -354,12 +355,19 @@ Done or largely done:
 - repeated cleanup-stage trend aggregation
 - repeated best-stage recommendation
 - runner-up stage comparison and effectiveness-gap reporting
+- explicit recommendation evidence-support classification:
+  - direct stage-local marker-clearance support
+  - broader marker-clearance history support
+  - cleanup-signal-only support
+  - GPU-only support
+  - limited/inconclusive support
 - explicit repeated controlled-canary history reporting
 - explicit repeated-evidence release-gating thresholds in reports
 - explicit “best repeated stage” versus “clean stage candidate” semantics
 
 ### Remaining v1 Work
 
+- keep tuning recommendation evidence classes and stage/gate thresholds against real repeated history
 - freeze v1 security claim wording
 
 ### v1 Exit Criteria
@@ -370,7 +378,7 @@ Done or largely done:
 
 ### Honest Status
 
-Track E is advanced, but not finished.
+Track E is advanced and now structurally close.
 This is the track that turns the other work into a shippable v1 security story.
 
 ---
@@ -485,7 +493,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `9-19` commits
+- core security/evidence work across Tracks A-E: `8-18` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -494,7 +502,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `23-48` commits
+- `22-47` commits
 
 ### Track Breakdown
 
@@ -551,7 +559,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `2-4` commits
+- `1-3` commits
 
 Expected areas:
 

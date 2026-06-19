@@ -772,6 +772,9 @@ function legacyMemoryValidationStageRecommendationReport() {
   return {
     recommendation_status: "recommendation_not_derived",
     clean_claim_status: "clean_claim_not_derived",
+    evidence_support_status: "recommendation_evidence_not_derived",
+    evidence_support_summary:
+      "This older report did not classify whether the cleanup-stage recommendation was marker-backed, only GPU-backed, or still too limited.",
     stage_id: null,
     stage_label: null,
     stage_kind: null,

@@ -276,6 +276,10 @@ pub struct ControlledCanaryHistoryReport {
 pub struct MemoryValidationStageRecommendationReport {
     pub recommendation_status: String,
     pub clean_claim_status: String,
+    #[serde(default = "default_memory_validation_stage_recommendation_evidence_support_status")]
+    pub evidence_support_status: String,
+    #[serde(default = "default_memory_validation_stage_recommendation_evidence_support_summary")]
+    pub evidence_support_summary: String,
     pub stage_id: Option<String>,
     pub stage_label: Option<String>,
     pub stage_kind: Option<String>,
@@ -4091,6 +4095,10 @@ fn default_memory_validation_stage_recommendation_report(
     MemoryValidationStageRecommendationReport {
         recommendation_status: "recommendation_not_derived".to_string(),
         clean_claim_status: "clean_claim_not_derived".to_string(),
+        evidence_support_status:
+            default_memory_validation_stage_recommendation_evidence_support_status(),
+        evidence_support_summary:
+            default_memory_validation_stage_recommendation_evidence_support_summary(),
         stage_id: None,
         stage_label: None,
         stage_kind: None,
@@ -4120,6 +4128,15 @@ fn default_memory_validation_stage_recommendation_report(
             "Older reports may not include cleanup-stage recommendation guidance.".to_string(),
         ],
     }
+}
+
+fn default_memory_validation_stage_recommendation_evidence_support_status() -> String {
+    "recommendation_evidence_not_derived".to_string()
+}
+
+fn default_memory_validation_stage_recommendation_evidence_support_summary() -> String {
+    "NullContext had not yet classified whether the cleanup-stage recommendation was backed by direct marker-clearance evidence, only by GPU/process trends, or still by limited repeated evidence."
+        .to_string()
 }
 
 fn default_platform_capability_matrix_report() -> PlatformCapabilityMatrixReport {

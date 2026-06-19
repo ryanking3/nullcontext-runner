@@ -2110,6 +2110,13 @@ export function PrivacyReportViewer({
                     ),
                   },
                   {
+                    label: "evidence support",
+                    value: humanizeSnakeCase(
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .evidence_support_status
+                    ),
+                  },
+                  {
                     label: "recommended stage",
                     value:
                       currentReport.memory_validation_history.cleanup_stage_recommendation
@@ -2269,6 +2276,13 @@ export function PrivacyReportViewer({
                   },
                 ]}
               />
+
+              <p className="report-summary">
+                {
+                  currentReport.memory_validation_history.cleanup_stage_recommendation
+                    .evidence_support_summary
+                }
+              </p>
 
               {currentReport.memory_validation_history.cleanup_stage_recommendation.notes.length >
                 0 && (
