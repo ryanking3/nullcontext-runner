@@ -910,6 +910,76 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
         return;
     };
 
+    let previous_selected_stage_id = llama_runtime
+        .vram_cleanup
+        .comparison
+        .selected_stage_id
+        .clone();
+
+    for stage in &mut llama_runtime.vram_cleanup.stages {
+        let stage_process_scan_signal_status = derive_stage_process_scan_signal_status(stage)
+            .unwrap_or_else(|| process_scan_signal_status.clone());
+        let marker_evidence_status = derive_vram_cleanup_marker_evidence_status(
+            &stage.evidence_improvement_status,
+            &stage_process_scan_signal_status,
+            &controlled_canary_signal_status,
+        );
+        stage.marker_evidence_summary = vram_cleanup_marker_evidence_summary(
+            &marker_evidence_status,
+            &stage_process_scan_signal_status,
+            &controlled_canary_signal_status,
+        );
+        stage.marker_evidence_status = marker_evidence_status;
+    }
+
+    if !llama_runtime.vram_cleanup.stages.is_empty()
+        && llama_runtime
+            .vram_cleanup
+            .comparison
+            .selected_stage_id
+            .is_some()
+    {
+        let baseline_snapshot = llama_runtime
+            .vram_cleanup
+            .comparison
+            .baseline_snapshot
+            .clone();
+        let total_stage_count = llama_runtime.vram_cleanup.stages.len();
+        let selected_stage = select_best_contextualized_vram_cleanup_stage_report(
+            &llama_runtime.vram_cleanup.stages,
+        )
+        .cloned();
+
+        if let Some(selected_stage) = selected_stage {
+            let mut comparison = build_experimental_vram_cleanup_comparison_report(
+                baseline_snapshot,
+                &selected_stage,
+                total_stage_count,
+            );
+
+            if previous_selected_stage_id.as_deref() != Some(selected_stage.stage_id.as_str()) {
+                comparison.notes.insert(
+                    0,
+                    format!(
+                        "Final selected stage changed from {} to {} after full RAM-side marker context was attached to all cleanup stages.",
+                        previous_selected_stage_id
+                            .as_deref()
+                            .unwrap_or("none"),
+                        selected_stage.stage_id
+                    ),
+                );
+            } else {
+                comparison.notes.insert(
+                    0,
+                    "Final selected stage was re-evaluated after full RAM-side marker context was attached and remained the strongest available cleanup stage."
+                        .to_string(),
+                );
+            }
+
+            llama_runtime.vram_cleanup.comparison = comparison;
+        }
+    }
+
     let selected_stage_process_scan_signal_status = llama_runtime
         .vram_cleanup
         .comparison
@@ -944,22 +1014,6 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
     );
     llama_runtime.vram_cleanup.comparison.marker_evidence_status =
         comparison_marker_evidence_status;
-
-    for stage in &mut llama_runtime.vram_cleanup.stages {
-        let stage_process_scan_signal_status = derive_stage_process_scan_signal_status(stage)
-            .unwrap_or_else(|| process_scan_signal_status.clone());
-        let marker_evidence_status = derive_vram_cleanup_marker_evidence_status(
-            &stage.evidence_improvement_status,
-            &stage_process_scan_signal_status,
-            &controlled_canary_signal_status,
-        );
-        stage.marker_evidence_summary = vram_cleanup_marker_evidence_summary(
-            &marker_evidence_status,
-            &stage_process_scan_signal_status,
-            &controlled_canary_signal_status,
-        );
-        stage.marker_evidence_status = marker_evidence_status;
-    }
 }
 
 fn derive_process_scan_signal_status_from_report(report: &ProcessScanReport) -> String {
@@ -4636,10 +4690,35 @@ fn select_best_vram_cleanup_stage_report(
         .max_by_key(|stage| vram_cleanup_stage_preference_key(stage))
 }
 
+fn select_best_contextualized_vram_cleanup_stage_report(
+    stage_reports: &[VramCleanupStrategyStageReport],
+) -> Option<&VramCleanupStrategyStageReport> {
+    stage_reports
+        .iter()
+        .max_by_key(|stage| contextualized_vram_cleanup_stage_preference_key(stage))
+}
+
 fn vram_cleanup_stage_preference_key(
     stage: &VramCleanupStrategyStageReport,
 ) -> (u8, u8, u8, u32, u64) {
     (
+        vram_cleanup_stage_selection_evidence_rank(&stage.selection_evidence_status),
+        vram_cleanup_stage_status_rank(&stage.evidence_improvement_status),
+        vram_cleanup_stage_visibility_rank(&stage.evidence_snapshot),
+        u32::MAX.saturating_sub(stage.evidence_snapshot.gpu_samples_with_pid_observed),
+        stage
+            .evidence_snapshot
+            .gpu_peak_memory_bytes
+            .map(|value| u64::MAX.saturating_sub(value))
+            .unwrap_or(u64::MAX),
+    )
+}
+
+fn contextualized_vram_cleanup_stage_preference_key(
+    stage: &VramCleanupStrategyStageReport,
+) -> (u8, u8, u8, u8, u32, u64) {
+    (
+        vram_cleanup_stage_contextualized_marker_rank(&stage.marker_evidence_status),
         vram_cleanup_stage_selection_evidence_rank(&stage.selection_evidence_status),
         vram_cleanup_stage_status_rank(&stage.evidence_improvement_status),
         vram_cleanup_stage_visibility_rank(&stage.evidence_snapshot),
@@ -4798,6 +4877,18 @@ fn vram_cleanup_stage_selection_evidence_rank(status: &str) -> u8 {
         "cleanup_stage_selection_evidence_gpu_improvement_without_local_marker_confirmation" => 2,
         "cleanup_stage_selection_evidence_limited_or_visibility_only" => 1,
         "cleanup_stage_selection_evidence_marker_persistence_detected" => 0,
+        _ => 0,
+    }
+}
+
+fn vram_cleanup_stage_contextualized_marker_rank(status: &str) -> u8 {
+    match status {
+        "gpu_evidence_supported_by_clear_session_and_canary_scans" => 5,
+        "gpu_evidence_supported_by_partial_marker_clearance" => 4,
+        "gpu_evidence_without_clear_marker_confirmation" => 3,
+        "marker_evidence_context_mixed" | "marker_evidence_not_yet_contextualized" => 2,
+        "gpu_evidence_improved_but_marker_persistence_detected" => 1,
+        "marker_persistence_detected_without_supporting_gpu_improvement" => 0,
         _ => 0,
     }
 }

@@ -105,6 +105,7 @@ NullContext already has meaningful foundations in-tree:
 - repeated cleanup-stage trend entries now also classify their own evidence-support class, so stage-by-stage comparison is not limited to scores and raw counts
 - repeated cleanup-stage ordering now explicitly prefers stronger evidence-support classes instead of treating all stage scores as equally trustworthy
 - single-report cleanup-stage selection now also prefers stronger local marker-backed evidence classes instead of relying only on GPU visibility deltas
+- the final single-report cleanup-stage selection is now re-evaluated after full RAM-side marker context is attached, so the chosen stage is not frozen from an earlier GPU-first pass
 
 That is strong progress.
 
@@ -305,6 +306,7 @@ Done or largely done:
 - helper-stage dedicated canary scans exist
 - repeated stage-level evidence-support classification exists across marker-backed, cleanup-signal-backed, GPU-only, and limited evidence classes
 - single-report cleanup-stage selection now also distinguishes stage-local marker-backed, GPU-only, and marker-persistent cleanup results
+- final per-report cleanup-stage comparison now reselects the strongest stage after full marker context arrives, not only during the earlier GPU-first build step
 
 Current in-tree cleanup stages:
 
@@ -502,7 +504,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `6-17` commits
+- core security/evidence work across Tracks A-E: `5-16` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -511,7 +513,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `28-54` commits
+- `27-53` commits
 
 ### Track Breakdown
 
@@ -568,7 +570,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `0-1` commits
+- `0` commits
 
 Expected areas:
 
