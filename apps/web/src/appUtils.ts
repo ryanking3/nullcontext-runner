@@ -831,6 +831,11 @@ function legacyValidationReleaseGateReport() {
     max_marker_detection_runs_allowed_for_clean_claim: 0,
     max_worsened_runs_allowed_for_clean_stage: 0,
     max_inconclusive_runs_allowed_for_clean_stage: 0,
+    required_stage_evidence_support_statuses: [
+      "recommendation_evidence_supported_by_stage_local_marker_clearance",
+      "recommendation_evidence_supported_by_marker_clearance_history",
+    ],
+    observed_stage_evidence_support_status: "recommendation_evidence_not_derived",
     stage_gate_passed: false,
     controlled_canary_gate_passed: false,
     summary: "This older report did not include explicit release-gating thresholds.",

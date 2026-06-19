@@ -101,6 +101,7 @@ NullContext already has meaningful foundations in-tree:
 - runtime reports and the Track C capability matrix now also state the exact Windows/NVIDIA GPU claim boundary for the run instead of relying on one static generic warning
 - runtime reports now also say explicitly that current GPU evidence is still only process-level visibility and does not provide CUDA-context-level or allocator-ownership truth
 - repeated cleanup-stage recommendations now explicitly classify whether the current “best stage” is backed by stage-local clear marker scans, broader marker-clearance history, cleanup-signal-only support, GPU-only improvement trends, or still-limited repeated evidence
+- repeated release-gating now also requires marker-backed cleanup-stage recommendation evidence instead of treating GPU-only or cleanup-signal-only stage wins as equally gate-worthy
 
 That is strong progress.
 
@@ -363,6 +364,7 @@ Done or largely done:
   - limited/inconclusive support
 - explicit repeated controlled-canary history reporting
 - explicit repeated-evidence release-gating thresholds in reports
+- explicit release-gate blocking when the leading cleanup-stage recommendation is not backed by repeated marker-clearance evidence
 - explicit “best repeated stage” versus “clean stage candidate” semantics
 
 ### Remaining v1 Work
@@ -378,7 +380,7 @@ Done or largely done:
 
 ### Honest Status
 
-Track E is advanced and now structurally close.
+Track E is advanced and now very close structurally.
 This is the track that turns the other work into a shippable v1 security story.
 
 ---
@@ -493,7 +495,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `10-21` commits
+- core security/evidence work across Tracks A-E: `9-20` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -502,7 +504,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `32-58` commits
+- `31-57` commits
 
 ### Track Breakdown
 
@@ -559,7 +561,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `1-3` commits
+- `0-2` commits
 
 Expected areas:
 

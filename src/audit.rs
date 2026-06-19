@@ -247,6 +247,10 @@ pub struct ValidationReleaseGateReport {
     pub max_marker_detection_runs_allowed_for_clean_claim: u32,
     pub max_worsened_runs_allowed_for_clean_stage: u32,
     pub max_inconclusive_runs_allowed_for_clean_stage: u32,
+    #[serde(default)]
+    pub required_stage_evidence_support_statuses: Vec<String>,
+    #[serde(default = "default_recommendation_evidence_not_derived")]
+    pub observed_stage_evidence_support_status: String,
     pub stage_gate_passed: bool,
     pub controlled_canary_gate_passed: bool,
     pub summary: String,
@@ -4054,6 +4058,11 @@ fn default_validation_release_gate_report() -> ValidationReleaseGateReport {
         max_marker_detection_runs_allowed_for_clean_claim: 0,
         max_worsened_runs_allowed_for_clean_stage: 0,
         max_inconclusive_runs_allowed_for_clean_stage: 0,
+        required_stage_evidence_support_statuses: vec![
+            "recommendation_evidence_supported_by_stage_local_marker_clearance".to_string(),
+            "recommendation_evidence_supported_by_marker_clearance_history".to_string(),
+        ],
+        observed_stage_evidence_support_status: default_recommendation_evidence_not_derived(),
         stage_gate_passed: false,
         controlled_canary_gate_passed: false,
         summary:
@@ -4063,6 +4072,10 @@ fn default_validation_release_gate_report() -> ValidationReleaseGateReport {
             "Older reports may not include repeated-evidence release-gating guidance.".to_string(),
         ],
     }
+}
+
+fn default_recommendation_evidence_not_derived() -> String {
+    "recommendation_evidence_not_derived".to_string()
 }
 
 fn default_controlled_canary_history_report() -> ControlledCanaryHistoryReport {

@@ -1202,6 +1202,13 @@ fn build_release_gate(
     let max_marker_detection_runs_allowed_for_clean_claim = 0;
     let max_worsened_runs_allowed_for_clean_stage = 0;
     let max_inconclusive_runs_allowed_for_clean_stage = 0;
+    let required_stage_evidence_support_statuses = vec![
+        "recommendation_evidence_supported_by_stage_local_marker_clearance".to_string(),
+        "recommendation_evidence_supported_by_marker_clearance_history".to_string(),
+    ];
+    let stage_evidence_support_meets_gate = required_stage_evidence_support_statuses
+        .iter()
+        .any(|status| status == &cleanup_stage_recommendation.evidence_support_status);
 
     let stage_gate_passed = cleanup_stage_recommendation.runs_recorded >= min_stage_runs_required
         && cleanup_stage_recommendation.marker_detection_runs
@@ -1209,6 +1216,7 @@ fn build_release_gate(
         && cleanup_stage_recommendation.worsened_runs <= max_worsened_runs_allowed_for_clean_stage
         && cleanup_stage_recommendation.inconclusive_runs
             <= max_inconclusive_runs_allowed_for_clean_stage
+        && stage_evidence_support_meets_gate
         && matches!(
             cleanup_stage_recommendation.clean_claim_status.as_str(),
             "clean_claim_eligible_under_current_thresholds"
@@ -1229,6 +1237,31 @@ fn build_release_gate(
         > max_inconclusive_runs_allowed_for_clean_stage
     {
         "cleanup_stage_gate_blocked_by_inconclusive_runs"
+    } else if !stage_evidence_support_meets_gate {
+        match cleanup_stage_recommendation
+            .evidence_support_status
+            .as_str()
+        {
+            "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance" => {
+                "cleanup_stage_gate_blocked_by_cleanup_signal_only_evidence"
+            }
+            "recommendation_evidence_gpu_only_without_marker_support" => {
+                "cleanup_stage_gate_blocked_by_gpu_only_recommendation_evidence"
+            }
+            "recommendation_evidence_limited_to_session_fallback_scans" => {
+                "cleanup_stage_gate_blocked_by_fallback_scan_only_evidence"
+            }
+            "recommendation_evidence_limited_by_inconclusive_history" => {
+                "cleanup_stage_gate_blocked_by_inconclusive_recommendation_evidence"
+            }
+            "recommendation_evidence_waiting_for_repeated_runs" => {
+                "cleanup_stage_gate_waiting_for_recommendation_evidence_history"
+            }
+            "recommendation_evidence_limited_by_marker_persistence" => {
+                "cleanup_stage_gate_blocked_by_marker_persistent_recommendation_evidence"
+            }
+            _ => "cleanup_stage_gate_blocked_by_non_marker_backed_recommendation_evidence",
+        }
     } else if cleanup_stage_recommendation.clean_claim_status
         == "clean_claim_blocked_by_narrow_lead_over_runner_up"
     {
@@ -1305,14 +1338,25 @@ fn build_release_gate(
             max_inconclusive_runs_allowed_for_clean_stage
         ),
         format!(
+            "Cleanup-stage release gating currently only accepts recommendation evidence classes backed by repeated marker-clearance history: {}.",
+            required_stage_evidence_support_statuses
+                .iter()
+                .map(|status| status.replace('_', " "))
+                .collect::<Vec<_>>()
+                .join(" or ")
+        ),
+        format!(
             "Controlled-canary threshold requires at least {} clear completed runs, {} marker-detection runs, and no mixed/inconclusive or backend-unsupported history.",
             min_clear_canary_runs_required,
             max_marker_detection_runs_allowed_for_clean_claim
         ),
         format!(
-            "Current cleanup-stage gate: {}. Current controlled-canary gate: {}.",
+            "Current cleanup-stage gate: {}. Current controlled-canary gate: {}. Current recommendation evidence support: {}.",
             cleanup_stage_gate_status.replace('_', " "),
-            controlled_canary_gate_status.replace('_', " ")
+            controlled_canary_gate_status.replace('_', " "),
+            cleanup_stage_recommendation
+                .evidence_support_status
+                .replace('_', " ")
         ),
     ];
 
@@ -1325,6 +1369,10 @@ fn build_release_gate(
         max_marker_detection_runs_allowed_for_clean_claim,
         max_worsened_runs_allowed_for_clean_stage,
         max_inconclusive_runs_allowed_for_clean_stage,
+        required_stage_evidence_support_statuses,
+        observed_stage_evidence_support_status: cleanup_stage_recommendation
+            .evidence_support_status
+            .clone(),
         stage_gate_passed,
         controlled_canary_gate_passed,
         summary,
@@ -1342,6 +1390,11 @@ fn default_release_gate_report() -> ValidationReleaseGateReport {
         max_marker_detection_runs_allowed_for_clean_claim: 0,
         max_worsened_runs_allowed_for_clean_stage: 0,
         max_inconclusive_runs_allowed_for_clean_stage: 0,
+        required_stage_evidence_support_statuses: vec![
+            "recommendation_evidence_supported_by_stage_local_marker_clearance".to_string(),
+            "recommendation_evidence_supported_by_marker_clearance_history".to_string(),
+        ],
+        observed_stage_evidence_support_status: "recommendation_evidence_not_derived".to_string(),
         stage_gate_passed: false,
         controlled_canary_gate_passed: false,
         summary:

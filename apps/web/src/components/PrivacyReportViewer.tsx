@@ -1952,6 +1952,23 @@ export function PrivacyReportViewer({
                         .max_inconclusive_runs_allowed_for_clean_stage
                     ),
                   },
+                  {
+                    label: "observed stage evidence",
+                    value: humanizeSnakeCase(
+                      currentReport.memory_validation_history.release_gate
+                        .observed_stage_evidence_support_status
+                    ),
+                  },
+                  {
+                    label: "required stage evidence",
+                    value:
+                      currentReport.memory_validation_history.release_gate
+                        .required_stage_evidence_support_statuses.length > 0
+                        ? currentReport.memory_validation_history.release_gate.required_stage_evidence_support_statuses
+                            .map((status) => humanizeSnakeCase(status))
+                            .join(" or ")
+                        : "unavailable",
+                  },
                 ]}
               />
 

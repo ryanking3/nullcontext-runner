@@ -319,6 +319,8 @@ export type ValidationReleaseGateReportData = {
   max_marker_detection_runs_allowed_for_clean_claim: number;
   max_worsened_runs_allowed_for_clean_stage: number;
   max_inconclusive_runs_allowed_for_clean_stage: number;
+  required_stage_evidence_support_statuses: string[];
+  observed_stage_evidence_support_status: string;
   stage_gate_passed: boolean;
   controlled_canary_gate_passed: boolean;
   summary: string;
