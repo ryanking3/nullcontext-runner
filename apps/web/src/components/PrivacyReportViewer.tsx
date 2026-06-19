@@ -931,6 +931,10 @@ export function PrivacyReportViewer({
                         <div>window: {stage.verification_window_ms} ms</div>
                         <div>action: {humanizeSnakeCase(stage.action_status)}</div>
                         <div>
+                          selection evidence:{" "}
+                          {humanizeSnakeCase(stage.selection_evidence_status)}
+                        </div>
+                        <div>
                           marker evidence: {humanizeSnakeCase(stage.marker_evidence_status)}
                         </div>
                         <div>
@@ -966,6 +970,7 @@ export function PrivacyReportViewer({
                             helper scan summary: {stage.helper_process_scan_report.summary}
                           </div>
                         )}
+                        <div>{stage.selection_evidence_summary}</div>
                         <div>{stage.marker_evidence_summary}</div>
                         <div>{stage.summary}</div>
                         {stage.notes.map((note) => (

@@ -546,6 +546,10 @@ pub struct VramCleanupStrategyStageReport {
     pub process_scan_phase: Option<ProcessScanPhaseReport>,
     #[serde(default)]
     pub helper_process_scan_report: Option<ProcessScanReport>,
+    #[serde(default = "default_vram_cleanup_selection_evidence_status")]
+    pub selection_evidence_status: String,
+    #[serde(default = "default_vram_cleanup_selection_evidence_summary")]
+    pub selection_evidence_summary: String,
     #[serde(default = "default_vram_cleanup_marker_evidence_status")]
     pub marker_evidence_status: String,
     #[serde(default = "default_vram_cleanup_marker_evidence_summary")]
@@ -4202,6 +4206,15 @@ fn default_vram_cleanup_marker_evidence_summary() -> String {
         .to_string()
 }
 
+fn default_vram_cleanup_selection_evidence_status() -> String {
+    "cleanup_stage_selection_evidence_not_derived".to_string()
+}
+
+fn default_vram_cleanup_selection_evidence_summary() -> String {
+    "NullContext had not yet classified whether this cleanup stage selection result was backed by stage-local marker clearance, only by GPU visibility, or still by limited local evidence."
+        .to_string()
+}
+
 fn default_process_scan_context_status() -> String {
     "process_scan_context_unavailable".to_string()
 }
@@ -4489,6 +4502,25 @@ fn build_vram_cleanup_stage_report(
         build_vram_cleanup_strategy_snapshot(gpu_offload_requested, &strategy_stage.window);
     let evidence_improvement_status =
         compare_vram_cleanup_snapshots(baseline_snapshot, &evidence_snapshot);
+    let stage_process_scan_signal_status = strategy_stage
+        .helper_process_scan_report
+        .as_ref()
+        .map(derive_process_scan_signal_status_from_report)
+        .or_else(|| {
+            strategy_stage
+                .process_scan_phase
+                .as_ref()
+                .map(derive_process_scan_signal_status_from_phase)
+        })
+        .unwrap_or_else(|| "process_scan_context_unavailable".to_string());
+    let selection_evidence_status = derive_vram_cleanup_selection_evidence_status(
+        &evidence_improvement_status,
+        &stage_process_scan_signal_status,
+    );
+    let selection_evidence_summary = vram_cleanup_selection_evidence_summary(
+        &selection_evidence_status,
+        &stage_process_scan_signal_status,
+    );
 
     VramCleanupStrategyStageReport {
         stage_id: strategy_stage.stage_id.clone(),
@@ -4507,6 +4539,8 @@ fn build_vram_cleanup_stage_report(
         ),
         process_scan_phase: strategy_stage.process_scan_phase.clone(),
         helper_process_scan_report: strategy_stage.helper_process_scan_report.clone(),
+        selection_evidence_status,
+        selection_evidence_summary,
         marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
         marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
         notes: {
@@ -4602,8 +4636,11 @@ fn select_best_vram_cleanup_stage_report(
         .max_by_key(|stage| vram_cleanup_stage_preference_key(stage))
 }
 
-fn vram_cleanup_stage_preference_key(stage: &VramCleanupStrategyStageReport) -> (u8, u8, u32, u64) {
+fn vram_cleanup_stage_preference_key(
+    stage: &VramCleanupStrategyStageReport,
+) -> (u8, u8, u8, u32, u64) {
     (
+        vram_cleanup_stage_selection_evidence_rank(&stage.selection_evidence_status),
         vram_cleanup_stage_status_rank(&stage.evidence_improvement_status),
         vram_cleanup_stage_visibility_rank(&stage.evidence_snapshot),
         u32::MAX.saturating_sub(stage.evidence_snapshot.gpu_samples_with_pid_observed),
@@ -4639,7 +4676,24 @@ fn vram_cleanup_stage_visibility_rank(snapshot: &VramCleanupEvidenceSnapshot) ->
 }
 
 fn vram_cleanup_stage_selection_reason(stage: &VramCleanupStrategyStageReport) -> String {
-    match stage.evidence_improvement_status.as_str() {
+    match stage.selection_evidence_status.as_str() {
+        "cleanup_stage_selection_evidence_stage_local_clear_marker_support" => {
+            "This stage was selected because it combined a strong GPU-side cleanup outcome with stage-local clear marker evidence, which is the strongest current single-report cleanup-stage evidence class."
+                .to_string()
+        }
+        "cleanup_stage_selection_evidence_partial_local_marker_support" => {
+            "This stage was selected because it had some stage-local clear marker support in addition to its GPU-side cleanup result, making it stronger than GPU-only competitors."
+                .to_string()
+        }
+        "cleanup_stage_selection_evidence_gpu_improvement_without_local_marker_confirmation" => {
+            "This stage was selected mainly from its GPU-side cleanup result because stage-local marker confirmation remained limited or unavailable."
+                .to_string()
+        }
+        "cleanup_stage_selection_evidence_marker_persistence_detected" => {
+            "This stage was selected only because no alternative stage produced stronger evidence; local marker persistence was still detected."
+                .to_string()
+        }
+        _ => match stage.evidence_improvement_status.as_str() {
         "evidence_improved_pid_no_longer_observed_after_strategy" => {
             "This stage was selected because its recheck no longer observed a matching GPU PID, which is the strongest driver-visible outcome currently available."
                 .to_string()
@@ -4669,6 +4723,82 @@ fn vram_cleanup_stage_selection_reason(stage: &VramCleanupStrategyStageReport) -
             "This stage was selected as the best available comparison point, but the evidence remained visibility-limited or inconclusive."
                 .to_string()
         }
+        },
+    }
+}
+
+fn derive_vram_cleanup_selection_evidence_status(
+    evidence_improvement_status: &str,
+    stage_process_scan_signal_status: &str,
+) -> String {
+    let strong_gpu_improvement = matches!(
+        evidence_improvement_status,
+        "evidence_improved_pid_no_longer_observed_after_strategy"
+            | "evidence_unchanged_not_observed"
+            | "evidence_improved_bytes_no_longer_visible_but_pid_still_observed"
+            | "evidence_improved_peak_bytes_lower_but_residency_still_observed"
+    );
+
+    match stage_process_scan_signal_status {
+        "marker_persistence_detected" => {
+            "cleanup_stage_selection_evidence_marker_persistence_detected".to_string()
+        }
+        "marker_scan_clear_in_scanned_regions" if strong_gpu_improvement => {
+            "cleanup_stage_selection_evidence_stage_local_clear_marker_support".to_string()
+        }
+        "marker_scan_clear_in_scanned_regions" => {
+            "cleanup_stage_selection_evidence_partial_local_marker_support".to_string()
+        }
+        "marker_scan_inconclusive"
+        | "marker_scan_backend_unsupported"
+        | "marker_scan_not_completed"
+        | "process_scan_context_unavailable"
+        | "marker_scan_context_mixed"
+            if strong_gpu_improvement =>
+        {
+            "cleanup_stage_selection_evidence_gpu_improvement_without_local_marker_confirmation"
+                .to_string()
+        }
+        _ => "cleanup_stage_selection_evidence_limited_or_visibility_only".to_string(),
+    }
+}
+
+fn vram_cleanup_selection_evidence_summary(
+    selection_evidence_status: &str,
+    stage_process_scan_signal_status: &str,
+) -> String {
+    match selection_evidence_status {
+        "cleanup_stage_selection_evidence_stage_local_clear_marker_support" => {
+            "This cleanup stage had a strong GPU-side result and its own local marker scan came back clear."
+                .to_string()
+        }
+        "cleanup_stage_selection_evidence_partial_local_marker_support" => format!(
+            "This cleanup stage had some local marker support, but the GPU-side result itself was not among the strongest observed outcomes. Local scan status: {}.",
+            stage_process_scan_signal_status.replace('_', " ")
+        ),
+        "cleanup_stage_selection_evidence_gpu_improvement_without_local_marker_confirmation" => format!(
+            "This cleanup stage looked stronger on the GPU side, but local marker confirmation remained limited. Local scan status: {}.",
+            stage_process_scan_signal_status.replace('_', " ")
+        ),
+        "cleanup_stage_selection_evidence_marker_persistence_detected" => {
+            "This cleanup stage still had local marker persistence, so it should not be treated as a clean stage even if GPU visibility looked better."
+                .to_string()
+        }
+        _ => format!(
+            "This cleanup stage remained limited or visibility-only from a local marker perspective. Local scan status: {}.",
+            stage_process_scan_signal_status.replace('_', " ")
+        ),
+    }
+}
+
+fn vram_cleanup_stage_selection_evidence_rank(status: &str) -> u8 {
+    match status {
+        "cleanup_stage_selection_evidence_stage_local_clear_marker_support" => 4,
+        "cleanup_stage_selection_evidence_partial_local_marker_support" => 3,
+        "cleanup_stage_selection_evidence_gpu_improvement_without_local_marker_confirmation" => 2,
+        "cleanup_stage_selection_evidence_limited_or_visibility_only" => 1,
+        "cleanup_stage_selection_evidence_marker_persistence_detected" => 0,
+        _ => 0,
     }
 }
 
