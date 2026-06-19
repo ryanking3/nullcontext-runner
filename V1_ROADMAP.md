@@ -103,6 +103,7 @@ NullContext already has meaningful foundations in-tree:
 - repeated cleanup-stage recommendations now explicitly classify whether the current “best stage” is backed by stage-local clear marker scans, broader marker-clearance history, cleanup-signal-only support, GPU-only improvement trends, or still-limited repeated evidence
 - repeated release-gating now also requires marker-backed cleanup-stage recommendation evidence instead of treating GPU-only or cleanup-signal-only stage wins as equally gate-worthy
 - repeated cleanup-stage trend entries now also classify their own evidence-support class, so stage-by-stage comparison is not limited to scores and raw counts
+- repeated cleanup-stage ordering now explicitly prefers stronger evidence-support classes instead of treating all stage scores as equally trustworthy
 
 That is strong progress.
 
@@ -368,6 +369,7 @@ Done or largely done:
 - explicit repeated-evidence release-gating thresholds in reports
 - explicit release-gate blocking when the leading cleanup-stage recommendation is not backed by repeated marker-clearance evidence
 - explicit per-stage repeated evidence-support classification in the stage-trend table, not only on the winning recommendation
+- explicit evidence-class-aware ordering for repeated cleanup-stage recommendations and trend tables
 - explicit “best repeated stage” versus “clean stage candidate” semantics
 
 ### Remaining v1 Work
@@ -498,7 +500,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `8-19` commits
+- core security/evidence work across Tracks A-E: `7-18` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -507,7 +509,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `30-56` commits
+- `29-55` commits
 
 ### Track Breakdown
 
@@ -564,7 +566,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `0-2` commits
+- `0-1` commits
 
 Expected areas:
 

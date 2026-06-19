@@ -714,8 +714,9 @@ fn build_stage_trends(
         .collect::<Vec<_>>();
 
     stage_trends.sort_by(|a, b| {
-        b.avg_validation_score
-            .total_cmp(&a.avg_validation_score)
+        stage_evidence_support_priority(&b.evidence_support_status)
+            .cmp(&stage_evidence_support_priority(&a.evidence_support_status))
+            .then_with(|| b.avg_validation_score.total_cmp(&a.avg_validation_score))
             .then_with(|| b.runs_recorded.cmp(&a.runs_recorded))
             .then_with(|| b.strong_or_moderate_runs.cmp(&a.strong_or_moderate_runs))
             .then_with(|| {
@@ -932,8 +933,11 @@ fn build_stage_recommendation(
         .map(|trend| (trend, stage_effectiveness_score(trend)))
         .collect::<Vec<_>>();
     ranked_stages.sort_by(|(left_trend, left_score), (right_trend, right_score)| {
-        right_score
-            .total_cmp(left_score)
+        stage_evidence_support_priority(&right_trend.evidence_support_status)
+            .cmp(&stage_evidence_support_priority(
+                &left_trend.evidence_support_status,
+            ))
+            .then_with(|| right_score.total_cmp(left_score))
             .then_with(|| {
                 right_trend
                     .avg_validation_score
@@ -1015,11 +1019,14 @@ fn build_stage_recommendation(
         ),
         "This recommendation is comparative operator guidance, not proof of full RAM or VRAM sanitization."
             .to_string(),
+        "Repeated cleanup-stage ranking now explicitly prefers stronger evidence-support classes before falling back to numeric effectiveness scoring."
+            .to_string(),
     ];
     if let Some((runner_up_trend, runner_up_score)) = runner_up {
         notes.push(format!(
-            "Runner-up stage: {} with effectiveness score {:.1} and average validation score {:.1}/100.",
+            "Runner-up stage: {} with evidence class {}, effectiveness score {:.1}, and average validation score {:.1}/100.",
             runner_up_trend.stage_label,
+            runner_up_trend.evidence_support_status.replace('_', " "),
             runner_up_score,
             runner_up_trend.avg_validation_score
         ));
@@ -1119,6 +1126,22 @@ fn build_stage_recommendation(
         } else if gap >= 12.0 {
             notes.push(
                 "The lead over the runner-up is materially wider than a small scoring fluctuation, which makes this recommendation more actionable."
+                    .to_string(),
+            );
+        }
+    }
+    if let Some((runner_up_trend, _)) = runner_up {
+        let leading_priority = stage_evidence_support_priority(&trend.evidence_support_status);
+        let runner_up_priority =
+            stage_evidence_support_priority(&runner_up_trend.evidence_support_status);
+        if leading_priority > runner_up_priority {
+            notes.push(
+                "The leading stage outranked the runner-up partly because it belongs to a stronger repeated evidence-support class, not just because of raw score."
+                    .to_string(),
+            );
+        } else if leading_priority < runner_up_priority {
+            notes.push(
+                "The runner-up had a stronger repeated evidence-support class, but the current ordering still favored the leading stage on the remaining ranking fields."
                     .to_string(),
             );
         }
@@ -1494,6 +1517,21 @@ fn stage_effectiveness_score(trend: &MemoryValidationStageTrendReport) -> f64 {
         - (trend.stage_local_scan_limited_runs as f64 * 2.0)
         - (trend.session_fallback_scan_runs as f64 * 1.0)
         - (trend.inconclusive_runs as f64 * 2.0)
+}
+
+fn stage_evidence_support_priority(status: &str) -> u8 {
+    match status {
+        "recommendation_evidence_supported_by_stage_local_marker_clearance" => 7,
+        "recommendation_evidence_supported_by_marker_clearance_history" => 6,
+        "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance" => 5,
+        "recommendation_evidence_gpu_only_without_marker_support" => 4,
+        "recommendation_evidence_limited_to_session_fallback_scans" => 3,
+        "recommendation_evidence_limited_by_inconclusive_history" => 2,
+        "recommendation_evidence_waiting_for_repeated_runs" => 1,
+        "recommendation_evidence_limited_mixed_history" => 1,
+        "recommendation_evidence_limited_by_marker_persistence" => 0,
+        _ => 0,
+    }
 }
 
 fn default_stage_recommendation_report(
