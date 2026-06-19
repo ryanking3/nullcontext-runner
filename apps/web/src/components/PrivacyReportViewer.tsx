@@ -477,6 +477,12 @@ export function PrivacyReportViewer({
                 value: humanizeSnakeCase(currentReport.llama_runtime.gpu_claim_boundary_status),
               },
               {
+                label: "gpu context visibility",
+                value: humanizeSnakeCase(
+                  currentReport.llama_runtime.gpu_context_visibility_status
+                ),
+              },
+              {
                 label: "gpu backend provenance",
                 value: humanizeSnakeCase(
                   currentReport.llama_runtime.gpu_backend_provenance_status
@@ -651,6 +657,10 @@ export function PrivacyReportViewer({
             <p>
               <strong>gpu claim boundary:</strong>{" "}
               {currentReport.llama_runtime.gpu_claim_boundary_summary}
+            </p>
+            <p>
+              <strong>gpu context visibility:</strong>{" "}
+              {currentReport.llama_runtime.gpu_context_visibility_summary}
             </p>
             <p>
               <strong>gpu backend provenance:</strong>{" "}

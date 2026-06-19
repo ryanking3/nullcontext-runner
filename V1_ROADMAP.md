@@ -99,6 +99,7 @@ NullContext already has meaningful foundations in-tree:
 - runtime reports now also classify backend provenance explicitly, distinguishing NVML driver-API evidence from nvidia-smi CLI evidence and mixed fallback chains
 - runtime reports and the Track C capability matrix now also collapse all of that into one GPU evidence tier that says whether the run reached driver-backed bytes, CLI-backed bytes, PID-only visibility, visibility-limited evidence, or no usable GPU truth
 - runtime reports and the Track C capability matrix now also state the exact Windows/NVIDIA GPU claim boundary for the run instead of relying on one static generic warning
+- runtime reports now also say explicitly that current GPU evidence is still only process-level visibility and does not provide CUDA-context-level or allocator-ownership truth
 
 That is strong progress.
 
@@ -251,6 +252,7 @@ Done or partially done:
 - the runtime report now also says whether the GPU evidence came from NVML driver APIs, nvidia-smi compute-apps, nvidia-smi pmon, or a mixed backend chain
 - the runtime report now also exposes one final GPU evidence tier so the operator does not have to mentally combine provenance and trust-boundary fields
 - the runtime report and capability matrix now also say exactly what kind of GPU cleanup claim is justified for the run and what still cannot be claimed
+- the runtime report now also says explicitly whether CUDA-context-level visibility remained unknown, even when per-process byte visibility existed
 
 ### Remaining v1 Work
 
@@ -492,7 +494,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `24-49` commits
+- `23-48` commits
 
 ### Track Breakdown
 
@@ -525,7 +527,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `0-1` commits
+- `0` commits
 
 Expected areas:
 

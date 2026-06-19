@@ -444,6 +444,10 @@ pub struct LlamaRuntimeReport {
     pub gpu_claim_boundary_status: String,
     #[serde(default = "default_gpu_claim_boundary_summary")]
     pub gpu_claim_boundary_summary: String,
+    #[serde(default = "default_gpu_context_visibility_status")]
+    pub gpu_context_visibility_status: String,
+    #[serde(default = "default_gpu_context_visibility_summary")]
+    pub gpu_context_visibility_summary: String,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub inspection_status: String,
@@ -1269,6 +1273,7 @@ fn build_gpu_inspection_capability_entry(
         notes: vec![
             llama_runtime.gpu_evidence_tier_summary.clone(),
             llama_runtime.gpu_claim_boundary_summary.clone(),
+            llama_runtime.gpu_context_visibility_summary.clone(),
             llama_runtime.gpu_trust_boundary_summary.clone(),
             llama_runtime.gpu_backend_provenance_summary.clone(),
             llama_runtime.gpu_evidence_summary.clone(),
@@ -1611,6 +1616,11 @@ pub fn build_llama_runtime_report(
         &gpu_evidence_tier_status,
         &gpu_trust_boundary_status,
     );
+    let gpu_context_visibility_status = gpu_context_visibility_status(
+        gpu_offload_requested,
+        &gpu_evidence_tier_status,
+        &gpu_backend_provenance_status,
+    );
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
     let vram_cleanup = build_vram_cleanup_strategy_report(
         gpu_offload_requested,
@@ -1709,6 +1719,12 @@ pub fn build_llama_runtime_report(
         gpu_claim_boundary_status: gpu_claim_boundary_status.clone(),
         gpu_claim_boundary_summary: gpu_claim_boundary_summary(
             &gpu_claim_boundary_status,
+            &gpu_evidence_tier_status,
+            &gpu_backend_provenance_status,
+        ),
+        gpu_context_visibility_status: gpu_context_visibility_status.clone(),
+        gpu_context_visibility_summary: gpu_context_visibility_summary(
+            &gpu_context_visibility_status,
             &gpu_evidence_tier_status,
             &gpu_backend_provenance_status,
         ),
@@ -1935,6 +1951,18 @@ pub fn build_failed_launch_llama_runtime_report(
                 .to_string()
         } else {
             "GPU offload was not requested, so no Windows/NVIDIA GPU claim boundary applied."
+                .to_string()
+        },
+        gpu_context_visibility_status: if gpu_offload_requested {
+            "gpu_context_visibility_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
+        gpu_context_visibility_summary: if gpu_offload_requested {
+            "Runtime startup failed before NullContext could say anything useful about CUDA-context-level visibility for this run."
+                .to_string()
+        } else {
+            "GPU offload was not requested, so no Windows/NVIDIA GPU context-visibility verdict applied."
                 .to_string()
         },
         gpu_check_backend: failure.post_cleanup_observation.gpu_check_backend.clone(),
@@ -3547,6 +3575,93 @@ fn gpu_claim_boundary_summary(
     }
 }
 
+fn gpu_context_visibility_status(
+    gpu_offload_requested: bool,
+    evidence_tier_status: &str,
+    provenance_status: &str,
+) -> String {
+    if !gpu_offload_requested {
+        return "gpu_offload_not_requested".to_string();
+    }
+
+    match evidence_tier_status {
+        "gpu_evidence_tier_driver_api_per_process_bytes"
+        | "gpu_evidence_tier_mixed_driver_and_cli_bytes" => {
+            "gpu_context_visibility_process_level_only_driver_or_mixed".to_string()
+        }
+        "gpu_evidence_tier_cli_per_process_bytes"
+        | "gpu_evidence_tier_cli_pid_only_visibility"
+        | "gpu_evidence_tier_pid_visible_without_bytes" => {
+            "gpu_context_visibility_process_level_only_host_tool".to_string()
+        }
+        "gpu_evidence_tier_visibility_limited" => {
+            "gpu_context_visibility_visibility_limited".to_string()
+        }
+        "gpu_evidence_tier_unavailable_or_inconclusive" => {
+            "gpu_context_visibility_unavailable_or_inconclusive".to_string()
+        }
+        "gpu_evidence_tier_pid_not_observed" => {
+            if provenance_status == "gpu_backend_provenance_nvml_driver_api"
+                || provenance_status == "gpu_backend_provenance_mixed_nvml_and_cli"
+            {
+                "gpu_context_visibility_pid_not_observed_without_context_truth".to_string()
+            } else {
+                "gpu_context_visibility_host_tool_pid_not_observed_without_context_truth"
+                    .to_string()
+            }
+        }
+        _ => "gpu_context_visibility_mixed".to_string(),
+    }
+}
+
+fn gpu_context_visibility_summary(
+    context_visibility_status: &str,
+    evidence_tier_status: &str,
+    provenance_status: &str,
+) -> String {
+    match context_visibility_status {
+        "gpu_offload_not_requested" => {
+            "GPU offload was not requested, so no Windows/NVIDIA GPU context-visibility verdict applied."
+                .to_string()
+        }
+        "gpu_context_visibility_process_level_only_driver_or_mixed" => format!(
+            "This run only achieved process-level GPU visibility. Even when NVML-backed or mixed driver/CLI evidence exposed per-process bytes, NullContext still did not gain direct CUDA-context teardown, allocator ownership, or context-residency truth. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_context_visibility_process_level_only_host_tool" => format!(
+            "This run only achieved host-tool process-level GPU visibility. The current evidence says nothing direct about CUDA-context teardown, allocator ownership, or context-residency state. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_context_visibility_visibility_limited" => format!(
+            "This run stayed in a visibility-limited GPU context state, so NullContext could not derive meaningful process-level or CUDA-context-level truth. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_context_visibility_unavailable_or_inconclusive" => format!(
+            "This run did not produce usable GPU context-visibility evidence, so CUDA-context-level state remained entirely unknown. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_context_visibility_pid_not_observed_without_context_truth"
+        | "gpu_context_visibility_host_tool_pid_not_observed_without_context_truth" => format!(
+            "This run did not observe the runtime PID in sampled GPU windows, but that still does not provide CUDA-context-level truth or allocator-ownership proof. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_context_visibility_unavailable_due_to_startup_failure" => {
+            "Runtime startup failed before NullContext could derive any useful GPU context-visibility statement for this run."
+                .to_string()
+        }
+        _ => format!(
+            "GPU context visibility remained mixed and unresolved for this run. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+    }
+}
+
 fn allocator_kv_cleanup_boundary_status(
     introspection: &LlamaRuntimeIntrospectionReport,
     startup_failed: bool,
@@ -4110,6 +4225,15 @@ fn default_gpu_claim_boundary_status() -> String {
 
 fn default_gpu_claim_boundary_summary() -> String {
     "This report did not yet state which Windows/NVIDIA GPU claims were actually justified by the recorded evidence."
+        .to_string()
+}
+
+fn default_gpu_context_visibility_status() -> String {
+    "gpu_context_visibility_unavailable".to_string()
+}
+
+fn default_gpu_context_visibility_summary() -> String {
+    "This report did not yet say whether its GPU evidence reached any meaningful CUDA-context-level visibility."
         .to_string()
 }
 
