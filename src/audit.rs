@@ -351,6 +351,10 @@ pub struct MemoryValidationStageTrendReport {
     pub latest_process_scan_context_status: String,
     #[serde(default = "default_process_scan_context_scope")]
     pub latest_process_scan_context_scope: String,
+    #[serde(default = "default_memory_validation_stage_trend_evidence_support_status")]
+    pub evidence_support_status: String,
+    #[serde(default = "default_memory_validation_stage_trend_evidence_support_summary")]
+    pub evidence_support_summary: String,
     pub summary: String,
     pub notes: Vec<String>,
 }
@@ -4149,6 +4153,15 @@ fn default_memory_validation_stage_recommendation_evidence_support_status() -> S
 
 fn default_memory_validation_stage_recommendation_evidence_support_summary() -> String {
     "NullContext had not yet classified whether the cleanup-stage recommendation was backed by direct marker-clearance evidence, only by GPU/process trends, or still by limited repeated evidence."
+        .to_string()
+}
+
+fn default_memory_validation_stage_trend_evidence_support_status() -> String {
+    "recommendation_evidence_not_derived".to_string()
+}
+
+fn default_memory_validation_stage_trend_evidence_support_summary() -> String {
+    "NullContext had not yet classified whether this repeated cleanup-stage trend was marker-backed, cleanup-signal-backed, GPU/process-trend-backed, or still too limited."
         .to_string()
 }
 

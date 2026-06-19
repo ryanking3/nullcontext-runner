@@ -405,6 +405,8 @@ export type MemoryValidationStageTrendReportData = {
   latest_cleanup_signal_support_status: string;
   latest_process_scan_context_status: string;
   latest_process_scan_context_scope: string;
+  evidence_support_status: string;
+  evidence_support_summary: string;
   summary: string;
   notes: string[];
 };

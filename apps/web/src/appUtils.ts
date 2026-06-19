@@ -763,6 +763,9 @@ function legacyMemoryValidationStageTrendReport() {
     latest_cleanup_signal_support_status: "cleanup_signal_support_unavailable",
     latest_process_scan_context_status: "process_scan_context_unavailable",
     latest_process_scan_context_scope: "process_scan_context_unavailable",
+    evidence_support_status: "recommendation_evidence_not_derived",
+    evidence_support_summary:
+      "This older report did not classify whether the repeated cleanup-stage trend was marker-backed, cleanup-signal-backed, GPU/process-trend-backed, or still too limited.",
     summary: "This older report did not include cleanup-stage trend details.",
     notes: [],
   };

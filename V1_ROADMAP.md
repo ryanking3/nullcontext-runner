@@ -102,6 +102,7 @@ NullContext already has meaningful foundations in-tree:
 - runtime reports now also say explicitly that current GPU evidence is still only process-level visibility and does not provide CUDA-context-level or allocator-ownership truth
 - repeated cleanup-stage recommendations now explicitly classify whether the current “best stage” is backed by stage-local clear marker scans, broader marker-clearance history, cleanup-signal-only support, GPU-only improvement trends, or still-limited repeated evidence
 - repeated release-gating now also requires marker-backed cleanup-stage recommendation evidence instead of treating GPU-only or cleanup-signal-only stage wins as equally gate-worthy
+- repeated cleanup-stage trend entries now also classify their own evidence-support class, so stage-by-stage comparison is not limited to scores and raw counts
 
 That is strong progress.
 
@@ -300,6 +301,7 @@ Done or largely done:
 - VRAM evidence scoring exists
 - stage-local marker context exists
 - helper-stage dedicated canary scans exist
+- repeated stage-level evidence-support classification exists across marker-backed, cleanup-signal-backed, GPU-only, and limited evidence classes
 
 Current in-tree cleanup stages:
 
@@ -365,6 +367,7 @@ Done or largely done:
 - explicit repeated controlled-canary history reporting
 - explicit repeated-evidence release-gating thresholds in reports
 - explicit release-gate blocking when the leading cleanup-stage recommendation is not backed by repeated marker-clearance evidence
+- explicit per-stage repeated evidence-support classification in the stage-trend table, not only on the winning recommendation
 - explicit “best repeated stage” versus “clean stage candidate” semantics
 
 ### Remaining v1 Work
@@ -495,7 +498,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `9-20` commits
+- core security/evidence work across Tracks A-E: `8-19` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -504,7 +507,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `31-57` commits
+- `30-56` commits
 
 ### Track Breakdown
 
@@ -549,7 +552,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `2-4` commits
+- `1-3` commits
 
 Expected areas:
 

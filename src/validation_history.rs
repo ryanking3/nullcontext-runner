@@ -555,6 +555,69 @@ fn build_stage_trends(
                 accumulator.latest_process_scan_context_status;
             let latest_process_scan_context_scope =
                 accumulator.latest_process_scan_context_scope;
+            let evidence_support_status = if accumulator.runs_recorded < 2 {
+                "recommendation_evidence_waiting_for_repeated_runs"
+            } else if accumulator.marker_detection_runs > 0 {
+                "recommendation_evidence_limited_by_marker_persistence"
+            } else if accumulator.stage_local_scan_clear_runs > 0 {
+                "recommendation_evidence_supported_by_stage_local_marker_clearance"
+            } else if accumulator.clear_marker_support_runs > 0
+                || accumulator.helper_scan_clear_runs > 0
+            {
+                "recommendation_evidence_supported_by_marker_clearance_history"
+            } else if accumulator.inconclusive_runs * 2 >= accumulator.runs_recorded {
+                "recommendation_evidence_limited_by_inconclusive_history"
+            } else if accumulator.stage_local_scan_runs == 0
+                && accumulator.session_fallback_scan_runs > 0
+            {
+                "recommendation_evidence_limited_to_session_fallback_scans"
+            } else if accumulator.cleanup_signal_strong_runs > 0
+                || accumulator.cleanup_signal_partial_runs > 0
+            {
+                "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance"
+            } else if accumulator.strong_or_moderate_runs > 0 || accumulator.improved_runs > 0 {
+                "recommendation_evidence_gpu_only_without_marker_support"
+            } else {
+                "recommendation_evidence_limited_mixed_history"
+            };
+            let evidence_support_summary = match evidence_support_status {
+                "recommendation_evidence_supported_by_stage_local_marker_clearance" => format!(
+                    "{} is backed by repeated stage-local clear marker scans, making this the strongest current cleanup-stage evidence class in the repeated trend table.",
+                    stage_label
+                ),
+                "recommendation_evidence_supported_by_marker_clearance_history" => format!(
+                    "{} is backed by repeated clear marker history, but that support is not yet entirely stage-local across all recorded runs.",
+                    stage_label
+                ),
+                "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance" => format!(
+                    "{} is currently supported more by repeated allocator/KV/model cleanup-path signals than by repeated direct marker-clearance evidence.",
+                    stage_label
+                ),
+                "recommendation_evidence_gpu_only_without_marker_support" => format!(
+                    "{} currently looks improved mostly from repeated GPU/process evidence trends; repeated direct marker-clearance support is still missing.",
+                    stage_label
+                ),
+                "recommendation_evidence_limited_to_session_fallback_scans" => format!(
+                    "{} still relies on session-fallback scan context rather than consistently isolated stage-local marker evidence.",
+                    stage_label
+                ),
+                "recommendation_evidence_limited_by_inconclusive_history" => format!(
+                    "{} still has too much inconclusive repeated history for NullContext to treat the stage trend as strongly supported.",
+                    stage_label
+                ),
+                "recommendation_evidence_limited_by_marker_persistence" => format!(
+                    "{} still has repeated marker persistence in its history, so this stage trend cannot be treated as clean evidence yet.",
+                    stage_label
+                ),
+                "recommendation_evidence_waiting_for_repeated_runs" => format!(
+                    "{} has not yet been exercised enough times in this scope for NullContext to classify its repeated evidence strongly.",
+                    stage_label
+                ),
+                _ => format!(
+                    "{} still has mixed repeated evidence, so NullContext cannot yet classify the stage trend as strongly supported.",
+                    stage_label
+                ),
+            };
             let summary = format!(
                 "{} was recorded in {} run(s), averaged {:.1}/100, improved {} time(s), stayed unchanged {} time(s), worsened {} time(s), and remained inconclusive {} time(s). Stage-local direct scans were recorded in {} run(s), with {} clear stage-local scan(s) and {} stage-local marker-detection run(s). Strong allocator/KV cleanup-signal support was present in {} run(s).",
                 stage_label,
@@ -587,6 +650,10 @@ fn build_stage_trends(
                     accumulator.cleanup_signal_strong_runs,
                     accumulator.cleanup_signal_partial_runs,
                     accumulator.cleanup_signal_limited_runs
+                ),
+                format!(
+                    "Repeated evidence support class: {}.",
+                    evidence_support_status.replace('_', " ")
                 ),
                 format!(
                     "Stage-local direct scans: {} total, {} clear, {} marker-detected, {} limited. Session-fallback scan usage: {} run(s).",
@@ -638,6 +705,8 @@ fn build_stage_trends(
                 latest_cleanup_signal_support_status,
                 latest_process_scan_context_status,
                 latest_process_scan_context_scope,
+                evidence_support_status: evidence_support_status.to_string(),
+                evidence_support_summary,
                 summary,
                 notes,
             }

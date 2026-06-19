@@ -2334,6 +2334,10 @@ export function PrivacyReportViewer({
                       <div className="report-path-list">
                         <div>stage id: {trend.stage_id}</div>
                         <div>kind: {humanizeSnakeCase(trend.stage_kind)}</div>
+                        <div>
+                          evidence support:{" "}
+                          {humanizeSnakeCase(trend.evidence_support_status)}
+                        </div>
                         <div>runs recorded: {trend.runs_recorded}</div>
                         <div>best score: {trend.best_validation_score}/100</div>
                         <div>improved runs: {trend.improved_runs}</div>
@@ -2396,6 +2400,7 @@ export function PrivacyReportViewer({
                           latest process scan scope:{" "}
                           {humanizeSnakeCase(trend.latest_process_scan_context_scope)}
                         </div>
+                        <div>{trend.evidence_support_summary}</div>
                         <div>{trend.summary}</div>
                         {trend.notes.map((note) => (
                           <div key={`${trend.stage_id}-${note}`}>{note}</div>
