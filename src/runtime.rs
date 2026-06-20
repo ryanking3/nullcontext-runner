@@ -153,7 +153,7 @@ const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
 const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
 const VRAM_CLEANUP_STRATEGY_ID: &str = "multi_stage_cleanup_experiments";
 const VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS: u64 = 1000;
-const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 9] = [
+const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 11] = [
     VramCleanupStrategyStagePlan {
         stage_id: "short_cooldown_recheck",
         stage_label: "Short Cooldown Recheck",
@@ -214,6 +214,20 @@ const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 9] = [
         stage_id: "cuda_then_host_ram_pressure_probe",
         stage_label: "CUDA Then Host RAM Pressure Probe",
         stage_kind: "cuda_then_host_ram_pressure_probe",
+        cooldown_ms_before_stage: 250,
+        perform_helper_relaunch_probe: false,
+    },
+    VramCleanupStrategyStagePlan {
+        stage_id: "host_ram_page_discard_then_cuda_probe",
+        stage_label: "Host RAM + Page Discard Then CUDA Probe",
+        stage_kind: "host_ram_page_discard_then_cuda_probe",
+        cooldown_ms_before_stage: 250,
+        perform_helper_relaunch_probe: false,
+    },
+    VramCleanupStrategyStagePlan {
+        stage_id: "cuda_host_ram_then_page_discard_probe",
+        stage_label: "CUDA + Host RAM Then Page Discard Probe",
+        stage_kind: "cuda_host_ram_then_page_discard_probe",
         cooldown_ms_before_stage: 250,
         perform_helper_relaunch_probe: false,
     },
@@ -819,6 +833,40 @@ fn execute_vram_cleanup_strategy_stage(
                 &[
                     ("CUDA memory pressure", cuda_report.status, cuda_report.notes),
                     ("host RAM pressure", host_ram_report.status, host_ram_report.notes),
+                ],
+            )
+        }
+        "host_ram_page_discard_then_cuda_probe" => {
+            let host_ram_report = run_host_ram_pressure_probe();
+            let page_discard_report = run_host_page_discard_probe();
+            let cuda_report = run_cuda_memory_pressure_probe();
+            build_composite_probe_outcome(
+                stage_plan.stage_id,
+                &[
+                    ("host RAM pressure", host_ram_report.status, host_ram_report.notes),
+                    (
+                        "host page discard",
+                        page_discard_report.status,
+                        page_discard_report.notes,
+                    ),
+                    ("CUDA memory pressure", cuda_report.status, cuda_report.notes),
+                ],
+            )
+        }
+        "cuda_host_ram_then_page_discard_probe" => {
+            let cuda_report = run_cuda_memory_pressure_probe();
+            let host_ram_report = run_host_ram_pressure_probe();
+            let page_discard_report = run_host_page_discard_probe();
+            build_composite_probe_outcome(
+                stage_plan.stage_id,
+                &[
+                    ("CUDA memory pressure", cuda_report.status, cuda_report.notes),
+                    ("host RAM pressure", host_ram_report.status, host_ram_report.notes),
+                    (
+                        "host page discard",
+                        page_discard_report.status,
+                        page_discard_report.notes,
+                    ),
                 ],
             )
         }
