@@ -515,6 +515,10 @@ pub struct VramCleanupComparisonReport {
     pub selected_stage_label: Option<String>,
     #[serde(default)]
     pub selected_stage_kind: Option<String>,
+    #[serde(default = "default_cleanup_signal_support_status")]
+    pub cleanup_signal_support_status: String,
+    #[serde(default = "default_cleanup_signal_support_summary")]
+    pub cleanup_signal_support_summary: String,
     #[serde(default = "default_vram_cleanup_selection_reason")]
     pub selection_reason: String,
     pub summary: String,
@@ -4709,6 +4713,8 @@ fn build_baseline_only_vram_cleanup_comparison_report(
         selected_stage_id: None,
         selected_stage_label: None,
         selected_stage_kind: None,
+        cleanup_signal_support_status: default_cleanup_signal_support_status(),
+        cleanup_signal_support_summary: default_cleanup_signal_support_summary(),
         selection_reason: "No experimental cleanup stage was selected because this run only recorded the baseline reference path."
             .to_string(),
         summary:
@@ -4801,10 +4807,11 @@ fn vram_cleanup_stage_preference_key(
 
 fn contextualized_vram_cleanup_stage_preference_key(
     stage: &VramCleanupStrategyStageReport,
-) -> (u8, u8, u8, u8, u32, u64) {
+) -> (u8, u8, u8, u8, u8, u32, u64) {
     (
         vram_cleanup_stage_contextualized_marker_rank(&stage.marker_evidence_status),
         vram_cleanup_stage_selection_evidence_rank(&stage.selection_evidence_status),
+        cleanup_signal_support_rank(&stage.cleanup_signal_support_status),
         vram_cleanup_stage_status_rank(&stage.evidence_improvement_status),
         vram_cleanup_stage_visibility_rank(&stage.evidence_snapshot),
         u32::MAX.saturating_sub(stage.evidence_snapshot.gpu_samples_with_pid_observed),
@@ -4840,7 +4847,7 @@ fn vram_cleanup_stage_visibility_rank(snapshot: &VramCleanupEvidenceSnapshot) ->
 }
 
 fn vram_cleanup_stage_selection_reason(stage: &VramCleanupStrategyStageReport) -> String {
-    match stage.selection_evidence_status.as_str() {
+    let base_reason = match stage.selection_evidence_status.as_str() {
         "cleanup_stage_selection_evidence_stage_local_clear_marker_support" => {
             "This stage was selected because it combined a strong GPU-side cleanup outcome with stage-local clear marker evidence, which is the strongest current single-report cleanup-stage evidence class."
                 .to_string()
@@ -4888,7 +4895,13 @@ fn vram_cleanup_stage_selection_reason(stage: &VramCleanupStrategyStageReport) -
                 .to_string()
         }
         },
-    }
+    };
+
+    format!(
+        "{} {}",
+        base_reason,
+        vram_cleanup_stage_cleanup_signal_clause(&stage.cleanup_signal_support_status)
+    )
 }
 
 fn derive_vram_cleanup_selection_evidence_status(
@@ -4966,6 +4979,17 @@ fn vram_cleanup_stage_selection_evidence_rank(status: &str) -> u8 {
     }
 }
 
+fn cleanup_signal_support_rank(status: &str) -> u8 {
+    match status {
+        "cleanup_signal_support_strong" => 3,
+        "cleanup_signal_support_partial" => 2,
+        "cleanup_signal_support_declared_but_unobserved" => 1,
+        "cleanup_signal_support_unavailable"
+        | "cleanup_signal_support_startup_failed_or_unavailable" => 0,
+        _ => 0,
+    }
+}
+
 fn vram_cleanup_stage_contextualized_marker_rank(status: &str) -> u8 {
     match status {
         "gpu_evidence_supported_by_clear_session_and_canary_scans" => 5,
@@ -4975,6 +4999,26 @@ fn vram_cleanup_stage_contextualized_marker_rank(status: &str) -> u8 {
         "gpu_evidence_improved_but_marker_persistence_detected" => 1,
         "marker_persistence_detected_without_supporting_gpu_improvement" => 0,
         _ => 0,
+    }
+}
+
+fn vram_cleanup_stage_cleanup_signal_clause(status: &str) -> &'static str {
+    match status {
+        "cleanup_signal_support_strong" => {
+            "Allocator/KV cleanup signals were also observed strongly for the runtime, so this stage sits inside the strongest currently available internal cleanup-path evidence class."
+        }
+        "cleanup_signal_support_partial" => {
+            "Allocator/KV cleanup signals were only partially observed for the runtime, so the stage still carries some internal cleanup-path uncertainty."
+        }
+        "cleanup_signal_support_declared_but_unobserved" => {
+            "Allocator/KV cleanup support was declared but not directly observed for the runtime, so this stage still depends mostly on external evidence."
+        }
+        "cleanup_signal_support_startup_failed_or_unavailable" => {
+            "Allocator/KV cleanup-path evidence was unavailable for the runtime, so this stage could not be strengthened by internal cleanup signals."
+        }
+        _ => {
+            "Allocator/KV cleanup signals were unavailable for the runtime, so this stage could not be strengthened by internal cleanup signals."
+        }
     }
 }
 
@@ -5067,6 +5111,8 @@ fn build_experimental_vram_cleanup_comparison_report(
         current_run_role: "selected_experimental_strategy_stage_result".to_string(),
         marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
         marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
+        cleanup_signal_support_status: selected_stage.cleanup_signal_support_status.clone(),
+        cleanup_signal_support_summary: selected_stage.cleanup_signal_support_summary.clone(),
         summary: format!(
             "Selected stage {} ({}). {}",
             selected_stage.stage_label,
@@ -5123,6 +5169,8 @@ fn build_not_applicable_vram_cleanup_comparison_report() -> VramCleanupCompariso
         selected_stage_id: None,
         selected_stage_label: None,
         selected_stage_kind: None,
+        cleanup_signal_support_status: default_cleanup_signal_support_status(),
+        cleanup_signal_support_summary: default_cleanup_signal_support_summary(),
         selection_reason:
             "No cleanup stage was selected because GPU offload was not requested.".to_string(),
         summary:
@@ -5156,6 +5204,8 @@ fn build_startup_failed_vram_cleanup_comparison_report() -> VramCleanupCompariso
         selected_stage_id: None,
         selected_stage_label: None,
         selected_stage_kind: None,
+        cleanup_signal_support_status: default_cleanup_signal_support_status(),
+        cleanup_signal_support_summary: default_cleanup_signal_support_summary(),
         selection_reason:
             "No cleanup stage was selected because startup failed before the experimental strategy could run."
                 .to_string(),
@@ -5192,6 +5242,8 @@ fn default_vram_cleanup_comparison_report() -> VramCleanupComparisonReport {
         selected_stage_id: None,
         selected_stage_label: None,
         selected_stage_kind: None,
+        cleanup_signal_support_status: default_cleanup_signal_support_status(),
+        cleanup_signal_support_summary: default_cleanup_signal_support_summary(),
         selection_reason:
             "This older report did not record stage-selection metadata.".to_string(),
         summary:

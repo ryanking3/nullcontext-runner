@@ -499,6 +499,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         legacy.marker_evidence_status;
       parsed.llama_runtime.vram_cleanup.comparison.marker_evidence_summary ??=
         legacy.marker_evidence_summary;
+      parsed.llama_runtime.vram_cleanup.comparison.cleanup_signal_support_status ??=
+        legacy.cleanup_signal_support_status;
+      parsed.llama_runtime.vram_cleanup.comparison.cleanup_signal_support_summary ??=
+        legacy.cleanup_signal_support_summary;
     }
 
     if (parsed.llama_runtime?.vram_cleanup?.stages) {
@@ -643,6 +647,9 @@ function legacyVramCleanupComparisonReport() {
     selected_stage_id: null,
     selected_stage_label: null,
     selected_stage_kind: null,
+    cleanup_signal_support_status: "cleanup_signal_support_unavailable",
+    cleanup_signal_support_summary:
+      "This older report did not attach allocator/KV cleanup-signal support to the selected VRAM cleanup stage.",
     selection_reason: "This older report did not record stage-selection metadata.",
     summary:
       "This older report did not include structured baseline-versus-strategy VRAM comparison data.",

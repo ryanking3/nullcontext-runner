@@ -778,6 +778,13 @@ export function PrivacyReportViewer({
                       .evidence_improvement_status
                   ),
                 },
+                {
+                  label: "selected cleanup signal support",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.comparison
+                      .cleanup_signal_support_status
+                  ),
+                },
               ]}
             />
 
@@ -785,6 +792,11 @@ export function PrivacyReportViewer({
               <p>
                 <strong>selection reason:</strong>{" "}
                 {currentReport.llama_runtime.vram_cleanup.comparison.selection_reason}
+              </p>
+              <p>
+                <strong>selected stage cleanup signal support:</strong>{" "}
+                {currentReport.llama_runtime.vram_cleanup.comparison
+                  .cleanup_signal_support_summary}
               </p>
             </div>
 

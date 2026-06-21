@@ -547,6 +547,8 @@ export type VramCleanupComparisonReport = {
   selected_stage_id?: string | null;
   selected_stage_label?: string | null;
   selected_stage_kind?: string | null;
+  cleanup_signal_support_status: string;
+  cleanup_signal_support_summary: string;
   selection_reason: string;
   summary: string;
   notes: string[];
