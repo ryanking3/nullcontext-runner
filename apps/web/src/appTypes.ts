@@ -575,6 +575,8 @@ export type VramCleanupStrategyStageReport = {
   helper_process_scan_report?: ProcessScanReportData | null;
   selection_evidence_status: string;
   selection_evidence_summary: string;
+  cleanup_signal_support_status: string;
+  cleanup_signal_support_summary: string;
   marker_evidence_status: string;
   marker_evidence_summary: string;
   evidence_snapshot: VramCleanupEvidenceSnapshot;

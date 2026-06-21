@@ -110,6 +110,7 @@ NullContext already has meaningful foundations in-tree:
 - repeated cleanup-stage ordering now explicitly prefers stronger evidence-support classes instead of treating all stage scores as equally trustworthy
 - single-report cleanup-stage selection now also prefers stronger local marker-backed evidence classes instead of relying only on GPU visibility deltas
 - the final single-report cleanup-stage selection is now re-evaluated after full RAM-side marker context is attached, so the chosen stage is not frozen from an earlier GPU-first pass
+- VRAM cleanup stage reports now also carry allocator/KV cleanup-signal support directly, so stage interpretation is no longer only a GPU-plus-marker story
 
 That is strong progress.
 
@@ -212,6 +213,7 @@ Done or partially done:
 - the allocator/KV capability matrix entry now reflects instrumentation evidence class directly instead of relying only on broader lifecycle tiers
 - the runtime report now surfaces the full runtime-signal contract as first-class rows, so setup, reuse, teardown, reset, and unload evidence can be inspected without reverse-engineering aggregate counts
 - the main runtime cleanup summary now explicitly says whether direct allocator/KV/model cleanup-path signals were observed, declared-but-unobserved, or absent on the stock runtime path
+- VRAM cleanup stage results now also inherit allocator/KV cleanup-signal support classification, tying Track B evidence more directly into Track D stage interpretation
 
 ### Remaining v1 Work
 
@@ -512,7 +514,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `3-14` commits
+- core security/evidence work across Tracks A-E: `2-13` commits
 - cross-cutting extra work: `6-10` commits
 - tests / validation / real-machine verification: `6-10` commits
 - docs / wording / claim-boundary pass: `3-5` commits
@@ -521,7 +523,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `25-51` commits
+- `24-50` commits
 
 ### Track Breakdown
 
@@ -541,7 +543,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `2-4` commits
+- `1-3` commits
 
 Expected areas:
 

@@ -550,6 +550,10 @@ pub struct VramCleanupStrategyStageReport {
     pub selection_evidence_status: String,
     #[serde(default = "default_vram_cleanup_selection_evidence_summary")]
     pub selection_evidence_summary: String,
+    #[serde(default = "default_cleanup_signal_support_status")]
+    pub cleanup_signal_support_status: String,
+    #[serde(default = "default_cleanup_signal_support_summary")]
+    pub cleanup_signal_support_summary: String,
     #[serde(default = "default_vram_cleanup_marker_evidence_status")]
     pub marker_evidence_status: String,
     #[serde(default = "default_vram_cleanup_marker_evidence_summary")]
@@ -909,6 +913,12 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
     let Some(llama_runtime) = report.llama_runtime.as_mut() else {
         return;
     };
+    let cleanup_signal_support_status =
+        derive_runtime_cleanup_signal_support_status(&llama_runtime.introspection).to_string();
+    let cleanup_signal_support_summary = runtime_cleanup_signal_support_summary(
+        &llama_runtime.introspection,
+        &cleanup_signal_support_status,
+    );
 
     let previous_selected_stage_id = llama_runtime
         .vram_cleanup
@@ -930,6 +940,8 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
             &controlled_canary_signal_status,
         );
         stage.marker_evidence_status = marker_evidence_status;
+        stage.cleanup_signal_support_status = cleanup_signal_support_status.clone();
+        stage.cleanup_signal_support_summary = cleanup_signal_support_summary.clone();
     }
 
     if !llama_runtime.vram_cleanup.stages.is_empty()
@@ -975,6 +987,16 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
                         .to_string(),
                 );
             }
+            comparison.notes.insert(
+                1,
+                format!(
+                    "Selected stage allocator/KV cleanup-signal support: {}. {}",
+                    selected_stage
+                        .cleanup_signal_support_status
+                        .replace('_', " "),
+                    selected_stage.cleanup_signal_support_summary
+                ),
+            );
 
             llama_runtime.vram_cleanup.comparison = comparison;
         }
@@ -1062,6 +1084,67 @@ fn derive_stage_process_scan_signal_status(
                 .as_ref()
                 .map(derive_process_scan_signal_status_from_phase)
         })
+}
+
+fn derive_runtime_cleanup_signal_support_status(
+    introspection: &LlamaRuntimeIntrospectionReport,
+) -> &'static str {
+    if introspection.cleanup_path_evidence_status
+        == "cleanup_path_unavailable_due_to_startup_failure"
+    {
+        return "cleanup_signal_support_startup_failed_or_unavailable";
+    }
+
+    let declared_direct_support = introspection
+        .cleanup_signal_matrix
+        .iter()
+        .any(|entry| entry.declared_support_status.contains("available"));
+    let observed_count = [
+        introspection.allocator_reset_observed,
+        introspection.kv_cache_clear_observed,
+        introspection.model_unload_observed,
+    ]
+    .into_iter()
+    .filter(|observed| *observed)
+    .count();
+
+    match observed_count {
+        3 => "cleanup_signal_support_strong",
+        1 | 2 => "cleanup_signal_support_partial",
+        0 if declared_direct_support => "cleanup_signal_support_declared_but_unobserved",
+        0 => "cleanup_signal_support_unavailable",
+        _ => "cleanup_signal_support_unavailable",
+    }
+}
+
+fn runtime_cleanup_signal_support_summary(
+    introspection: &LlamaRuntimeIntrospectionReport,
+    status: &str,
+) -> String {
+    match status {
+        "cleanup_signal_support_strong" => {
+            "Allocator reset, KV clear, and model unload cleanup signals were all observed directly for this runtime."
+                .to_string()
+        }
+        "cleanup_signal_support_partial" => format!(
+            "Cleanup-path signal coverage was partial for this runtime: allocator reset observed={}, kv clear observed={}, model unload observed={}.",
+            introspection.allocator_reset_observed,
+            introspection.kv_cache_clear_observed,
+            introspection.model_unload_observed
+        ),
+        "cleanup_signal_support_declared_but_unobserved" => {
+            "This runtime advertised allocator/KV cleanup-signal support, but the current run did not directly observe allocator reset, KV clear, or model unload signals."
+                .to_string()
+        }
+        "cleanup_signal_support_startup_failed_or_unavailable" => {
+            "Cleanup-path introspection was unavailable for this run because startup failed or direct allocator/KV cleanup signals could not be derived."
+                .to_string()
+        }
+        _ => {
+            "This runtime did not provide direct allocator/KV cleanup-path signal support for the current run."
+                .to_string()
+        }
+    }
 }
 
 fn derive_vram_cleanup_marker_evidence_status(
@@ -4595,6 +4678,8 @@ fn build_vram_cleanup_stage_report(
         helper_process_scan_report: strategy_stage.helper_process_scan_report.clone(),
         selection_evidence_status,
         selection_evidence_summary,
+        cleanup_signal_support_status: default_cleanup_signal_support_status(),
+        cleanup_signal_support_summary: default_cleanup_signal_support_summary(),
         marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
         marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
         notes: {

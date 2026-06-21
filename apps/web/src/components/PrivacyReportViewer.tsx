@@ -935,6 +935,10 @@ export function PrivacyReportViewer({
                           {humanizeSnakeCase(stage.selection_evidence_status)}
                         </div>
                         <div>
+                          cleanup signal support:{" "}
+                          {humanizeSnakeCase(stage.cleanup_signal_support_status)}
+                        </div>
+                        <div>
                           marker evidence: {humanizeSnakeCase(stage.marker_evidence_status)}
                         </div>
                         <div>
@@ -971,6 +975,7 @@ export function PrivacyReportViewer({
                           </div>
                         )}
                         <div>{stage.selection_evidence_summary}</div>
+                        <div>{stage.cleanup_signal_support_summary}</div>
                         <div>{stage.marker_evidence_summary}</div>
                         <div>{stage.summary}</div>
                         {stage.notes.map((note) => (

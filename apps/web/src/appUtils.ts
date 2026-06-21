@@ -508,6 +508,9 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         stage.selection_evidence_status ??= "cleanup_stage_selection_evidence_not_derived";
         stage.selection_evidence_summary ??=
           "This older report did not classify whether this cleanup stage selection result was backed by local marker evidence or only by GPU visibility.";
+        stage.cleanup_signal_support_status ??= "cleanup_signal_support_unavailable";
+        stage.cleanup_signal_support_summary ??=
+          "This older report did not attach allocator/KV cleanup-signal support to this cleanup stage.";
         stage.marker_evidence_status ??= "marker_evidence_not_yet_contextualized";
         stage.marker_evidence_summary ??=
           "This older report did not attach RAM-side marker context to this cleanup stage.";
