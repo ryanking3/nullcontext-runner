@@ -554,6 +554,9 @@ export type VramCleanupComparisonReport = {
   selected_stage_kind?: string | null;
   cleanup_signal_support_status: string;
   cleanup_signal_support_summary: string;
+  cleanup_signal_support_scope_status: string;
+  cleanup_signal_support_scope_summary: string;
+  contributing_cleanup_signals: string[];
   selection_reason: string;
   summary: string;
   notes: string[];
@@ -584,6 +587,9 @@ export type VramCleanupStrategyStageReport = {
   selection_evidence_summary: string;
   cleanup_signal_support_status: string;
   cleanup_signal_support_summary: string;
+  cleanup_signal_support_scope_status: string;
+  cleanup_signal_support_scope_summary: string;
+  contributing_cleanup_signals: string[];
   marker_evidence_status: string;
   marker_evidence_summary: string;
   evidence_snapshot: VramCleanupEvidenceSnapshot;

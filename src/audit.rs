@@ -519,6 +519,12 @@ pub struct VramCleanupComparisonReport {
     pub cleanup_signal_support_status: String,
     #[serde(default = "default_cleanup_signal_support_summary")]
     pub cleanup_signal_support_summary: String,
+    #[serde(default = "default_cleanup_signal_support_scope_status")]
+    pub cleanup_signal_support_scope_status: String,
+    #[serde(default = "default_cleanup_signal_support_scope_summary")]
+    pub cleanup_signal_support_scope_summary: String,
+    #[serde(default)]
+    pub contributing_cleanup_signals: Vec<String>,
     #[serde(default = "default_vram_cleanup_selection_reason")]
     pub selection_reason: String,
     pub summary: String,
@@ -558,6 +564,12 @@ pub struct VramCleanupStrategyStageReport {
     pub cleanup_signal_support_status: String,
     #[serde(default = "default_cleanup_signal_support_summary")]
     pub cleanup_signal_support_summary: String,
+    #[serde(default = "default_cleanup_signal_support_scope_status")]
+    pub cleanup_signal_support_scope_status: String,
+    #[serde(default = "default_cleanup_signal_support_scope_summary")]
+    pub cleanup_signal_support_scope_summary: String,
+    #[serde(default)]
+    pub contributing_cleanup_signals: Vec<String>,
     #[serde(default = "default_vram_cleanup_marker_evidence_status")]
     pub marker_evidence_status: String,
     #[serde(default = "default_vram_cleanup_marker_evidence_summary")]
@@ -933,6 +945,10 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
         &llama_runtime.introspection,
         &cleanup_signal_support_status,
     );
+    let cleanup_signal_support_scope_status =
+        derive_runtime_cleanup_signal_scope_status(&llama_runtime.introspection).to_string();
+    let contributing_cleanup_signals =
+        observed_cleanup_signal_labels(&llama_runtime.introspection.cleanup_signal_matrix);
 
     let previous_selected_stage_id = llama_runtime
         .vram_cleanup
@@ -956,6 +972,13 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
         stage.marker_evidence_status = marker_evidence_status;
         stage.cleanup_signal_support_status = cleanup_signal_support_status.clone();
         stage.cleanup_signal_support_summary = cleanup_signal_support_summary.clone();
+        stage.cleanup_signal_support_scope_status = cleanup_signal_support_scope_status.clone();
+        stage.cleanup_signal_support_scope_summary = runtime_cleanup_signal_scope_summary(
+            &llama_runtime.introspection,
+            &cleanup_signal_support_scope_status,
+            Some(stage.stage_label.as_str()),
+        );
+        stage.contributing_cleanup_signals = contributing_cleanup_signals.clone();
     }
 
     if !llama_runtime.vram_cleanup.stages.is_empty()
@@ -1009,6 +1032,16 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
                         .cleanup_signal_support_status
                         .replace('_', " "),
                     selected_stage.cleanup_signal_support_summary
+                ),
+            );
+            comparison.notes.insert(
+                2,
+                format!(
+                    "Selected stage cleanup-signal scope: {}. {}",
+                    selected_stage
+                        .cleanup_signal_support_scope_status
+                        .replace('_', " "),
+                    selected_stage.cleanup_signal_support_scope_summary
                 ),
             );
 
@@ -1161,6 +1194,81 @@ fn runtime_cleanup_signal_support_summary(
             "This runtime did not provide direct allocator/KV cleanup-path signal support for the current run."
                 .to_string()
         }
+    }
+}
+
+fn observed_cleanup_signal_labels(
+    cleanup_signal_matrix: &[LlamaRuntimeCleanupSignalEntryReport],
+) -> Vec<String> {
+    cleanup_signal_matrix
+        .iter()
+        .filter(|entry| entry.observed_count > 0)
+        .map(|entry| entry.signal_label.clone())
+        .collect()
+}
+
+fn derive_runtime_cleanup_signal_scope_status(
+    introspection: &LlamaRuntimeIntrospectionReport,
+) -> &'static str {
+    if introspection.cleanup_path_evidence_status
+        == "cleanup_path_unavailable_due_to_startup_failure"
+    {
+        return "cleanup_signal_scope_unavailable_due_to_startup_failure";
+    }
+
+    if introspection
+        .cleanup_signal_matrix
+        .iter()
+        .any(|entry| entry.observed_count > 0)
+    {
+        "cleanup_signal_scope_runtime_global_only"
+    } else if introspection
+        .cleanup_signal_matrix
+        .iter()
+        .any(|entry| entry.declared_support_status.contains("available"))
+    {
+        "cleanup_signal_scope_declared_but_not_observed"
+    } else {
+        "cleanup_signal_scope_unavailable"
+    }
+}
+
+fn runtime_cleanup_signal_scope_summary(
+    introspection: &LlamaRuntimeIntrospectionReport,
+    scope_status: &str,
+    stage_label: Option<&str>,
+) -> String {
+    let stage_subject = stage_label.unwrap_or("this cleanup interpretation");
+    let observed_labels = observed_cleanup_signal_labels(&introspection.cleanup_signal_matrix);
+    let observed_clause = if observed_labels.is_empty() {
+        "No direct runtime cleanup signals were retained for this run.".to_string()
+    } else {
+        format!(
+            "Observed runtime cleanup signals: {}.",
+            observed_labels.join(", ")
+        )
+    };
+
+    match scope_status {
+        "cleanup_signal_scope_runtime_global_only" => format!(
+            "Allocator/KV cleanup evidence attached to {} comes from the overall llama runtime lifecycle, not from a stage-local cleanup hook inside that specific VRAM cleanup step. {}",
+            stage_subject,
+            observed_clause
+        ),
+        "cleanup_signal_scope_declared_but_not_observed" => format!(
+            "Allocator/KV cleanup support attached to {} is only declared by the runtime path and was not directly observed during this run, so it cannot be treated as stage-local proof. {}",
+            stage_subject,
+            observed_clause
+        ),
+        "cleanup_signal_scope_unavailable_due_to_startup_failure" => format!(
+            "Allocator/KV cleanup scope for {} could not be derived because startup failed before a normal cleanup lifecycle completed.",
+            stage_subject
+        ),
+        _ => format!(
+            "Allocator/KV cleanup scope for {} remained unavailable, so no stage-local internal cleanup claim should be inferred. {}",
+            stage_subject,
+            observed_clause
+        ),
     }
 }
 
@@ -4552,6 +4660,15 @@ fn default_cleanup_signal_support_summary() -> String {
         .to_string()
 }
 
+fn default_cleanup_signal_support_scope_status() -> String {
+    "cleanup_signal_scope_unavailable".to_string()
+}
+
+fn default_cleanup_signal_support_scope_summary() -> String {
+    "This report did not yet distinguish whether allocator/KV cleanup-signal evidence was stage-local or only runtime-global."
+        .to_string()
+}
+
 fn default_controlled_canary_validation_run_report() -> ControlledCanaryValidationRunReport {
     ControlledCanaryValidationRunReport {
         execution_status: "controlled_canary_not_run_yet".to_string(),
@@ -4784,6 +4901,9 @@ fn build_vram_cleanup_stage_report(
         selection_evidence_summary,
         cleanup_signal_support_status: default_cleanup_signal_support_status(),
         cleanup_signal_support_summary: default_cleanup_signal_support_summary(),
+        cleanup_signal_support_scope_status: default_cleanup_signal_support_scope_status(),
+        cleanup_signal_support_scope_summary: default_cleanup_signal_support_scope_summary(),
+        contributing_cleanup_signals: vec![],
         marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
         marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
         notes: {
@@ -4815,6 +4935,9 @@ fn build_baseline_only_vram_cleanup_comparison_report(
         selected_stage_kind: None,
         cleanup_signal_support_status: default_cleanup_signal_support_status(),
         cleanup_signal_support_summary: default_cleanup_signal_support_summary(),
+        cleanup_signal_support_scope_status: default_cleanup_signal_support_scope_status(),
+        cleanup_signal_support_scope_summary: default_cleanup_signal_support_scope_summary(),
+        contributing_cleanup_signals: vec![],
         selection_reason: "No experimental cleanup stage was selected because this run only recorded the baseline reference path."
             .to_string(),
         summary:
@@ -4998,9 +5121,10 @@ fn vram_cleanup_stage_selection_reason(stage: &VramCleanupStrategyStageReport) -
     };
 
     format!(
-        "{} {}",
+        "{} {} {}",
         base_reason,
-        vram_cleanup_stage_cleanup_signal_clause(&stage.cleanup_signal_support_status)
+        vram_cleanup_stage_cleanup_signal_clause(&stage.cleanup_signal_support_status),
+        vram_cleanup_stage_cleanup_signal_scope_clause(&stage.cleanup_signal_support_scope_status)
     )
 }
 
@@ -5122,6 +5246,23 @@ fn vram_cleanup_stage_cleanup_signal_clause(status: &str) -> &'static str {
     }
 }
 
+fn vram_cleanup_stage_cleanup_signal_scope_clause(status: &str) -> &'static str {
+    match status {
+        "cleanup_signal_scope_runtime_global_only" => {
+            "That allocator/KV evidence still applies only at whole-runtime lifecycle scope, not as proof that this specific VRAM cleanup stage triggered those internal cleanup signals."
+        }
+        "cleanup_signal_scope_declared_but_not_observed" => {
+            "That allocator/KV evidence is still only a declared runtime capability and not a directly observed internal cleanup event for this specific VRAM cleanup stage."
+        }
+        "cleanup_signal_scope_unavailable_due_to_startup_failure" => {
+            "Startup failure prevented NullContext from deriving any trustworthy internal cleanup scope for this specific VRAM cleanup stage."
+        }
+        _ => {
+            "NullContext still lacks stage-local internal cleanup attribution for this specific VRAM cleanup stage."
+        }
+    }
+}
+
 fn snapshot_is_inconclusive(snapshot: &VramCleanupEvidenceSnapshot) -> bool {
     snapshot
         .vram_inspection_status
@@ -5213,6 +5354,13 @@ fn build_experimental_vram_cleanup_comparison_report(
         marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
         cleanup_signal_support_status: selected_stage.cleanup_signal_support_status.clone(),
         cleanup_signal_support_summary: selected_stage.cleanup_signal_support_summary.clone(),
+        cleanup_signal_support_scope_status: selected_stage
+            .cleanup_signal_support_scope_status
+            .clone(),
+        cleanup_signal_support_scope_summary: selected_stage
+            .cleanup_signal_support_scope_summary
+            .clone(),
+        contributing_cleanup_signals: selected_stage.contributing_cleanup_signals.clone(),
         summary: format!(
             "Selected stage {} ({}). {}",
             selected_stage.stage_label,
@@ -5271,6 +5419,9 @@ fn build_not_applicable_vram_cleanup_comparison_report() -> VramCleanupCompariso
         selected_stage_kind: None,
         cleanup_signal_support_status: default_cleanup_signal_support_status(),
         cleanup_signal_support_summary: default_cleanup_signal_support_summary(),
+        cleanup_signal_support_scope_status: default_cleanup_signal_support_scope_status(),
+        cleanup_signal_support_scope_summary: default_cleanup_signal_support_scope_summary(),
+        contributing_cleanup_signals: vec![],
         selection_reason:
             "No cleanup stage was selected because GPU offload was not requested.".to_string(),
         summary:
@@ -5306,6 +5457,9 @@ fn build_startup_failed_vram_cleanup_comparison_report() -> VramCleanupCompariso
         selected_stage_kind: None,
         cleanup_signal_support_status: default_cleanup_signal_support_status(),
         cleanup_signal_support_summary: default_cleanup_signal_support_summary(),
+        cleanup_signal_support_scope_status: default_cleanup_signal_support_scope_status(),
+        cleanup_signal_support_scope_summary: default_cleanup_signal_support_scope_summary(),
+        contributing_cleanup_signals: vec![],
         selection_reason:
             "No cleanup stage was selected because startup failed before the experimental strategy could run."
                 .to_string(),
@@ -5344,6 +5498,9 @@ fn default_vram_cleanup_comparison_report() -> VramCleanupComparisonReport {
         selected_stage_kind: None,
         cleanup_signal_support_status: default_cleanup_signal_support_status(),
         cleanup_signal_support_summary: default_cleanup_signal_support_summary(),
+        cleanup_signal_support_scope_status: default_cleanup_signal_support_scope_status(),
+        cleanup_signal_support_scope_summary: default_cleanup_signal_support_scope_summary(),
+        contributing_cleanup_signals: vec![],
         selection_reason:
             "This older report did not record stage-selection metadata.".to_string(),
         summary:

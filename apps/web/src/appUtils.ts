@@ -503,6 +503,12 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         legacy.cleanup_signal_support_status;
       parsed.llama_runtime.vram_cleanup.comparison.cleanup_signal_support_summary ??=
         legacy.cleanup_signal_support_summary;
+      parsed.llama_runtime.vram_cleanup.comparison.cleanup_signal_support_scope_status ??=
+        legacy.cleanup_signal_support_scope_status;
+      parsed.llama_runtime.vram_cleanup.comparison.cleanup_signal_support_scope_summary ??=
+        legacy.cleanup_signal_support_scope_summary;
+      parsed.llama_runtime.vram_cleanup.comparison.contributing_cleanup_signals ??=
+        legacy.contributing_cleanup_signals;
     }
 
     if (parsed.llama_runtime?.vram_cleanup?.stages) {
@@ -515,6 +521,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         stage.cleanup_signal_support_status ??= "cleanup_signal_support_unavailable";
         stage.cleanup_signal_support_summary ??=
           "This older report did not attach allocator/KV cleanup-signal support to this cleanup stage.";
+        stage.cleanup_signal_support_scope_status ??= "cleanup_signal_scope_unavailable";
+        stage.cleanup_signal_support_scope_summary ??=
+          "This older report did not distinguish whether allocator/KV cleanup-signal evidence for this cleanup stage was stage-local or only runtime-global.";
+        stage.contributing_cleanup_signals ??= [];
         stage.marker_evidence_status ??= "marker_evidence_not_yet_contextualized";
         stage.marker_evidence_summary ??=
           "This older report did not attach RAM-side marker context to this cleanup stage.";
@@ -655,6 +665,10 @@ function legacyVramCleanupComparisonReport() {
     cleanup_signal_support_status: "cleanup_signal_support_unavailable",
     cleanup_signal_support_summary:
       "This older report did not attach allocator/KV cleanup-signal support to the selected VRAM cleanup stage.",
+    cleanup_signal_support_scope_status: "cleanup_signal_scope_unavailable",
+    cleanup_signal_support_scope_summary:
+      "This older report did not distinguish whether allocator/KV cleanup-signal evidence for the selected VRAM cleanup stage was stage-local or only runtime-global.",
+    contributing_cleanup_signals: [],
     selection_reason: "This older report did not record stage-selection metadata.",
     summary:
       "This older report did not include structured baseline-versus-strategy VRAM comparison data.",

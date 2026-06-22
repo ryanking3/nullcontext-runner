@@ -216,6 +216,7 @@ Done or partially done:
 - VRAM cleanup stage results now also inherit allocator/KV cleanup-signal support classification, tying Track B evidence more directly into Track D stage interpretation
 - the selected VRAM cleanup comparison now also carries allocator/KV cleanup-signal support as first-class report data, and contextualized cleanup-stage selection can treat that support as a future-ready tie-break signal instead of display-only metadata
 - the runtime and cleanup signal matrices now also retain per-signal observation counts, sources, phases, and sample details, so allocator/KV cleanup evidence is less collapsed than before
+- VRAM cleanup stages and the selected-stage comparison now explicitly disclose when allocator/KV cleanup evidence is only runtime-global rather than stage-local, and they list which observed cleanup signals contributed to that interpretation
 
 ### Remaining v1 Work
 
@@ -223,7 +224,7 @@ Done or partially done:
 - improve instrumented-runtime path so this is not mostly manifest-driven
 - capture more allocator/KV events from real instrumented builds
 - reduce reliance on generic fallback wording like “not observed directly”
-- deepen per-stage rather than only runtime-wide allocator/KV cleanup attribution where possible
+- add true stage-local internal cleanup attribution or hooks where possible, instead of only runtime-global lifecycle evidence
 
 ### v1 Exit Criteria
 
@@ -516,7 +517,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `5-11` commits
+- core security/evidence work across Tracks A-E: `4-10` commits
 - cross-cutting extra work: `5-9` commits
 - tests / validation / real-machine verification: `5-9` commits
 - docs / wording / claim-boundary pass: `2-4` commits
@@ -525,7 +526,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `24-45` commits
+- `23-44` commits
 
 ### Track Breakdown
 
@@ -551,8 +552,7 @@ Expected areas:
 
 - stronger instrumented-runtime path
 - more direct allocator/KV event capture
-- better report semantics for observed versus supported versus unknown
-- better tie-in between allocator/KV signals and cleanup interpretation
+- true stage-local internal cleanup attribution instead of only runtime-global lifecycle evidence
 
 ### Track C: CUDA / NVIDIA Inspection
 

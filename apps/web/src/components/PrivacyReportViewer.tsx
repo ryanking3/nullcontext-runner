@@ -785,6 +785,13 @@ export function PrivacyReportViewer({
                       .cleanup_signal_support_status
                   ),
                 },
+                {
+                  label: "selected cleanup signal scope",
+                  value: humanizeSnakeCase(
+                    currentReport.llama_runtime.vram_cleanup.comparison
+                      .cleanup_signal_support_scope_status
+                  ),
+                },
               ]}
             />
 
@@ -797,6 +804,20 @@ export function PrivacyReportViewer({
                 <strong>selected stage cleanup signal support:</strong>{" "}
                 {currentReport.llama_runtime.vram_cleanup.comparison
                   .cleanup_signal_support_summary}
+              </p>
+              <p>
+                <strong>selected stage cleanup signal scope:</strong>{" "}
+                {currentReport.llama_runtime.vram_cleanup.comparison
+                  .cleanup_signal_support_scope_summary}
+              </p>
+              <p>
+                <strong>selected stage contributing cleanup signals:</strong>{" "}
+                {currentReport.llama_runtime.vram_cleanup.comparison
+                  .contributing_cleanup_signals.length > 0
+                  ? currentReport.llama_runtime.vram_cleanup.comparison.contributing_cleanup_signals.join(
+                      ", "
+                    )
+                  : "none"}
               </p>
             </div>
 
@@ -951,6 +972,16 @@ export function PrivacyReportViewer({
                           {humanizeSnakeCase(stage.cleanup_signal_support_status)}
                         </div>
                         <div>
+                          cleanup signal scope:{" "}
+                          {humanizeSnakeCase(stage.cleanup_signal_support_scope_status)}
+                        </div>
+                        <div>
+                          contributing cleanup signals:{" "}
+                          {stage.contributing_cleanup_signals.length > 0
+                            ? stage.contributing_cleanup_signals.join(", ")
+                            : "none"}
+                        </div>
+                        <div>
                           marker evidence: {humanizeSnakeCase(stage.marker_evidence_status)}
                         </div>
                         <div>
@@ -988,6 +1019,7 @@ export function PrivacyReportViewer({
                         )}
                         <div>{stage.selection_evidence_summary}</div>
                         <div>{stage.cleanup_signal_support_summary}</div>
+                        <div>{stage.cleanup_signal_support_scope_summary}</div>
                         <div>{stage.marker_evidence_summary}</div>
                         <div>{stage.summary}</div>
                         {stage.notes.map((note) => (
