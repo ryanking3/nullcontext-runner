@@ -507,6 +507,11 @@ export type LlamaRuntimeCleanupSignalEntryReport = {
   declared_support_status: string;
   observation_status: string;
   evidence_status: string;
+  observed_count: number;
+  observed_sources: string[];
+  observed_phases: string[];
+  sample_observed_status?: string | null;
+  sample_observed_details?: string | null;
   summary: string;
 };
 

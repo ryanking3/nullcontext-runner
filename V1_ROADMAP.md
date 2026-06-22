@@ -215,6 +215,7 @@ Done or partially done:
 - the main runtime cleanup summary now explicitly says whether direct allocator/KV/model cleanup-path signals were observed, declared-but-unobserved, or absent on the stock runtime path
 - VRAM cleanup stage results now also inherit allocator/KV cleanup-signal support classification, tying Track B evidence more directly into Track D stage interpretation
 - the selected VRAM cleanup comparison now also carries allocator/KV cleanup-signal support as first-class report data, and contextualized cleanup-stage selection can treat that support as a future-ready tie-break signal instead of display-only metadata
+- the runtime and cleanup signal matrices now also retain per-signal observation counts, sources, phases, and sample details, so allocator/KV cleanup evidence is less collapsed than before
 
 ### Remaining v1 Work
 
@@ -515,16 +516,16 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `2-12` commits
-- cross-cutting extra work: `6-10` commits
-- tests / validation / real-machine verification: `6-10` commits
-- docs / wording / claim-boundary pass: `3-5` commits
+- core security/evidence work across Tracks A-E: `5-11` commits
+- cross-cutting extra work: `5-9` commits
+- tests / validation / real-machine verification: `5-9` commits
+- docs / wording / claim-boundary pass: `2-4` commits
 - packaging / release prep: `4-7` commits
 - cleanup / polish / final pass: `3-5` commits
 
 Estimated total remaining before `v1`:
 
-- `23-49` commits
+- `24-45` commits
 
 ### Track Breakdown
 
@@ -544,7 +545,7 @@ Expected areas:
 
 Estimated remaining:
 
-- `0-2` commits
+- `0-1` commits
 
 Expected areas:
 

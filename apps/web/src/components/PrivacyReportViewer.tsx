@@ -1291,6 +1291,30 @@ export function PrivacyReportViewer({
                         <div>
                           observation: {humanizeSnakeCase(entry.observation_status)}
                         </div>
+                        <div>observed count: {entry.observed_count}</div>
+                        <div>
+                          observed sources:{" "}
+                          {entry.observed_sources.length > 0
+                            ? entry.observed_sources.join(", ")
+                            : "none"}
+                        </div>
+                        <div>
+                          observed phases:{" "}
+                          {entry.observed_phases.length > 0
+                            ? entry.observed_phases
+                                .map((phase) => humanizeSnakeCase(phase))
+                                .join(", ")
+                            : "none"}
+                        </div>
+                        <div>
+                          sample status:{" "}
+                          {entry.sample_observed_status
+                            ? humanizeSnakeCase(entry.sample_observed_status)
+                            : "none"}
+                        </div>
+                        {entry.sample_observed_details && (
+                          <div>sample details: {entry.sample_observed_details}</div>
+                        )}
                         <div>{entry.summary}</div>
                       </div>
                     </div>
@@ -1326,6 +1350,30 @@ export function PrivacyReportViewer({
                         <div>
                           observation: {humanizeSnakeCase(entry.observation_status)}
                         </div>
+                        <div>observed count: {entry.observed_count}</div>
+                        <div>
+                          observed sources:{" "}
+                          {entry.observed_sources.length > 0
+                            ? entry.observed_sources.join(", ")
+                            : "none"}
+                        </div>
+                        <div>
+                          observed phases:{" "}
+                          {entry.observed_phases.length > 0
+                            ? entry.observed_phases
+                                .map((phase) => humanizeSnakeCase(phase))
+                                .join(", ")
+                            : "none"}
+                        </div>
+                        <div>
+                          sample status:{" "}
+                          {entry.sample_observed_status
+                            ? humanizeSnakeCase(entry.sample_observed_status)
+                            : "none"}
+                        </div>
+                        {entry.sample_observed_details && (
+                          <div>sample details: {entry.sample_observed_details}</div>
+                        )}
                         <div>{entry.summary}</div>
                       </div>
                     </div>

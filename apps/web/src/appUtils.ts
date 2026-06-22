@@ -611,6 +611,11 @@ function legacyLlamaRuntimeCleanupSignalEntryReport() {
     declared_support_status: "support_unknown_in_legacy_report",
     observation_status: "signal_not_observed",
     evidence_status: "legacy_cleanup_signal_evidence_unavailable",
+    observed_count: 0,
+    observed_sources: [],
+    observed_phases: [],
+    sample_observed_status: null,
+    sample_observed_details: null,
     summary:
       "This older report did not include structured cleanup-signal coverage entries.",
   };

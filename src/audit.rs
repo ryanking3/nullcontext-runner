@@ -623,6 +623,16 @@ pub struct LlamaRuntimeCleanupSignalEntryReport {
     pub declared_support_status: String,
     pub observation_status: String,
     pub evidence_status: String,
+    #[serde(default)]
+    pub observed_count: u32,
+    #[serde(default)]
+    pub observed_sources: Vec<String>,
+    #[serde(default)]
+    pub observed_phases: Vec<String>,
+    #[serde(default)]
+    pub sample_observed_status: Option<String>,
+    #[serde(default)]
+    pub sample_observed_details: Option<String>,
     pub summary: String,
 }
 
@@ -1125,16 +1135,19 @@ fn runtime_cleanup_signal_support_summary(
     introspection: &LlamaRuntimeIntrospectionReport,
     status: &str,
 ) -> String {
+    let observed_cleanup_signal_clause =
+        observed_cleanup_signal_evidence_clause(&introspection.cleanup_signal_matrix);
     match status {
-        "cleanup_signal_support_strong" => {
-            "Allocator reset, KV clear, and model unload cleanup signals were all observed directly for this runtime."
-                .to_string()
-        }
+        "cleanup_signal_support_strong" => format!(
+            "Allocator reset, KV clear, and model unload cleanup signals were all observed directly for this runtime. {}",
+            observed_cleanup_signal_clause
+        ),
         "cleanup_signal_support_partial" => format!(
-            "Cleanup-path signal coverage was partial for this runtime: allocator reset observed={}, kv clear observed={}, model unload observed={}.",
+            "Cleanup-path signal coverage was partial for this runtime: allocator reset observed={}, kv clear observed={}, model unload observed={}. {}",
             introspection.allocator_reset_observed,
             introspection.kv_cache_clear_observed,
-            introspection.model_unload_observed
+            introspection.model_unload_observed,
+            observed_cleanup_signal_clause
         ),
         "cleanup_signal_support_declared_but_unobserved" => {
             "This runtime advertised allocator/KV cleanup-signal support, but the current run did not directly observe allocator reset, KV clear, or model unload signals."
@@ -1148,6 +1161,35 @@ fn runtime_cleanup_signal_support_summary(
             "This runtime did not provide direct allocator/KV cleanup-path signal support for the current run."
                 .to_string()
         }
+    }
+}
+
+fn observed_cleanup_signal_evidence_clause(
+    cleanup_signal_matrix: &[LlamaRuntimeCleanupSignalEntryReport],
+) -> String {
+    let observed_entries = cleanup_signal_matrix
+        .iter()
+        .filter(|entry| entry.observed_count > 0)
+        .map(|entry| {
+            let sources = if entry.observed_sources.is_empty() {
+                "unknown source".to_string()
+            } else {
+                entry.observed_sources.join(", ")
+            };
+            format!(
+                "{} x{} via {}",
+                entry.signal_label, entry.observed_count, sources
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if observed_entries.is_empty() {
+        "No cleanup-signal observation footprint was retained for this runtime.".to_string()
+    } else {
+        format!(
+            "Observed cleanup-signal footprint: {}.",
+            observed_entries.join("; ")
+        )
     }
 }
 
@@ -2625,7 +2667,8 @@ fn build_llama_runtime_introspection_report(
                 &capabilities.declared_signal_ids,
                 "allocator_initialized",
             ) || declared_allocator_introspection_status.contains("available"),
-            observed_allocator_initialized,
+            observed_signals,
+            &["allocator_initialized"],
             startup_failed,
         ),
         signal_entry(
@@ -2636,7 +2679,8 @@ fn build_llama_runtime_introspection_report(
                 &capabilities.declared_signal_ids,
                 "allocator_teardown_observed",
             ) || declared_allocator_introspection_status.contains("available"),
-            observed_allocator_teardown,
+            observed_signals,
+            &["allocator_teardown_observed"],
             startup_failed,
         ),
         signal_entry(
@@ -2649,7 +2693,8 @@ fn build_llama_runtime_introspection_report(
             ) || capabilities
                 .allocator_reset_signal_status
                 .contains("available"),
-            observed_allocator_reset_signal,
+            observed_signals,
+            &["allocator_reset_observed"],
             startup_failed,
         ),
         signal_entry(
@@ -2660,7 +2705,8 @@ fn build_llama_runtime_introspection_report(
                 &capabilities.declared_signal_ids,
                 "kv_cache_initialized",
             ) || declared_kv_cache_introspection_status.contains("available"),
-            observed_kv_initialized,
+            observed_signals,
+            &["kv_cache_initialized"],
             startup_failed,
         ),
         signal_entry(
@@ -2671,7 +2717,8 @@ fn build_llama_runtime_introspection_report(
                 &capabilities.declared_signal_ids,
                 "kv_cache_reused",
             ) || declared_kv_cache_introspection_status.contains("available"),
-            observed_kv_reused,
+            observed_signals,
+            &["kv_cache_reused"],
             startup_failed,
         ),
         signal_entry(
@@ -2682,7 +2729,8 @@ fn build_llama_runtime_introspection_report(
                 &capabilities.declared_signal_ids,
                 "kv_cache_clear_observed",
             ) || declared_kv_cache_introspection_status.contains("available"),
-            observed_kv_clear,
+            observed_signals,
+            &["kv_cache_clear_observed"],
             startup_failed,
         ),
         signal_entry(
@@ -2695,7 +2743,8 @@ fn build_llama_runtime_introspection_report(
             ) || capabilities
                 .model_unload_signal_status
                 .contains("available"),
-            observed_model_unload_signal,
+            observed_signals,
+            &["model_unload_observed"],
             startup_failed,
         ),
     ];
@@ -2710,7 +2759,8 @@ fn build_llama_runtime_introspection_report(
             ) || capabilities
                 .allocator_reset_signal_status
                 .contains("available"),
-            observed_allocator_reset_signal,
+            observed_signals,
+            &["allocator_reset_observed"],
             startup_failed,
         ),
         signal_entry(
@@ -2721,7 +2771,8 @@ fn build_llama_runtime_introspection_report(
                 &capabilities.declared_signal_ids,
                 "kv_cache_clear_observed",
             ) || declared_kv_cache_introspection_status.contains("available"),
-            observed_kv_clear,
+            observed_signals,
+            &["kv_cache_clear_observed"],
             startup_failed,
         ),
         signal_entry(
@@ -2734,7 +2785,8 @@ fn build_llama_runtime_introspection_report(
             ) || capabilities
                 .model_unload_signal_status
                 .contains("available"),
-            observed_model_unload_signal,
+            observed_signals,
+            &["model_unload_observed"],
             startup_failed,
         ),
     ];
@@ -2972,6 +3024,11 @@ fn fallback_signal_entry(
         declared_support_status: "support_unknown_in_fallback_path".to_string(),
         observation_status: observation_status.to_string(),
         evidence_status: evidence_status.to_string(),
+        observed_count: 0,
+        observed_sources: vec![],
+        observed_phases: vec![],
+        sample_observed_status: None,
+        sample_observed_details: None,
         summary: if startup_failed {
             format!(
                 "{} could not be evaluated because runtime startup failed before normal signal collection.",
@@ -2990,9 +3047,20 @@ fn signal_entry(
     signal_id: &str,
     signal_label: &str,
     declared_support: bool,
-    observed: bool,
+    observed_signals: &[RuntimeIntrospectionSignal],
+    observed_event_ids: &[&str],
     startup_failed: bool,
 ) -> LlamaRuntimeCleanupSignalEntryReport {
+    let matched_signals = observed_signals
+        .iter()
+        .filter(|signal| {
+            signal.status != "failed"
+                && observed_event_ids
+                    .iter()
+                    .any(|event_id| signal.event.as_str() == *event_id)
+        })
+        .collect::<Vec<_>>();
+    let observed = !matched_signals.is_empty();
     let declared_support_status = if declared_support {
         "declared_signal_support_available"
     } else {
@@ -3014,6 +3082,27 @@ fn signal_entry(
     } else {
         "no_declared_support_and_no_signal_observed"
     };
+    let mut observed_sources = matched_signals
+        .iter()
+        .map(|signal| signal.source_stream.clone())
+        .collect::<Vec<_>>();
+    observed_sources.sort();
+    observed_sources.dedup();
+    let mut observed_phases = matched_signals
+        .iter()
+        .map(|signal| introspection_event_phase(&signal.event).to_string())
+        .collect::<Vec<_>>();
+    observed_phases.sort();
+    observed_phases.dedup();
+    let sample_observed_status = matched_signals.last().map(|signal| signal.status.clone());
+    let sample_observed_details = matched_signals.iter().rev().find_map(|signal| {
+        let trimmed = signal.details.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
     let summary = if startup_failed {
         format!(
             "{} could not be evaluated because runtime startup failed before normal signal collection.",
@@ -3021,8 +3110,14 @@ fn signal_entry(
         )
     } else if observed {
         format!(
-            "{} was observed directly during this runtime lifecycle.",
-            signal_label
+            "{} was observed directly {} time(s) during this runtime lifecycle via {}.",
+            signal_label,
+            matched_signals.len(),
+            if observed_sources.is_empty() {
+                "no captured source metadata".to_string()
+            } else {
+                observed_sources.join(", ")
+            }
         )
     } else if declared_support {
         format!(
@@ -3042,6 +3137,11 @@ fn signal_entry(
         declared_support_status: declared_support_status.to_string(),
         observation_status: observation_status.to_string(),
         evidence_status: evidence_status.to_string(),
+        observed_count: matched_signals.len() as u32,
+        observed_sources,
+        observed_phases,
+        sample_observed_status,
+        sample_observed_details,
         summary,
     }
 }
