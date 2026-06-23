@@ -518,16 +518,16 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `4-10` commits
-- cross-cutting extra work: `5-9` commits
-- tests / validation / real-machine verification: `5-9` commits
+- core security/evidence work across Tracks A-E: `8-17` commits
+- cross-cutting extra work: `4-7` commits
+- tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
 - packaging / release prep: `4-7` commits
-- cleanup / polish / final pass: `3-5` commits
+- cleanup / polish / final pass: `2-4` commits
 
 Estimated total remaining before `v1`:
 
-- `23-44` commits
+- `25-47` commits
 
 ### Track Breakdown
 
@@ -535,102 +535,104 @@ Estimated total remaining before `v1`:
 
 Estimated remaining:
 
-- `2-4` commits
+- `1-3` commits
 
-Expected areas:
+Rough commit guide:
 
-- tighten stage-local versus fallback scan attribution
-- improve repeated stage-local process-scan interpretation
-- possibly one more platform/backend pass if it adds real evidence rather than noise
+- `A1` tighten repeated stage-local versus session-fallback scan interpretation in validation history, recommendation logic, and UI wording
+- `A2` add one more genuinely useful process-scan backend or platform path only if it produces operator-visible evidence rather than another unsupported stub
+- `A3` final pass on process-scan claim boundaries, skipped-scan semantics, and report consistency if the first two commits expose wording gaps
 
 ### Track B: llama.cpp Allocator / KV Introspection
 
 Estimated remaining:
 
-- `0-1` commits
+- `2-4` commits
 
-Expected areas:
+Rough commit guide:
 
-- stronger instrumented-runtime path
-- more direct allocator/KV event capture
-- true stage-local internal cleanup attribution instead of only runtime-global lifecycle evidence
+- `B1` strengthen the instrumented-runtime contract so declared signals, observed signals, and missing signals are easier to trust and compare
+- `B2` capture additional real allocator/KV/model lifecycle events from instrumented builds instead of relying mainly on the current small cleanup subset
+- `B3` add true stage-local internal cleanup attribution or hooks where possible, instead of only runtime-global lifecycle evidence feeding cleanup stages
+- `B4` final Track B wording/claim-boundary pass once the deeper instrumentation work lands and the real evidence ceiling is known
 
 ### Track C: CUDA / NVIDIA Inspection
 
 Estimated remaining:
 
-- `3-6` commits
+- `3-5` commits
 
-Expected areas:
+Rough commit guide:
 
-- stronger Windows/NVIDIA inspection truth
-- API-level or driver-level investigation beyond current host-tool reporting
-- tighter claim boundaries around PID visibility, allocation visibility, and allocator unknowns
+- `C1` strengthen Windows/NVIDIA collection and reporting around what is actually driver-visible versus only CLI-visible for the current PID
+- `C2` add one deeper API-level or driver-level inspection path beyond today’s host-tool chain if it materially improves truth
+- `C3` tighten allocator/context unknowns so the report says exactly where process-level GPU visibility stops
+- `C4` compare competing GPU evidence backends cleanly in one report path and remove duplicated or conflicting wording
+- `C5` final Windows/NVIDIA validation and claim-boundary pass against a real machine/runtime combination
 
 ### Track D: Experimental Cleanup / Sanitization
 
 Estimated remaining:
 
-- `0` commits
+- `1-3` commits
 
-Expected areas:
+Rough commit guide:
 
-- only add or keep cleanup stages that produce better evidence
-- possibly one or two more invasive experiments if they materially improve truth
-- tighten stage-selection interpretation after more repeated runs
+- `D1` aggregate repeated cleanup-stage effectiveness more explicitly so the system can say which stages actually help rather than only which stage won a single run
+- `D2` add one more invasive cleanup experiment only if it improves evidence quality instead of just increasing stage count
+- `D3` prune or demote low-value stages and tighten final selection logic once repeated results make the weak stages obvious
 
 ### Track E: Validation and Release Gating
 
 Estimated remaining:
 
-- `0` commits
+- `1-2` commits
 
-Expected areas:
+Rough commit guide:
 
-- keep recommendation and gate semantics honest as more runs accumulate
-- tune repeated-evidence thresholds against real history
-- finish final release-gating semantics and wording
+- `E1` tune repeated-evidence thresholds, recommendation ordering, and clean-stage gate semantics against more real history
+- `E2` freeze final release-gating semantics and operator wording once Track B/C/D evidence settles
 
 ### Cross-Cutting Extra Work
 
 Estimated remaining:
 
-- `6-10` commits
+- `4-7` commits
 
-Expected areas:
+Rough commit guide:
 
-- connect allocator/KV truth to RAM/VRAM evidence summaries
-- improve capability-matrix wording and consistency
-- close gaps between backend report fields and frontend surfaces
-- make residual-risk summaries more uniform and less repetitive
+- `X1` connect Track B allocator/KV truth more directly into the top-level RAM/VRAM cleanup summaries and residual-risk wording
+- `X2` unify capability-matrix wording with the richer backend evidence classes so the matrix never overstates a track
+- `X3` close remaining backend/frontend field gaps where a report field exists but is still hidden, underexplained, or inconsistently rendered
+- `X4` normalize residual-risk summaries so they are less repetitive and more specific by platform/runtime situation
+- `X5-X7` reserve room for follow-on cross-cutting cleanups that fall out of B/C/D/E work but are too small to deserve their own roadmap track
 
 ### Tests And Validation
 
 Estimated remaining:
 
-- `6-10` commits
+- `5-8` commits
 
-Expected areas:
+Rough commit guide:
 
-- targeted Rust tests for report derivation logic
-- validation-history compatibility coverage for older report shapes
-- manual real-machine verification passes:
-  - macOS
-  - Windows/NVIDIA
-  - repeated canary runs
-  - repeated cleanup-stage runs
+- `T1` targeted Rust tests for allocator/KV report derivation and cleanup-stage selection logic
+- `T2` targeted Rust tests for validation-history aggregation, recommendation ordering, and gate behavior
+- `T3` compatibility coverage for older report shapes and legacy hydration paths
+- `T4` macOS manual validation pass with repeated canary runs and repeated cleanup-stage runs
+- `T5` Windows/NVIDIA manual validation pass for GPU evidence, process memory evidence, and cleanup-stage reporting
+- `T6-T8` reserve room for follow-up test hardening after the major Track B/C work lands and exposes real edge cases
 
 ### Docs And Claim Wording
 
 Estimated remaining:
 
-- `3-5` commits
+- `2-4` commits
 
-Expected areas:
+Rough commit guide:
 
-- freeze README / roadmap / agent wording around final evidence level
-- tighten “best effort” versus “observed directly” language everywhere
-- final operator-facing explanation of what NullContext can and cannot claim
+- `W1` freeze final README/roadmap/AGENTS wording around the actual evidence level reached by Tracks A-E
+- `W2` tighten “best effort”, “observed directly”, “not observed”, and “unsupported” language across reports and UI
+- `W3-W4` reserve room for one or two final docs passes after real-machine validation changes the claim boundaries
 
 ### Packaging And Release Prep
 
@@ -638,25 +640,26 @@ Estimated remaining:
 
 - `4-7` commits
 
-Expected areas:
+Rough commit guide:
 
-- release build checks
-- config/example cleanup
-- frontend/backend startup ergonomics
-- any final packaging scripts or release notes work
+- `P1` release build and startup-path audit across backend/frontend
+- `P2` config/example cleanup so the supported flows are obvious and reproducible
+- `P3` frontend/backend startup ergonomics and failure messaging cleanup
+- `P4` release notes / operator quickstart / minimal packaging checklist
+- `P5-P7` reserve room for platform-specific packaging fixes that usually show up only near the end
 
 ### Cleanup And Final Polish
 
 Estimated remaining:
 
-- `3-5` commits
+- `2-4` commits
 
-Expected areas:
+Rough commit guide:
 
-- delete or simplify stale temporary wording
-- remove low-value duplication in reports/UI
-- final code cleanup after the larger security slices settle
-- final roadmap/checklist closeout
+- `F1` delete stale temporary wording, duplicated explanations, and dead report branches after the larger security slices settle
+- `F2` final code cleanup and small refactors once the report model is stable
+- `F3` roadmap/checklist closeout and final consistency audit across docs/UI/backend
+- `F4` reserve room for one last cleanup pass if late validation reveals rough edges
 
 ---
 
