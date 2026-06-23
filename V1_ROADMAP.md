@@ -388,6 +388,7 @@ Done or largely done:
 - explicit per-stage repeated evidence-support classification in the stage-trend table, not only on the winning recommendation
 - explicit evidence-class-aware ordering for repeated cleanup-stage recommendations and trend tables
 - explicit “best repeated stage” versus “clean stage candidate” semantics
+- validation scorecards and repeated stage trends now preserve whether allocator/KV cleanup evidence was runtime-global-only, declared-but-unobserved, or unavailable, instead of flattening that scope distinction away
 
 ### Remaining v1 Work
 

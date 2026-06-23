@@ -231,6 +231,9 @@ export type MemoryValidationStageScorecard = {
   process_scan_context_scope: string;
   cleanup_signal_support_status: string;
   cleanup_signal_support_summary: string;
+  cleanup_signal_support_scope_status: string;
+  cleanup_signal_support_scope_summary: string;
+  contributing_cleanup_signals: string[];
   controlled_canary_signal_status: string;
   validation_score: number;
   validation_verdict: string;
@@ -394,6 +397,9 @@ export type MemoryValidationStageTrendReportData = {
   cleanup_signal_strong_runs: number;
   cleanup_signal_partial_runs: number;
   cleanup_signal_limited_runs: number;
+  cleanup_signal_runtime_global_only_runs: number;
+  cleanup_signal_declared_only_runs: number;
+  cleanup_signal_scope_unavailable_runs: number;
   stage_local_scan_runs: number;
   stage_local_scan_clear_runs: number;
   stage_local_scan_marker_detection_runs: number;
@@ -403,6 +409,8 @@ export type MemoryValidationStageTrendReportData = {
   latest_validation_verdict: string;
   latest_marker_evidence_status: string;
   latest_cleanup_signal_support_status: string;
+  latest_cleanup_signal_support_scope_status: string;
+  latest_contributing_cleanup_signals: string[];
   latest_process_scan_context_status: string;
   latest_process_scan_context_scope: string;
   evidence_support_status: string;

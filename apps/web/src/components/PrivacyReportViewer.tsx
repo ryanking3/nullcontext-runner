@@ -2464,6 +2464,18 @@ export function PrivacyReportViewer({
                         <div>
                           cleanup signal limited runs: {trend.cleanup_signal_limited_runs}
                         </div>
+                        <div>
+                          cleanup signal runtime-global-only runs:
+                          {" "}{trend.cleanup_signal_runtime_global_only_runs}
+                        </div>
+                        <div>
+                          cleanup signal declared-only runs:
+                          {" "}{trend.cleanup_signal_declared_only_runs}
+                        </div>
+                        <div>
+                          cleanup signal scope unavailable runs:
+                          {" "}{trend.cleanup_signal_scope_unavailable_runs}
+                        </div>
                         <div>stage-local scan runs: {trend.stage_local_scan_runs}</div>
                         <div>
                           stage-local scan clear runs: {trend.stage_local_scan_clear_runs}
@@ -2493,6 +2505,16 @@ export function PrivacyReportViewer({
                         <div>
                           latest cleanup signal support:{" "}
                           {humanizeSnakeCase(trend.latest_cleanup_signal_support_status)}
+                        </div>
+                        <div>
+                          latest cleanup signal scope:{" "}
+                          {humanizeSnakeCase(trend.latest_cleanup_signal_support_scope_status)}
+                        </div>
+                        <div>
+                          latest contributing cleanup signals:{" "}
+                          {trend.latest_contributing_cleanup_signals.length > 0
+                            ? trend.latest_contributing_cleanup_signals.join(", ")
+                            : "none"}
                         </div>
                         <div>
                           latest process scan context:{" "}
@@ -2768,11 +2790,22 @@ export function PrivacyReportViewer({
                         {humanizeSnakeCase(scorecard.cleanup_signal_support_status)}
                       </div>
                       <div>
+                        cleanup signal scope:{" "}
+                        {humanizeSnakeCase(scorecard.cleanup_signal_support_scope_status)}
+                      </div>
+                      <div>
+                        contributing cleanup signals:{" "}
+                        {scorecard.contributing_cleanup_signals.length > 0
+                          ? scorecard.contributing_cleanup_signals.join(", ")
+                          : "none"}
+                      </div>
+                      <div>
                         controlled canary:{" "}
                         {humanizeSnakeCase(scorecard.controlled_canary_signal_status)}
                       </div>
                       <div>{scorecard.summary}</div>
                       <div>{scorecard.cleanup_signal_support_summary}</div>
+                      <div>{scorecard.cleanup_signal_support_scope_summary}</div>
                     </div>
 
                     {scorecard.strengths.length > 0 && (

@@ -1,6 +1,6 @@
 use crate::audit::{
-    LlamaRuntimeIntrospectionReport, MemoryValidationReport, MemoryValidationStageScorecard,
-    PrivacyReport, ProcessScanReport, VramCleanupStrategyStageReport,
+    MemoryValidationReport, MemoryValidationStageScorecard, PrivacyReport, ProcessScanReport,
+    VramCleanupStrategyStageReport,
 };
 
 pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidationReport {
@@ -76,7 +76,6 @@ pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidatio
                 stage,
                 &process_scan_signal_status,
                 &controlled_canary_signal_status,
-                &llama_runtime.introspection,
             )
         })
         .collect::<Vec<_>>();
@@ -225,7 +224,6 @@ fn build_stage_scorecard(
     stage: &VramCleanupStrategyStageReport,
     fallback_process_scan_signal_status: &str,
     controlled_canary_signal_status: &str,
-    introspection: &LlamaRuntimeIntrospectionReport,
 ) -> MemoryValidationStageScorecard {
     let mut score = 0_u32;
     let mut strengths = Vec::new();
@@ -252,10 +250,11 @@ fn build_stage_scorecard(
                 "process_scan_context_unavailable".to_string(),
             )
         };
-    let cleanup_signal_support_status =
-        derive_cleanup_signal_support_status(introspection).to_string();
-    let cleanup_signal_support_summary =
-        cleanup_signal_support_summary(introspection, &cleanup_signal_support_status);
+    let cleanup_signal_support_status = stage.cleanup_signal_support_status.clone();
+    let cleanup_signal_support_summary = stage.cleanup_signal_support_summary.clone();
+    let cleanup_signal_support_scope_status = stage.cleanup_signal_support_scope_status.clone();
+    let cleanup_signal_support_scope_summary = stage.cleanup_signal_support_scope_summary.clone();
+    let contributing_cleanup_signals = stage.contributing_cleanup_signals.clone();
 
     match stage.evidence_improvement_status.as_str() {
         "evidence_improved_pid_no_longer_observed_after_strategy" => {
@@ -452,6 +451,30 @@ fn build_stage_scorecard(
         ),
     }
 
+    match cleanup_signal_support_scope_status.as_str() {
+        "cleanup_signal_scope_runtime_global_only" => gaps.push(
+            "Allocator/KV cleanup evidence for this stage still comes from whole-runtime lifecycle observation rather than a stage-local internal cleanup hook."
+                .to_string(),
+        ),
+        "cleanup_signal_scope_declared_but_not_observed" => gaps.push(
+            "Allocator/KV cleanup evidence for this stage is still only declared by the runtime path and was not directly observed in this run."
+                .to_string(),
+        ),
+        "cleanup_signal_scope_unavailable_due_to_startup_failure"
+        | "cleanup_signal_scope_unavailable" => gaps.push(
+            "NullContext could not derive trustworthy stage-specific allocator/KV cleanup scope for this stage."
+                .to_string(),
+        ),
+        _ => {}
+    }
+
+    if !contributing_cleanup_signals.is_empty() {
+        strengths.push(format!(
+            "The internal cleanup interpretation for this stage was informed by these observed runtime cleanup signals: {}.",
+            contributing_cleanup_signals.join(", ")
+        ));
+    }
+
     match controlled_canary_signal_status {
         "controlled_canary_markers_detected_across_passes" => gaps.push(
             "At least one dedicated controlled canary helper pass still detected its markers in readable llama-server memory."
@@ -490,73 +513,15 @@ fn build_stage_scorecard(
         process_scan_context_scope,
         cleanup_signal_support_status,
         cleanup_signal_support_summary,
+        cleanup_signal_support_scope_status,
+        cleanup_signal_support_scope_summary,
+        contributing_cleanup_signals,
         controlled_canary_signal_status: controlled_canary_signal_status.to_string(),
         validation_score,
         validation_verdict,
         summary,
         strengths,
         gaps,
-    }
-}
-
-fn derive_cleanup_signal_support_status(
-    introspection: &LlamaRuntimeIntrospectionReport,
-) -> &'static str {
-    if introspection.cleanup_path_evidence_status
-        == "cleanup_path_unavailable_due_to_startup_failure"
-    {
-        return "cleanup_signal_support_startup_failed_or_unavailable";
-    }
-
-    let declared_direct_support = introspection
-        .cleanup_signal_matrix
-        .iter()
-        .any(|entry| entry.declared_support_status.contains("available"));
-    let observed_count = [
-        introspection.allocator_reset_observed,
-        introspection.kv_cache_clear_observed,
-        introspection.model_unload_observed,
-    ]
-    .into_iter()
-    .filter(|observed| *observed)
-    .count();
-
-    match observed_count {
-        3 => "cleanup_signal_support_strong",
-        1 | 2 => "cleanup_signal_support_partial",
-        0 if declared_direct_support => "cleanup_signal_support_declared_but_unobserved",
-        0 => "cleanup_signal_support_unavailable",
-        _ => "cleanup_signal_support_unavailable",
-    }
-}
-
-fn cleanup_signal_support_summary(
-    introspection: &LlamaRuntimeIntrospectionReport,
-    status: &str,
-) -> String {
-    match status {
-        "cleanup_signal_support_strong" => {
-            "Allocator reset, KV clear, and model unload cleanup signals were all observed directly for this runtime."
-                .to_string()
-        }
-        "cleanup_signal_support_partial" => format!(
-            "Cleanup-path signal coverage was partial for this runtime: allocator reset observed={}, kv clear observed={}, model unload observed={}.",
-            introspection.allocator_reset_observed,
-            introspection.kv_cache_clear_observed,
-            introspection.model_unload_observed
-        ),
-        "cleanup_signal_support_declared_but_unobserved" => {
-            "This runtime advertised allocator/KV cleanup-signal support, but the current run did not directly observe allocator reset, KV clear, or model unload signals."
-                .to_string()
-        }
-        "cleanup_signal_support_startup_failed_or_unavailable" => {
-            "Cleanup-path introspection was unavailable for this run because startup failed or direct allocator/KV cleanup signals could not be derived."
-                .to_string()
-        }
-        _ => {
-            "This runtime did not provide direct allocator/KV cleanup-path signal support for the current run."
-                .to_string()
-        }
     }
 }
 

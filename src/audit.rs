@@ -200,6 +200,12 @@ pub struct MemoryValidationStageScorecard {
     pub cleanup_signal_support_status: String,
     #[serde(default = "default_cleanup_signal_support_summary")]
     pub cleanup_signal_support_summary: String,
+    #[serde(default = "default_cleanup_signal_support_scope_status")]
+    pub cleanup_signal_support_scope_status: String,
+    #[serde(default = "default_cleanup_signal_support_scope_summary")]
+    pub cleanup_signal_support_scope_summary: String,
+    #[serde(default)]
+    pub contributing_cleanup_signals: Vec<String>,
     #[serde(default = "default_controlled_canary_signal_status")]
     pub controlled_canary_signal_status: String,
     pub validation_score: u32,
@@ -333,6 +339,12 @@ pub struct MemoryValidationStageTrendReport {
     #[serde(default)]
     pub cleanup_signal_limited_runs: u32,
     #[serde(default)]
+    pub cleanup_signal_runtime_global_only_runs: u32,
+    #[serde(default)]
+    pub cleanup_signal_declared_only_runs: u32,
+    #[serde(default)]
+    pub cleanup_signal_scope_unavailable_runs: u32,
+    #[serde(default)]
     pub stage_local_scan_runs: u32,
     #[serde(default)]
     pub stage_local_scan_clear_runs: u32,
@@ -347,6 +359,10 @@ pub struct MemoryValidationStageTrendReport {
     pub latest_marker_evidence_status: String,
     #[serde(default = "default_cleanup_signal_support_status")]
     pub latest_cleanup_signal_support_status: String,
+    #[serde(default = "default_cleanup_signal_support_scope_status")]
+    pub latest_cleanup_signal_support_scope_status: String,
+    #[serde(default)]
+    pub latest_contributing_cleanup_signals: Vec<String>,
     #[serde(default = "default_process_scan_context_status")]
     pub latest_process_scan_context_status: String,
     #[serde(default = "default_process_scan_context_scope")]
