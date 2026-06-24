@@ -404,6 +404,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       parsed.memory_validation_history.controlled_canary_history =
         legacyMemoryValidationHistoryReport().controlled_canary_history;
     }
+    if (parsed.memory_validation_history.cleanup_stage_effectiveness === undefined) {
+      parsed.memory_validation_history.cleanup_stage_effectiveness =
+        legacyMemoryValidationHistoryReport().cleanup_stage_effectiveness;
+    }
     if (parsed.memory_validation_history.cleanup_stage_recommendation === undefined) {
       parsed.memory_validation_history.cleanup_stage_recommendation =
         legacyMemoryValidationHistoryReport().cleanup_stage_recommendation;
@@ -417,6 +421,16 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         ...legacyMemoryValidationStageTrendReport(),
         ...trend,
       }));
+    parsed.memory_validation_history.cleanup_stage_effectiveness = {
+      ...legacyMemoryValidationStageEffectivenessReport(),
+      ...parsed.memory_validation_history.cleanup_stage_effectiveness,
+      stages: (parsed.memory_validation_history.cleanup_stage_effectiveness.stages ?? []).map(
+        (stage) => ({
+          ...legacyMemoryValidationStageEffectivenessEntryReport(),
+          ...stage,
+        })
+      ),
+    };
     parsed.memory_validation_history.cleanup_stage_recommendation = {
       ...legacyMemoryValidationStageRecommendationReport(),
       ...parsed.memory_validation_history.cleanup_stage_recommendation,
@@ -763,6 +777,7 @@ function legacyMemoryValidationHistoryReport() {
     last_recorded_at: null,
     stage_trends: [],
     controlled_canary_history: legacyControlledCanaryHistoryReport(),
+    cleanup_stage_effectiveness: legacyMemoryValidationStageEffectivenessReport(),
     cleanup_stage_recommendation: legacyMemoryValidationStageRecommendationReport(),
     release_gate: legacyValidationReleaseGateReport(),
     summary:
@@ -770,6 +785,44 @@ function legacyMemoryValidationHistoryReport() {
     notes: [
       "Open a newer report to inspect locally persisted validation history for the current model/platform scope.",
     ],
+  };
+}
+
+function legacyMemoryValidationStageEffectivenessReport() {
+  return {
+    summary_status: "cleanup_stage_effectiveness_not_derived",
+    consistently_helpful_count: 0,
+    promising_but_limited_count: 0,
+    ineffective_or_regressive_count: 0,
+    marker_persistent_count: 0,
+    waiting_for_repeated_history_count: 0,
+    stages: [],
+    summary:
+      "This older report did not include an explicit repeated cleanup-stage effectiveness summary.",
+    notes: [
+      "Open a newer report to inspect which cleanup stages actually help over repeated runs in this scope.",
+    ],
+  };
+}
+
+function legacyMemoryValidationStageEffectivenessEntryReport() {
+  return {
+    stage_id: "legacy_stage",
+    stage_label: "Legacy Stage",
+    stage_kind: "legacy",
+    effectiveness_class: "effectiveness_not_derived",
+    evidence_support_status: "recommendation_evidence_not_derived",
+    cleanup_signal_scope_status: "cleanup_signal_scope_unavailable",
+    runs_recorded: 0,
+    avg_validation_score: 0,
+    improved_runs: 0,
+    unchanged_runs: 0,
+    worsened_runs: 0,
+    inconclusive_runs: 0,
+    marker_detection_runs: 0,
+    stage_local_scan_clear_runs: 0,
+    summary:
+      "This older report did not classify repeated cleanup-stage effectiveness for this stage.",
   };
 }
 

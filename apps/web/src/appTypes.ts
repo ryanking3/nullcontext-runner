@@ -307,10 +307,41 @@ export type MemoryValidationHistoryReportData = {
   last_recorded_at?: string | null;
   stage_trends: MemoryValidationStageTrendReportData[];
   controlled_canary_history: ControlledCanaryHistoryReportData;
+  cleanup_stage_effectiveness: MemoryValidationStageEffectivenessReportData;
   cleanup_stage_recommendation: MemoryValidationStageRecommendationReportData;
   release_gate: ValidationReleaseGateReportData;
   summary: string;
   notes: string[];
+};
+
+export type MemoryValidationStageEffectivenessReportData = {
+  summary_status: string;
+  consistently_helpful_count: number;
+  promising_but_limited_count: number;
+  ineffective_or_regressive_count: number;
+  marker_persistent_count: number;
+  waiting_for_repeated_history_count: number;
+  stages: MemoryValidationStageEffectivenessEntryData[];
+  summary: string;
+  notes: string[];
+};
+
+export type MemoryValidationStageEffectivenessEntryData = {
+  stage_id: string;
+  stage_label: string;
+  stage_kind: string;
+  effectiveness_class: string;
+  evidence_support_status: string;
+  cleanup_signal_scope_status: string;
+  runs_recorded: number;
+  avg_validation_score: number;
+  improved_runs: number;
+  unchanged_runs: number;
+  worsened_runs: number;
+  inconclusive_runs: number;
+  marker_detection_runs: number;
+  stage_local_scan_clear_runs: number;
+  summary: string;
 };
 
 export type ValidationReleaseGateReportData = {

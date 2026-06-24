@@ -235,12 +235,49 @@ pub struct MemoryValidationHistoryReport {
     pub stage_trends: Vec<MemoryValidationStageTrendReport>,
     #[serde(default = "default_controlled_canary_history_report")]
     pub controlled_canary_history: ControlledCanaryHistoryReport,
+    #[serde(default = "default_memory_validation_stage_effectiveness_report")]
+    pub cleanup_stage_effectiveness: MemoryValidationStageEffectivenessReport,
     #[serde(default = "default_memory_validation_stage_recommendation_report")]
     pub cleanup_stage_recommendation: MemoryValidationStageRecommendationReport,
     #[serde(default = "default_validation_release_gate_report")]
     pub release_gate: ValidationReleaseGateReport,
     pub summary: String,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryValidationStageEffectivenessReport {
+    pub summary_status: String,
+    pub consistently_helpful_count: u32,
+    pub promising_but_limited_count: u32,
+    pub ineffective_or_regressive_count: u32,
+    pub marker_persistent_count: u32,
+    pub waiting_for_repeated_history_count: u32,
+    #[serde(default)]
+    pub stages: Vec<MemoryValidationStageEffectivenessEntry>,
+    pub summary: String,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryValidationStageEffectivenessEntry {
+    pub stage_id: String,
+    pub stage_label: String,
+    pub stage_kind: String,
+    pub effectiveness_class: String,
+    #[serde(default = "default_memory_validation_stage_recommendation_evidence_support_status")]
+    pub evidence_support_status: String,
+    #[serde(default = "default_cleanup_signal_support_scope_status")]
+    pub cleanup_signal_scope_status: String,
+    pub runs_recorded: u32,
+    pub avg_validation_score: f64,
+    pub improved_runs: u32,
+    pub unchanged_runs: u32,
+    pub worsened_runs: u32,
+    pub inconclusive_runs: u32,
+    pub marker_detection_runs: u32,
+    pub stage_local_scan_clear_runs: u32,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4409,6 +4446,7 @@ fn default_memory_validation_history_report() -> MemoryValidationHistoryReport {
         last_recorded_at: None,
         stage_trends: vec![],
         controlled_canary_history: default_controlled_canary_history_report(),
+        cleanup_stage_effectiveness: default_memory_validation_stage_effectiveness_report(),
         cleanup_stage_recommendation: default_memory_validation_stage_recommendation_report(),
         release_gate: default_validation_release_gate_report(),
         summary:
@@ -4416,6 +4454,26 @@ fn default_memory_validation_history_report() -> MemoryValidationHistoryReport {
                 .to_string(),
         notes: vec![
             "Older reports may not include the cross-session memory-validation history section."
+                .to_string(),
+        ],
+    }
+}
+
+fn default_memory_validation_stage_effectiveness_report() -> MemoryValidationStageEffectivenessReport
+{
+    MemoryValidationStageEffectivenessReport {
+        summary_status: "cleanup_stage_effectiveness_not_derived".to_string(),
+        consistently_helpful_count: 0,
+        promising_but_limited_count: 0,
+        ineffective_or_regressive_count: 0,
+        marker_persistent_count: 0,
+        waiting_for_repeated_history_count: 0,
+        stages: vec![],
+        summary:
+            "NullContext had not yet derived explicit repeated cleanup-stage effectiveness classes for this scope."
+                .to_string(),
+        notes: vec![
+            "Older reports may not include the repeated cleanup-stage effectiveness summary."
                 .to_string(),
         ],
     }

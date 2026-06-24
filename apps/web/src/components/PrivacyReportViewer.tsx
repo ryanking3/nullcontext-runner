@@ -2536,6 +2536,135 @@ export function PrivacyReportViewer({
               )}
             </details>
 
+            <details className="report-detail">
+              <summary>
+                cleanup stage effectiveness (
+                {
+                  currentReport.memory_validation_history.cleanup_stage_effectiveness.stages
+                    .length
+                }
+                )
+              </summary>
+              {currentReport.memory_validation_history.cleanup_stage_effectiveness.stages.length ===
+              0 ? (
+                <p className="muted-text">
+                  no repeated cleanup-stage effectiveness summary available yet
+                </p>
+              ) : (
+                <>
+                  <ReportGrid
+                    entries={[
+                      {
+                        label: "summary status",
+                        value: humanizeSnakeCase(
+                          currentReport.memory_validation_history.cleanup_stage_effectiveness
+                            .summary_status
+                        ),
+                      },
+                      {
+                        label: "consistently helpful",
+                        value: String(
+                          currentReport.memory_validation_history.cleanup_stage_effectiveness
+                            .consistently_helpful_count
+                        ),
+                      },
+                      {
+                        label: "promising but limited",
+                        value: String(
+                          currentReport.memory_validation_history.cleanup_stage_effectiveness
+                            .promising_but_limited_count
+                        ),
+                      },
+                      {
+                        label: "ineffective or regressive",
+                        value: String(
+                          currentReport.memory_validation_history.cleanup_stage_effectiveness
+                            .ineffective_or_regressive_count
+                        ),
+                      },
+                      {
+                        label: "marker persistent",
+                        value: String(
+                          currentReport.memory_validation_history.cleanup_stage_effectiveness
+                            .marker_persistent_count
+                        ),
+                      },
+                      {
+                        label: "waiting for history",
+                        value: String(
+                          currentReport.memory_validation_history.cleanup_stage_effectiveness
+                            .waiting_for_repeated_history_count
+                        ),
+                      },
+                    ]}
+                  />
+
+                  <p className="report-summary">
+                    {
+                      currentReport.memory_validation_history.cleanup_stage_effectiveness
+                        .summary
+                    }
+                  </p>
+
+                  <div className="report-list">
+                    {currentReport.memory_validation_history.cleanup_stage_effectiveness.stages.map(
+                      (stage) => (
+                        <div
+                          className="report-item"
+                          key={`effectiveness-${stage.stage_id}`}
+                        >
+                          <div className="report-item-header">
+                            <strong>{stage.stage_label}</strong>
+                            <span className={inspectionStatusClass(stage.effectiveness_class)}>
+                              {humanizeSnakeCase(stage.effectiveness_class)}
+                            </span>
+                          </div>
+                          <div className="report-path-list">
+                            <div>stage id: {stage.stage_id}</div>
+                            <div>kind: {humanizeSnakeCase(stage.stage_kind)}</div>
+                            <div>runs recorded: {stage.runs_recorded}</div>
+                            <div>
+                              avg validation score: {stage.avg_validation_score.toFixed(1)}/100
+                            </div>
+                            <div>
+                              evidence support:{" "}
+                              {humanizeSnakeCase(stage.evidence_support_status)}
+                            </div>
+                            <div>
+                              cleanup signal scope:{" "}
+                              {humanizeSnakeCase(stage.cleanup_signal_scope_status)}
+                            </div>
+                            <div>improved runs: {stage.improved_runs}</div>
+                            <div>unchanged runs: {stage.unchanged_runs}</div>
+                            <div>worsened runs: {stage.worsened_runs}</div>
+                            <div>inconclusive runs: {stage.inconclusive_runs}</div>
+                            <div>marker-detection runs: {stage.marker_detection_runs}</div>
+                            <div>
+                              stage-local clear runs: {stage.stage_local_scan_clear_runs}
+                            </div>
+                            <div>{stage.summary}</div>
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+
+                  {currentReport.memory_validation_history.cleanup_stage_effectiveness.notes
+                    .length > 0 && (
+                    <ul className="report-note-list">
+                      {currentReport.memory_validation_history.cleanup_stage_effectiveness.notes.map(
+                        (note, index) => (
+                          <li key={`memory-validation-effectiveness-note-${index}`}>
+                            {note}
+                          </li>
+                        )
+                      )}
+                    </ul>
+                  )}
+                </>
+              )}
+            </details>
+
             {currentReport.memory_validation_history.notes.length > 0 && (
               <details className="report-detail">
                 <summary>

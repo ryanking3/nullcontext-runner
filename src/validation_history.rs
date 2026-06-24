@@ -1,5 +1,6 @@
 use crate::audit::{
-    MemoryValidationHistoryReport, MemoryValidationStageRecommendationReport,
+    MemoryValidationHistoryReport, MemoryValidationStageEffectivenessEntry,
+    MemoryValidationStageEffectivenessReport, MemoryValidationStageRecommendationReport,
     MemoryValidationStageTrendReport, PrivacyReport, ValidationReleaseGateReport,
 };
 use anyhow::{Context, Result};
@@ -61,6 +62,25 @@ fn default_cleanup_signal_support_status() -> String {
 
 fn default_cleanup_signal_support_scope_status() -> String {
     "cleanup_signal_scope_unavailable".to_string()
+}
+
+fn default_stage_effectiveness_report() -> MemoryValidationStageEffectivenessReport {
+    MemoryValidationStageEffectivenessReport {
+        summary_status: "cleanup_stage_effectiveness_not_derived".to_string(),
+        consistently_helpful_count: 0,
+        promising_but_limited_count: 0,
+        ineffective_or_regressive_count: 0,
+        marker_persistent_count: 0,
+        waiting_for_repeated_history_count: 0,
+        stages: vec![],
+        summary:
+            "NullContext had not yet derived explicit repeated cleanup-stage effectiveness classes for this scope."
+                .to_string(),
+        notes: vec![
+            "Older reports may not include the repeated cleanup-stage effectiveness summary."
+                .to_string(),
+        ],
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +155,7 @@ pub fn apply_and_record_memory_validation_history(
                 last_recorded_at: None,
                 stage_trends: vec![],
                 controlled_canary_history: build_controlled_canary_history(&[]),
+                cleanup_stage_effectiveness: default_stage_effectiveness_report(),
                 cleanup_stage_recommendation:
                     default_stage_recommendation_report("history_registry_unavailable"),
                 release_gate: default_release_gate_report(),
@@ -276,6 +297,7 @@ fn build_history_report_from_registry(
             last_recorded_at: None,
             stage_trends: vec![],
             controlled_canary_history: build_controlled_canary_history(&[]),
+            cleanup_stage_effectiveness: default_stage_effectiveness_report(),
             cleanup_stage_recommendation: default_stage_recommendation_report(
                 "history_scope_empty",
             ),
@@ -338,10 +360,12 @@ fn build_history_report_from_registry(
     };
     let stage_trends = build_stage_trends(&matching_entries);
     let controlled_canary_history = build_controlled_canary_history(&matching_entries);
+    let cleanup_stage_effectiveness = build_stage_effectiveness_report(&stage_trends);
     let cleanup_stage_recommendation = build_stage_recommendation(&stage_trends);
     let release_gate =
         build_release_gate(&cleanup_stage_recommendation, &controlled_canary_history);
     let canary_summary = controlled_canary_history.summary.clone();
+    let cleanup_stage_effectiveness_summary = cleanup_stage_effectiveness.summary.clone();
     let recommendation_summary = cleanup_stage_recommendation.summary.clone();
     let release_gate_summary = release_gate.summary.clone();
 
@@ -368,10 +392,11 @@ fn build_history_report_from_registry(
         last_recorded_at: matching_entries.first().map(|entry| entry.recorded_at.clone()),
         stage_trends,
         controlled_canary_history,
+        cleanup_stage_effectiveness,
         cleanup_stage_recommendation,
         release_gate,
         summary: format!(
-            "NullContext has recorded {} validation run(s) for scope {}. {} run(s) still showed marker-detection evidence, {} run(s) achieved fully clear repeated canary passes, and the best-stage score average is {}. {} {} {}",
+            "NullContext has recorded {} validation run(s) for scope {}. {} run(s) still showed marker-detection evidence, {} run(s) achieved fully clear repeated canary passes, and the best-stage score average is {}. {} {} {} {}",
             runs_recorded,
             history_scope_label(report),
             marker_detection_runs,
@@ -380,6 +405,7 @@ fn build_history_report_from_registry(
                 .map(|value| format!("{value:.1}/100"))
                 .unwrap_or_else(|| "unavailable".to_string()),
             canary_summary,
+            cleanup_stage_effectiveness_summary,
             recommendation_summary,
             release_gate_summary
         ),
@@ -389,6 +415,192 @@ fn build_history_report_from_registry(
             "Cross-session history is local-only and stores compact validation metadata rather than prompt/response content."
                 .to_string(),
         ],
+    }
+}
+
+fn build_stage_effectiveness_report(
+    stage_trends: &[MemoryValidationStageTrendReport],
+) -> MemoryValidationStageEffectivenessReport {
+    if stage_trends.is_empty() {
+        return MemoryValidationStageEffectivenessReport {
+            summary_status: "cleanup_stage_effectiveness_waiting_for_history".to_string(),
+            consistently_helpful_count: 0,
+            promising_but_limited_count: 0,
+            ineffective_or_regressive_count: 0,
+            marker_persistent_count: 0,
+            waiting_for_repeated_history_count: 0,
+            stages: vec![],
+            summary:
+                "No repeated cleanup-stage trends are available yet, so NullContext cannot classify which cleanup stages actually help in this scope."
+                    .to_string(),
+            notes: vec![
+                "Repeated cleanup-stage effectiveness becomes meaningful only after at least one cleanup stage has history in the current model/platform/GPU-offload scope."
+                    .to_string(),
+            ],
+        };
+    }
+
+    let mut consistently_helpful_count = 0_u32;
+    let mut promising_but_limited_count = 0_u32;
+    let mut ineffective_or_regressive_count = 0_u32;
+    let mut marker_persistent_count = 0_u32;
+    let mut waiting_for_repeated_history_count = 0_u32;
+
+    let mut stages = stage_trends
+        .iter()
+        .map(|trend| {
+            let effectiveness_class = classify_stage_effectiveness(trend).to_string();
+            match effectiveness_class.as_str() {
+                "effectiveness_consistently_helpful" => {
+                    consistently_helpful_count = consistently_helpful_count.saturating_add(1);
+                }
+                "effectiveness_promising_but_limited" => {
+                    promising_but_limited_count = promising_but_limited_count.saturating_add(1);
+                }
+                "effectiveness_marker_persistent" => {
+                    marker_persistent_count = marker_persistent_count.saturating_add(1);
+                }
+                "effectiveness_waiting_for_repeated_history" => {
+                    waiting_for_repeated_history_count =
+                        waiting_for_repeated_history_count.saturating_add(1);
+                }
+                _ => {
+                    ineffective_or_regressive_count =
+                        ineffective_or_regressive_count.saturating_add(1);
+                }
+            }
+
+            let summary = match effectiveness_class.as_str() {
+                "effectiveness_consistently_helpful" => format!(
+                    "{} repeatedly improves or preserves the strongest observed cleanup outcomes in this scope without repeated marker persistence or regressions.",
+                    trend.stage_label
+                ),
+                "effectiveness_promising_but_limited" => format!(
+                    "{} shows some repeated improvement signals, but its evidence is still limited by scope, incomplete marker support, or mixed cleanup-signal context.",
+                    trend.stage_label
+                ),
+                "effectiveness_marker_persistent" => format!(
+                    "{} still has repeated marker persistence in its history, so NullContext should not treat it as a stage that actually helps yet.",
+                    trend.stage_label
+                ),
+                "effectiveness_waiting_for_repeated_history" => format!(
+                    "{} does not have enough repeated history yet for NullContext to classify whether it actually helps in this scope.",
+                    trend.stage_label
+                ),
+                _ => format!(
+                    "{} is currently ineffective, regressive, or too inconsistent to count as a helpful cleanup stage in this scope.",
+                    trend.stage_label
+                ),
+            };
+
+            MemoryValidationStageEffectivenessEntry {
+                stage_id: trend.stage_id.clone(),
+                stage_label: trend.stage_label.clone(),
+                stage_kind: trend.stage_kind.clone(),
+                effectiveness_class,
+                evidence_support_status: trend.evidence_support_status.clone(),
+                cleanup_signal_scope_status: trend.latest_cleanup_signal_support_scope_status.clone(),
+                runs_recorded: trend.runs_recorded,
+                avg_validation_score: trend.avg_validation_score,
+                improved_runs: trend.improved_runs,
+                unchanged_runs: trend.unchanged_runs,
+                worsened_runs: trend.worsened_runs,
+                inconclusive_runs: trend.inconclusive_runs,
+                marker_detection_runs: trend.marker_detection_runs,
+                stage_local_scan_clear_runs: trend.stage_local_scan_clear_runs,
+                summary,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    stages.sort_by(|a, b| {
+        stage_effectiveness_class_priority(&b.effectiveness_class)
+            .cmp(&stage_effectiveness_class_priority(&a.effectiveness_class))
+            .then_with(|| b.avg_validation_score.total_cmp(&a.avg_validation_score))
+            .then_with(|| b.runs_recorded.cmp(&a.runs_recorded))
+    });
+
+    let summary_status = if consistently_helpful_count > 0 {
+        "cleanup_stage_effectiveness_has_consistently_helpful_stage"
+    } else if promising_but_limited_count > 0 {
+        "cleanup_stage_effectiveness_only_promising_stages"
+    } else if marker_persistent_count > 0 {
+        "cleanup_stage_effectiveness_blocked_by_marker_persistence"
+    } else if waiting_for_repeated_history_count == stage_trends.len() as u32 {
+        "cleanup_stage_effectiveness_waiting_for_history"
+    } else {
+        "cleanup_stage_effectiveness_no_helpful_stage_confirmed"
+    };
+
+    let summary = format!(
+        "Repeated cleanup-stage effectiveness in this scope currently classifies {} stage(s) as consistently helpful, {} as promising but limited, {} as ineffective or regressive, {} as marker-persistent, and {} as still waiting for enough repeated history.",
+        consistently_helpful_count,
+        promising_but_limited_count,
+        ineffective_or_regressive_count,
+        marker_persistent_count,
+        waiting_for_repeated_history_count
+    );
+
+    let notes = vec![
+        "This summary is meant to answer which cleanup stages actually help over time in the current model/platform/GPU-offload scope, not just which stage won one report."
+            .to_string(),
+        "A stage is only treated as consistently helpful here when repeated history stays free of repeated marker persistence, regressions, and major inconclusive gaps."
+            .to_string(),
+    ];
+
+    MemoryValidationStageEffectivenessReport {
+        summary_status: summary_status.to_string(),
+        consistently_helpful_count,
+        promising_but_limited_count,
+        ineffective_or_regressive_count,
+        marker_persistent_count,
+        waiting_for_repeated_history_count,
+        stages,
+        summary,
+        notes,
+    }
+}
+
+fn classify_stage_effectiveness(trend: &MemoryValidationStageTrendReport) -> &'static str {
+    if trend.runs_recorded < 2 {
+        return "effectiveness_waiting_for_repeated_history";
+    }
+    if trend.marker_detection_runs > 0 {
+        return "effectiveness_marker_persistent";
+    }
+    if trend.worsened_runs > 0 && trend.improved_runs == 0 && trend.strong_or_moderate_runs == 0 {
+        return "effectiveness_ineffective_or_regressive";
+    }
+    if trend.stage_local_scan_clear_runs > 0
+        && trend.improved_runs > 0
+        && trend.worsened_runs == 0
+        && trend.inconclusive_runs == 0
+        && matches!(
+            trend.evidence_support_status.as_str(),
+            "recommendation_evidence_supported_by_stage_local_marker_clearance"
+                | "recommendation_evidence_supported_by_marker_clearance_history"
+        )
+    {
+        return "effectiveness_consistently_helpful";
+    }
+    if trend.improved_runs > 0
+        || trend.strong_or_moderate_runs > 0
+        || trend.clear_marker_support_runs > 0
+        || trend.helper_scan_clear_runs > 0
+    {
+        return "effectiveness_promising_but_limited";
+    }
+    "effectiveness_ineffective_or_regressive"
+}
+
+fn stage_effectiveness_class_priority(effectiveness_class: &str) -> u8 {
+    match effectiveness_class {
+        "effectiveness_consistently_helpful" => 4,
+        "effectiveness_promising_but_limited" => 3,
+        "effectiveness_waiting_for_repeated_history" => 2,
+        "effectiveness_ineffective_or_regressive" => 1,
+        "effectiveness_marker_persistent" => 0,
+        _ => 0,
     }
 }
 

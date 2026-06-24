@@ -390,6 +390,7 @@ Done or largely done:
 - explicit “best repeated stage” versus “clean stage candidate” semantics
 - validation scorecards and repeated stage trends now preserve whether allocator/KV cleanup evidence was runtime-global-only, declared-but-unobserved, or unavailable, instead of flattening that scope distinction away
 - repeated cleanup-stage recommendations and release gating now also distinguish runtime-global-only cleanup-signal evidence from stage-local marker-backed evidence, so cleanup-signal-only wins no longer sound stronger than they are
+- cross-session validation history now also produces an explicit repeated cleanup-stage effectiveness summary, classifying which stages are consistently helpful, only promising, ineffective/regressive, marker-persistent, or still waiting on enough history
 
 ### Remaining v1 Work
 
@@ -519,7 +520,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `7-15` commits
+- core security/evidence work across Tracks A-E: `6-14` commits
 - cross-cutting extra work: `4-7` commits
 - tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
@@ -528,7 +529,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `24-45` commits
+- `23-44` commits
 
 ### Track Breakdown
 
@@ -575,11 +576,11 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `1-3` commits
+- `0-2` commits
 
 Rough commit guide:
 
-- `D1` aggregate repeated cleanup-stage effectiveness more explicitly so the system can say which stages actually help rather than only which stage won a single run
+- `D1` completed: repeated cleanup-stage effectiveness is now aggregated explicitly so the report can say which stages actually help over time instead of only showing a winning recommendation
 - `D2` add one more invasive cleanup experiment only if it improves evidence quality instead of just increasing stage count
 - `D3` prune or demote low-value stages and tighten final selection logic once repeated results make the weak stages obvious
 
