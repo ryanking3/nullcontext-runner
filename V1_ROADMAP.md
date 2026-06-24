@@ -389,6 +389,7 @@ Done or largely done:
 - explicit evidence-class-aware ordering for repeated cleanup-stage recommendations and trend tables
 - explicit “best repeated stage” versus “clean stage candidate” semantics
 - validation scorecards and repeated stage trends now preserve whether allocator/KV cleanup evidence was runtime-global-only, declared-but-unobserved, or unavailable, instead of flattening that scope distinction away
+- repeated cleanup-stage recommendations and release gating now also distinguish runtime-global-only cleanup-signal evidence from stage-local marker-backed evidence, so cleanup-signal-only wins no longer sound stronger than they are
 
 ### Remaining v1 Work
 
@@ -518,7 +519,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `8-17` commits
+- core security/evidence work across Tracks A-E: `7-15` commits
 - cross-cutting extra work: `4-7` commits
 - tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
@@ -527,7 +528,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `25-47` commits
+- `24-45` commits
 
 ### Track Breakdown
 
@@ -535,11 +536,11 @@ Estimated total remaining before `v1`:
 
 Estimated remaining:
 
-- `1-3` commits
+- `0-2` commits
 
 Rough commit guide:
 
-- `A1` tighten repeated stage-local versus session-fallback scan interpretation in validation history, recommendation logic, and UI wording
+- `A1` completed: repeated stage-local versus session-fallback scan interpretation is now tighter in validation history, recommendation logic, and gate wording
 - `A2` add one more genuinely useful process-scan backend or platform path only if it produces operator-visible evidence rather than another unsupported stub
 - `A3` final pass on process-scan claim boundaries, skipped-scan semantics, and report consistency if the first two commits expose wording gaps
 
@@ -586,11 +587,11 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `1-2` commits
+- `0-1` commits
 
 Rough commit guide:
 
-- `E1` tune repeated-evidence thresholds, recommendation ordering, and clean-stage gate semantics against more real history
+- `E1` completed: repeated-evidence ordering and gate semantics now distinguish runtime-global-only cleanup-signal support from stronger stage-local marker-backed evidence
 - `E2` freeze final release-gating semantics and operator wording once Track B/C/D evidence settles
 
 ### Cross-Cutting Extra Work

@@ -613,6 +613,15 @@ fn build_stage_trends(
                 && accumulator.session_fallback_scan_runs > 0
             {
                 "recommendation_evidence_limited_to_session_fallback_scans"
+            } else if accumulator.cleanup_signal_runtime_global_only_runs > 0
+                && accumulator.cleanup_signal_runtime_global_only_runs
+                    + accumulator.cleanup_signal_declared_only_runs
+                    + accumulator.cleanup_signal_scope_unavailable_runs
+                    == accumulator.runs_recorded
+                && accumulator.clear_marker_support_runs == 0
+                && accumulator.stage_local_scan_clear_runs == 0
+            {
+                "recommendation_evidence_limited_to_runtime_global_cleanup_signals"
             } else if accumulator.cleanup_signal_strong_runs > 0
                 || accumulator.cleanup_signal_partial_runs > 0
             {
@@ -629,6 +638,10 @@ fn build_stage_trends(
                 ),
                 "recommendation_evidence_supported_by_marker_clearance_history" => format!(
                     "{} is backed by repeated clear marker history, but that support is not yet entirely stage-local across all recorded runs.",
+                    stage_label
+                ),
+                "recommendation_evidence_limited_to_runtime_global_cleanup_signals" => format!(
+                    "{} is currently supported by repeated allocator/KV/model cleanup signals, but that support is still runtime-global-only rather than stage-local to the winning cleanup stage.",
                     stage_label
                 ),
                 "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance" => format!(
@@ -1070,6 +1083,15 @@ fn build_stage_recommendation(
         "recommendation_evidence_limited_by_inconclusive_history"
     } else if trend.stage_local_scan_runs == 0 && trend.session_fallback_scan_runs > 0 {
         "recommendation_evidence_limited_to_session_fallback_scans"
+    } else if trend.cleanup_signal_runtime_global_only_runs > 0
+        && trend.cleanup_signal_runtime_global_only_runs
+            + trend.cleanup_signal_declared_only_runs
+            + trend.cleanup_signal_scope_unavailable_runs
+            == trend.runs_recorded
+        && trend.clear_marker_support_runs == 0
+        && trend.stage_local_scan_clear_runs == 0
+    {
+        "recommendation_evidence_limited_to_runtime_global_cleanup_signals"
     } else if trend.cleanup_signal_strong_runs > 0 || trend.cleanup_signal_partial_runs > 0 {
         "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance"
     } else if trend.strong_or_moderate_runs > 0 || trend.improved_runs > 0 {
@@ -1128,6 +1150,10 @@ fn build_stage_recommendation(
         ),
         "recommendation_evidence_supported_by_marker_clearance_history" => notes.push(
             "The leading stage is backed by repeated clear marker history, but some of that support still comes from helper or broader repeated evidence instead of only stage-local scans."
+                .to_string(),
+        ),
+        "recommendation_evidence_limited_to_runtime_global_cleanup_signals" => notes.push(
+            "The leading stage is backed by repeated allocator/KV/model cleanup signals, but those signals still belong to whole-runtime lifecycle evidence rather than a stage-local internal cleanup hook."
                 .to_string(),
         ),
         "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance" => notes.push(
@@ -1289,6 +1315,10 @@ fn build_stage_recommendation(
             "{} is currently backed by repeated clear marker history, but that support is not yet entirely stage-local in every repeated run.",
             trend.stage_label
         ),
+        "recommendation_evidence_limited_to_runtime_global_cleanup_signals" => format!(
+            "{} is currently backed by repeated allocator/KV/model cleanup signals, but those signals are still runtime-global-only and do not yet prove that the winning cleanup stage itself triggered stage-local internal cleanup.",
+            trend.stage_label
+        ),
         "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance" => format!(
             "{} is currently supported by repeated allocator/KV/model cleanup-path signals, but it still lacks equally strong repeated direct marker-clearance evidence.",
             trend.stage_label
@@ -1402,6 +1432,9 @@ fn build_release_gate(
         {
             "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance" => {
                 "cleanup_stage_gate_blocked_by_cleanup_signal_only_evidence"
+            }
+            "recommendation_evidence_limited_to_runtime_global_cleanup_signals" => {
+                "cleanup_stage_gate_blocked_by_runtime_global_cleanup_signal_evidence"
             }
             "recommendation_evidence_gpu_only_without_marker_support" => {
                 "cleanup_stage_gate_blocked_by_gpu_only_recommendation_evidence"
@@ -1590,8 +1623,9 @@ fn stage_evidence_support_priority(status: &str) -> u8 {
         "recommendation_evidence_supported_by_stage_local_marker_clearance" => 7,
         "recommendation_evidence_supported_by_marker_clearance_history" => 6,
         "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance" => 5,
-        "recommendation_evidence_gpu_only_without_marker_support" => 4,
-        "recommendation_evidence_limited_to_session_fallback_scans" => 3,
+        "recommendation_evidence_limited_to_runtime_global_cleanup_signals" => 4,
+        "recommendation_evidence_gpu_only_without_marker_support" => 3,
+        "recommendation_evidence_limited_to_session_fallback_scans" => 2,
         "recommendation_evidence_limited_by_inconclusive_history" => 2,
         "recommendation_evidence_waiting_for_repeated_runs" => 1,
         "recommendation_evidence_limited_mixed_history" => 1,
