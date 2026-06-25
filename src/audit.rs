@@ -640,6 +640,10 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub instrumentation_backend: String,
     pub declared_signal_ids: Vec<String>,
     pub declared_cleanup_signal_ids: Vec<String>,
+    #[serde(default)]
+    pub missing_declared_signal_ids: Vec<String>,
+    #[serde(default)]
+    pub undeclared_observed_signal_ids: Vec<String>,
     pub lifecycle_signal_evidence_tier: String,
     pub signal_contract_status: String,
     pub signal_contract_summary: String,
@@ -654,6 +658,10 @@ pub struct LlamaRuntimeIntrospectionReport {
     pub cleanup_signal_coverage_status: String,
     pub cleanup_signal_contract_status: String,
     pub cleanup_signal_contract_summary: String,
+    #[serde(default)]
+    pub missing_declared_cleanup_signal_ids: Vec<String>,
+    #[serde(default)]
+    pub undeclared_observed_cleanup_signal_ids: Vec<String>,
     pub declared_cleanup_signal_count: u32,
     pub observed_cleanup_signal_count: u32,
     pub missing_declared_cleanup_signal_count: u32,
@@ -2429,6 +2437,8 @@ fn build_llama_runtime_introspection_report(
                 instrumentation_backend: "none".to_string(),
                 declared_signal_ids: vec![],
                 declared_cleanup_signal_ids: vec![],
+                missing_declared_signal_ids: vec![],
+                undeclared_observed_signal_ids: vec![],
                 lifecycle_signal_evidence_tier: "introspection_capability_load_failed"
                     .to_string(),
                 signal_contract_status: if startup_failed {
@@ -2486,6 +2496,8 @@ fn build_llama_runtime_introspection_report(
                     "NullContext could not derive a cleanup-signal contract comparison because runtime capability loading failed."
                         .to_string()
                 },
+                missing_declared_cleanup_signal_ids: vec![],
+                undeclared_observed_cleanup_signal_ids: vec![],
                 declared_cleanup_signal_count: 0,
                 observed_cleanup_signal_count: 0,
                 missing_declared_cleanup_signal_count: 0,
@@ -2596,12 +2608,18 @@ fn build_llama_runtime_introspection_report(
         })
         .map(|signal| signal.event.clone())
         .collect::<BTreeSet<_>>();
+    let missing_declared_signal_ids = declared_signal_ids
+        .difference(&observed_signal_ids)
+        .cloned()
+        .collect::<Vec<_>>();
+    let undeclared_observed_signal_ids = observed_signal_ids
+        .difference(&declared_signal_ids)
+        .cloned()
+        .collect::<Vec<_>>();
     let declared_signal_count = declared_signal_ids.len() as u32;
     let observed_signal_unique_count = observed_signal_ids.len() as u32;
-    let missing_declared_signal_count =
-        declared_signal_ids.difference(&observed_signal_ids).count() as u32;
-    let undeclared_observed_signal_count =
-        observed_signal_ids.difference(&declared_signal_ids).count() as u32;
+    let missing_declared_signal_count = missing_declared_signal_ids.len() as u32;
+    let undeclared_observed_signal_count = undeclared_observed_signal_ids.len() as u32;
     let observed_signal_sources = observed_signal_sources(observed_signals);
     let observed_kv_initialized = observed_signals
         .iter()
@@ -2951,28 +2969,35 @@ fn build_llama_runtime_introspection_report(
             startup_failed,
         ),
     ];
+    let declared_cleanup_signal_ids = cleanup_signal_matrix
+        .iter()
+        .filter(|entry| entry.declared_support_status == "declared_signal_support_available")
+        .map(|entry| entry.signal_id.clone())
+        .collect::<BTreeSet<_>>();
+    let observed_cleanup_signal_ids = cleanup_signal_matrix
+        .iter()
+        .filter(|entry| entry.observation_status == "signal_observed")
+        .map(|entry| entry.signal_id.clone())
+        .collect::<BTreeSet<_>>();
+    let missing_declared_cleanup_signal_ids = declared_cleanup_signal_ids
+        .difference(&observed_cleanup_signal_ids)
+        .cloned()
+        .collect::<Vec<_>>();
+    let undeclared_observed_cleanup_signal_ids = observed_cleanup_signal_ids
+        .difference(&declared_cleanup_signal_ids)
+        .cloned()
+        .collect::<Vec<_>>();
     let declared_cleanup_signal_count = cleanup_signal_matrix
         .iter()
-        .filter(|entry| entry.declared_support_status == "declared_supported")
+        .filter(|entry| entry.declared_support_status == "declared_signal_support_available")
         .count() as u32;
     let observed_cleanup_signal_count = cleanup_signal_matrix
         .iter()
         .filter(|entry| entry.observation_status == "signal_observed")
         .count() as u32;
-    let missing_declared_cleanup_signal_count = cleanup_signal_matrix
-        .iter()
-        .filter(|entry| {
-            entry.declared_support_status == "declared_supported"
-                && entry.observation_status != "signal_observed"
-        })
-        .count() as u32;
-    let undeclared_observed_cleanup_signal_count = cleanup_signal_matrix
-        .iter()
-        .filter(|entry| {
-            entry.declared_support_status != "declared_supported"
-                && entry.observation_status == "signal_observed"
-        })
-        .count() as u32;
+    let missing_declared_cleanup_signal_count = missing_declared_cleanup_signal_ids.len() as u32;
+    let undeclared_observed_cleanup_signal_count =
+        undeclared_observed_cleanup_signal_ids.len() as u32;
     let cleanup_signal_contract_status = if startup_failed {
         "cleanup_signal_contract_interrupted_by_startup_failure".to_string()
     } else if declared_cleanup_signal_count == 0 && observed_cleanup_signal_count == 0 {
@@ -3044,6 +3069,8 @@ fn build_llama_runtime_introspection_report(
         instrumentation_backend: capabilities.instrumentation_backend.clone(),
         declared_signal_ids: capabilities.declared_signal_ids.clone(),
         declared_cleanup_signal_ids: capabilities.declared_cleanup_signal_ids.clone(),
+        missing_declared_signal_ids,
+        undeclared_observed_signal_ids,
         lifecycle_signal_evidence_tier,
         signal_contract_status,
         signal_contract_summary,
@@ -3058,6 +3085,8 @@ fn build_llama_runtime_introspection_report(
         cleanup_signal_coverage_status,
         cleanup_signal_contract_status,
         cleanup_signal_contract_summary,
+        missing_declared_cleanup_signal_ids,
+        undeclared_observed_cleanup_signal_ids,
         declared_cleanup_signal_count,
         observed_cleanup_signal_count,
         missing_declared_cleanup_signal_count,

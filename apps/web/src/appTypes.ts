@@ -500,6 +500,8 @@ export type LlamaRuntimeIntrospectionReport = {
   instrumentation_backend: string;
   declared_signal_ids: string[];
   declared_cleanup_signal_ids: string[];
+  missing_declared_signal_ids: string[];
+  undeclared_observed_signal_ids: string[];
   lifecycle_signal_evidence_tier: string;
   signal_contract_status: string;
   signal_contract_summary: string;
@@ -514,6 +516,8 @@ export type LlamaRuntimeIntrospectionReport = {
   cleanup_signal_coverage_status: string;
   cleanup_signal_contract_status: string;
   cleanup_signal_contract_summary: string;
+  missing_declared_cleanup_signal_ids: string[];
+  undeclared_observed_cleanup_signal_ids: string[];
   declared_cleanup_signal_count: number;
   observed_cleanup_signal_count: number;
   missing_declared_cleanup_signal_count: number;

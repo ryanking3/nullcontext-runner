@@ -591,6 +591,8 @@ function legacyLlamaRuntimeIntrospectionReport() {
     instrumentation_backend: "none",
     declared_signal_ids: [],
     declared_cleanup_signal_ids: [],
+    missing_declared_signal_ids: [],
+    undeclared_observed_signal_ids: [],
     lifecycle_signal_evidence_tier: "no_direct_runtime_signal_evidence",
     signal_contract_status: "signal_contract_unavailable",
     signal_contract_summary:
@@ -608,6 +610,8 @@ function legacyLlamaRuntimeIntrospectionReport() {
     cleanup_signal_contract_status: "cleanup_signal_contract_unavailable",
     cleanup_signal_contract_summary:
       "This older report did not compare declared cleanup-signal support with observed cleanup-signal evidence.",
+    missing_declared_cleanup_signal_ids: [],
+    undeclared_observed_cleanup_signal_ids: [],
     declared_cleanup_signal_count: 0,
     observed_cleanup_signal_count: 0,
     missing_declared_cleanup_signal_count: 0,

@@ -1128,11 +1128,31 @@ export function PrivacyReportViewer({
                   ),
                 },
                 {
+                  label: "missing declared runtime ids",
+                  value:
+                    currentReport.llama_runtime.introspection.missing_declared_signal_ids
+                      .length === 0
+                      ? "none"
+                      : currentReport.llama_runtime.introspection.missing_declared_signal_ids.join(
+                          ", "
+                        ),
+                },
+                {
                   label: "undeclared observed runtime signals",
                   value: String(
                     currentReport.llama_runtime.introspection
                       .undeclared_observed_signal_count
                   ),
+                },
+                {
+                  label: "undeclared observed runtime ids",
+                  value:
+                    currentReport.llama_runtime.introspection.undeclared_observed_signal_ids
+                      .length === 0
+                      ? "none"
+                      : currentReport.llama_runtime.introspection.undeclared_observed_signal_ids.join(
+                          ", "
+                        ),
                 },
                 {
                   label: "cleanup-path evidence",
@@ -1178,11 +1198,31 @@ export function PrivacyReportViewer({
                   ),
                 },
                 {
+                  label: "missing declared cleanup ids",
+                  value:
+                    currentReport.llama_runtime.introspection
+                      .missing_declared_cleanup_signal_ids.length === 0
+                      ? "none"
+                      : currentReport.llama_runtime.introspection.missing_declared_cleanup_signal_ids.join(
+                          ", "
+                        ),
+                },
+                {
                   label: "undeclared observed signals",
                   value: String(
                     currentReport.llama_runtime.introspection
                       .undeclared_observed_cleanup_signal_count
                   ),
+                },
+                {
+                  label: "undeclared observed cleanup ids",
+                  value:
+                    currentReport.llama_runtime.introspection
+                      .undeclared_observed_cleanup_signal_ids.length === 0
+                      ? "none"
+                      : currentReport.llama_runtime.introspection.undeclared_observed_cleanup_signal_ids.join(
+                          ", "
+                        ),
                 },
                 {
                   label: "allocator introspection",

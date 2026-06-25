@@ -217,6 +217,7 @@ Done or partially done:
 - the selected VRAM cleanup comparison now also carries allocator/KV cleanup-signal support as first-class report data, and contextualized cleanup-stage selection can treat that support as a future-ready tie-break signal instead of display-only metadata
 - the runtime and cleanup signal matrices now also retain per-signal observation counts, sources, phases, and sample details, so allocator/KV cleanup evidence is less collapsed than before
 - VRAM cleanup stages and the selected-stage comparison now explicitly disclose when allocator/KV cleanup evidence is only runtime-global rather than stage-local, and they list which observed cleanup signals contributed to that interpretation
+- runtime introspection now also carries the actual missing declared and undeclared observed signal IDs for both the full runtime contract and the cleanup-signal subset, so operators can inspect the exact contract gaps instead of only aggregate counts
 
 ### Remaining v1 Work
 
@@ -520,7 +521,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `6-14` commits
+- core security/evidence work across Tracks A-E: `5-13` commits
 - cross-cutting extra work: `4-7` commits
 - tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
@@ -529,7 +530,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `23-44` commits
+- `22-43` commits
 
 ### Track Breakdown
 
@@ -549,11 +550,11 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `2-4` commits
+- `1-3` commits
 
 Rough commit guide:
 
-- `B1` strengthen the instrumented-runtime contract so declared signals, observed signals, and missing signals are easier to trust and compare
+- `B1` completed: the instrumented-runtime contract now exposes the exact missing declared and undeclared observed signal IDs for both runtime and cleanup-signal coverage
 - `B2` capture additional real allocator/KV/model lifecycle events from instrumented builds instead of relying mainly on the current small cleanup subset
 - `B3` add true stage-local internal cleanup attribution or hooks where possible, instead of only runtime-global lifecycle evidence feeding cleanup stages
 - `B4` final Track B wording/claim-boundary pass once the deeper instrumentation work lands and the real evidence ceiling is known
