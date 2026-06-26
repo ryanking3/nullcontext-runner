@@ -104,6 +104,7 @@ NullContext already has meaningful foundations in-tree:
 - runtime reports and the Track C capability matrix now also collapse all of that into one GPU evidence tier that says whether the run reached driver-backed bytes, CLI-backed bytes, PID-only visibility, visibility-limited evidence, or no usable GPU truth
 - runtime reports and the Track C capability matrix now also state the exact Windows/NVIDIA GPU claim boundary for the run instead of relying on one static generic warning
 - runtime reports now also say explicitly that current GPU evidence is still only process-level visibility and does not provide CUDA-context-level or allocator-ownership truth
+- Windows/NVIDIA backend selection now keeps the decisive byte-visible backend authoritative and no longer stops early on weaker PID-only fallback evidence, which avoids overstating NVML-backed byte visibility when stronger evidence actually came from a later CLI backend
 - repeated cleanup-stage recommendations now explicitly classify whether the current “best stage” is backed by stage-local clear marker scans, broader marker-clearance history, cleanup-signal-only support, GPU-only improvement trends, or still-limited repeated evidence
 - repeated release-gating now also requires marker-backed cleanup-stage recommendation evidence instead of treating GPU-only or cleanup-signal-only stage wins as equally gate-worthy
 - repeated cleanup-stage trend entries now also classify their own evidence-support class, so stage-by-stage comparison is not limited to scores and raw counts
@@ -523,7 +524,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `3-10` commits
+- core security/evidence work across Tracks A-E: `2-9` commits
 - cross-cutting extra work: `4-7` commits
 - tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
@@ -532,7 +533,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `19-40` commits
+- `18-39` commits
 
 ### Track Breakdown
 
@@ -566,11 +567,11 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `3-5` commits
+- `2-4` commits
 
 Rough commit guide:
 
-- `C1` strengthen Windows/NVIDIA collection and reporting around what is actually driver-visible versus only CLI-visible for the current PID
+- `C1` completed: Windows/NVIDIA backend selection no longer stops on early PID-only fallback evidence and no longer misattributes later byte-visible evidence to the wrong backend class
 - `C2` add one deeper API-level or driver-level inspection path beyond today’s host-tool chain if it materially improves truth
 - `C3` tighten allocator/context unknowns so the report says exactly where process-level GPU visibility stops
 - `C4` compare competing GPU evidence backends cleanly in one report path and remove duplicated or conflicting wording

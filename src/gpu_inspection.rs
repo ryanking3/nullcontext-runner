@@ -39,26 +39,18 @@ pub fn observe_gpu_process(pid: u32) -> GpuInspectionObservation {
     let mut prior_notes = Vec::new();
     let mut prior_sources = Vec::new();
     let mut prior_backends = Vec::new();
+    let mut pending_pid_only_observation: Option<GpuInspectionObservation> = None;
 
     for backend in backends {
         let Some(mut observation) = backend.inspect_process(pid) else {
             continue;
         };
-
-        if !prior_sources.is_empty() {
-            observation.source = Some(merge_labels(&prior_sources, observation.source.as_deref()));
-        }
-
-        if !prior_backends.is_empty() {
-            observation.backend = merge_labels(&prior_backends, Some(&observation.backend));
-        }
-
-        if !prior_notes.is_empty() {
-            observation.note = Some(match observation.note.take() {
-                Some(note) => format!("{} {}", prior_notes.join(" "), note),
-                None => prior_notes.join(" "),
-            });
-        }
+        append_prior_backend_context(
+            &mut observation,
+            &prior_sources,
+            &prior_backends,
+            &prior_notes,
+        );
 
         if observation.pid_observed == Some(true) && observation.memory_bytes.is_some() {
             return GpuInspectionObservation {
@@ -70,37 +62,29 @@ pub fn observe_gpu_process(pid: u32) -> GpuInspectionObservation {
             };
         }
 
-        if let Some(source) = observation.source {
+        if observation.pid_observed == Some(true) {
+            pending_pid_only_observation = Some(GpuInspectionObservation {
+                memory_bytes: observation.memory_bytes,
+                source: observation.source.clone(),
+                backend: Some(observation.backend.clone()),
+                pid_observed: Some(true),
+                note: observation.note.clone(),
+            });
+        }
+
+        if let Some(source) = observation.source.take() {
             prior_sources.push(source);
         }
 
         prior_backends.push(observation.backend);
 
-        if let Some(note) = observation.note {
+        if let Some(note) = observation.note.take() {
             prior_notes.push(note);
         }
+    }
 
-        if observation.pid_observed == Some(true) {
-            return GpuInspectionObservation {
-                memory_bytes: observation.memory_bytes,
-                source: if prior_sources.is_empty() {
-                    None
-                } else {
-                    Some(merge_labels(&prior_sources, None))
-                },
-                backend: if prior_backends.is_empty() {
-                    None
-                } else {
-                    Some(merge_labels(&prior_backends, None))
-                },
-                pid_observed: Some(true),
-                note: if prior_notes.is_empty() {
-                    None
-                } else {
-                    Some(prior_notes.join(" "))
-                },
-            };
-        }
+    if let Some(observation) = pending_pid_only_observation {
+        return observation;
     }
 
     GpuInspectionObservation {
@@ -128,6 +112,44 @@ pub fn observe_gpu_process(pid: u32) -> GpuInspectionObservation {
             prior_notes.join(" ")
         }),
     }
+}
+
+fn append_prior_backend_context(
+    observation: &mut BackendObservation,
+    prior_sources: &[String],
+    prior_backends: &[String],
+    prior_notes: &[String],
+) {
+    if prior_sources.is_empty() && prior_backends.is_empty() && prior_notes.is_empty() {
+        return;
+    }
+
+    let mut context_parts = Vec::new();
+
+    if !prior_backends.is_empty() {
+        context_parts.push(format!(
+            "Earlier GPU backend attempts before this result: {}.",
+            merge_labels(prior_backends, None)
+        ));
+    }
+
+    if !prior_sources.is_empty() {
+        context_parts.push(format!(
+            "Earlier GPU evidence sources before this result: {}.",
+            merge_labels(prior_sources, None)
+        ));
+    }
+
+    if !prior_notes.is_empty() {
+        context_parts.push(format!("Earlier backend notes: {}", prior_notes.join(" ")));
+    }
+
+    let context = context_parts.join(" ");
+
+    observation.note = Some(match observation.note.take() {
+        Some(note) => format!("{context} {note}"),
+        None => context,
+    });
 }
 
 struct NvmlProcessBackend;
