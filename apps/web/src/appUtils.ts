@@ -379,6 +379,11 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
           ...legacyLlamaRuntimeCleanupSignalEntryReport(),
           ...entry,
         }));
+      parsed.llama_runtime.introspection.observed_events =
+        parsed.llama_runtime.introspection.observed_events.map((event) => ({
+          ...legacyLlamaRuntimeIntrospectionEventReport(),
+          ...event,
+        }));
     }
 
     if (parsed.llama_runtime && !parsed.llama_runtime.vram_cleanup.comparison) {
@@ -656,6 +661,20 @@ function legacyLlamaRuntimeCleanupSignalEntryReport() {
     sample_observed_details: null,
     summary:
       "This older report did not include structured cleanup-signal coverage entries.",
+  };
+}
+
+function legacyLlamaRuntimeIntrospectionEventReport() {
+  return {
+    event: "legacy_runtime_signal",
+    canonical_event: null,
+    status: "legacy_report_unavailable",
+    source: "legacy_report",
+    lifecycle_phase: "unknown",
+    evidence_scope: "unknown",
+    cleanup_relevance: "unknown_cleanup_relevance",
+    details:
+      "This older report did not include canonicalized runtime lifecycle event metadata.",
   };
 }
 

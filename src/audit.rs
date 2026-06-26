@@ -712,6 +712,8 @@ pub struct LlamaRuntimeCleanupSignalEntryReport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlamaRuntimeIntrospectionEventReport {
     pub event: String,
+    #[serde(default)]
+    pub canonical_event: Option<String>,
     pub status: String,
     pub source: String,
     pub lifecycle_phase: String,
@@ -2575,7 +2577,7 @@ fn build_llama_runtime_introspection_report(
                 ],
                 observed_events: observed_signals
                     .iter()
-                    .map(map_runtime_introspection_signal)
+                    .map(|signal| map_runtime_introspection_signal(signal, &BTreeMap::new()))
                     .collect(),
                 notes: vec![
                     format!("Capability load failure: {}", error),
@@ -2590,9 +2592,10 @@ fn build_llama_runtime_introspection_report(
         "Future allocator/KV work should fill this section with explicit runtime capability evidence rather than freeform caveats."
             .to_string(),
     );
+    let signal_aliases = build_signal_alias_lookup(&capabilities.signal_aliases);
     let observed_events = observed_signals
         .iter()
-        .map(map_runtime_introspection_signal)
+        .map(|signal| map_runtime_introspection_signal(signal, &signal_aliases))
         .collect::<Vec<_>>();
     let observed_signal_count = observed_events.len() as u32;
     let declared_signal_ids = capabilities
@@ -2606,8 +2609,30 @@ fn build_llama_runtime_introspection_report(
         .filter(|signal| {
             signal.status != "failed" && signal.event != "introspection_signal_parse_failed"
         })
-        .map(|signal| signal.event.clone())
+        .map(|signal| canonical_or_raw_signal_id(signal, &signal_aliases))
         .collect::<BTreeSet<_>>();
+    let alias_normalized_signal_samples = observed_signals
+        .iter()
+        .filter_map(|signal| {
+            let canonical = canonical_signal_id_for_event(&signal.event, &signal_aliases)?;
+            if canonical == signal.event {
+                None
+            } else {
+                Some(format!("{} -> {}", signal.event, canonical))
+            }
+        })
+        .collect::<BTreeSet<_>>();
+    if !alias_normalized_signal_samples.is_empty() {
+        notes.push(format!(
+            "Normalized {} observed runtime signal variant(s) through canonical alias mapping: {}.",
+            alias_normalized_signal_samples.len(),
+            alias_normalized_signal_samples
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     let missing_declared_signal_ids = declared_signal_ids
         .difference(&observed_signal_ids)
         .cloned()
@@ -2623,37 +2648,35 @@ fn build_llama_runtime_introspection_report(
     let observed_signal_sources = observed_signal_sources(observed_signals);
     let observed_kv_initialized = observed_signals
         .iter()
-        .any(|signal| signal.event == "kv_cache_initialized" && signal.status != "failed");
+        .any(|signal| observed_signal_matches(signal, &signal_aliases, "kv_cache_initialized"));
     let observed_kv_reused = observed_signals
         .iter()
-        .any(|signal| signal.event == "kv_cache_reused" && signal.status != "failed");
+        .any(|signal| observed_signal_matches(signal, &signal_aliases, "kv_cache_reused"));
     let observed_kv_clear = observed_signals
         .iter()
-        .any(|signal| signal.event == "kv_cache_clear_observed" && signal.status != "failed");
+        .any(|signal| observed_signal_matches(signal, &signal_aliases, "kv_cache_clear_observed"));
     let observed_kv_signal = observed_signals.iter().any(|signal| {
-        matches!(
-            signal.event.as_str(),
-            "kv_cache_initialized" | "kv_cache_reused" | "kv_cache_clear_observed"
-        ) && signal.status != "failed"
+        observed_signal_matches(signal, &signal_aliases, "kv_cache_initialized")
+            || observed_signal_matches(signal, &signal_aliases, "kv_cache_reused")
+            || observed_signal_matches(signal, &signal_aliases, "kv_cache_clear_observed")
     });
     let observed_allocator_signal = observed_signals.iter().any(|signal| {
-        matches!(
-            signal.event.as_str(),
-            "allocator_reset_observed" | "allocator_initialized" | "allocator_teardown_observed"
-        ) && signal.status != "failed"
+        observed_signal_matches(signal, &signal_aliases, "allocator_reset_observed")
+            || observed_signal_matches(signal, &signal_aliases, "allocator_initialized")
+            || observed_signal_matches(signal, &signal_aliases, "allocator_teardown_observed")
     });
     let observed_allocator_initialized = observed_signals
         .iter()
-        .any(|signal| signal.event == "allocator_initialized" && signal.status != "failed");
-    let observed_allocator_teardown = observed_signals
-        .iter()
-        .any(|signal| signal.event == "allocator_teardown_observed" && signal.status != "failed");
+        .any(|signal| observed_signal_matches(signal, &signal_aliases, "allocator_initialized"));
+    let observed_allocator_teardown = observed_signals.iter().any(|signal| {
+        observed_signal_matches(signal, &signal_aliases, "allocator_teardown_observed")
+    });
     let observed_model_unload_signal = observed_signals
         .iter()
-        .any(|signal| signal.event == "model_unload_observed" && signal.status != "failed");
+        .any(|signal| observed_signal_matches(signal, &signal_aliases, "model_unload_observed"));
     let observed_allocator_reset_signal = observed_signals
         .iter()
-        .any(|signal| signal.event == "allocator_reset_observed" && signal.status != "failed");
+        .any(|signal| observed_signal_matches(signal, &signal_aliases, "allocator_reset_observed"));
     let declared_allocator_introspection_status =
         capabilities.allocator_introspection_status.clone();
     let declared_kv_cache_introspection_status = capabilities.kv_cache_introspection_status.clone();
@@ -2847,7 +2870,7 @@ fn build_llama_runtime_introspection_report(
                 "allocator_initialized",
             ) || declared_allocator_introspection_status.contains("available"),
             observed_signals,
-            &["allocator_initialized"],
+            &signal_aliases,
             startup_failed,
         ),
         signal_entry(
@@ -2859,7 +2882,7 @@ fn build_llama_runtime_introspection_report(
                 "allocator_teardown_observed",
             ) || declared_allocator_introspection_status.contains("available"),
             observed_signals,
-            &["allocator_teardown_observed"],
+            &signal_aliases,
             startup_failed,
         ),
         signal_entry(
@@ -2873,7 +2896,7 @@ fn build_llama_runtime_introspection_report(
                 .allocator_reset_signal_status
                 .contains("available"),
             observed_signals,
-            &["allocator_reset_observed"],
+            &signal_aliases,
             startup_failed,
         ),
         signal_entry(
@@ -2885,7 +2908,7 @@ fn build_llama_runtime_introspection_report(
                 "kv_cache_initialized",
             ) || declared_kv_cache_introspection_status.contains("available"),
             observed_signals,
-            &["kv_cache_initialized"],
+            &signal_aliases,
             startup_failed,
         ),
         signal_entry(
@@ -2897,7 +2920,7 @@ fn build_llama_runtime_introspection_report(
                 "kv_cache_reused",
             ) || declared_kv_cache_introspection_status.contains("available"),
             observed_signals,
-            &["kv_cache_reused"],
+            &signal_aliases,
             startup_failed,
         ),
         signal_entry(
@@ -2909,7 +2932,7 @@ fn build_llama_runtime_introspection_report(
                 "kv_cache_clear_observed",
             ) || declared_kv_cache_introspection_status.contains("available"),
             observed_signals,
-            &["kv_cache_clear_observed"],
+            &signal_aliases,
             startup_failed,
         ),
         signal_entry(
@@ -2923,7 +2946,7 @@ fn build_llama_runtime_introspection_report(
                 .model_unload_signal_status
                 .contains("available"),
             observed_signals,
-            &["model_unload_observed"],
+            &signal_aliases,
             startup_failed,
         ),
     ];
@@ -2939,7 +2962,7 @@ fn build_llama_runtime_introspection_report(
                 .allocator_reset_signal_status
                 .contains("available"),
             observed_signals,
-            &["allocator_reset_observed"],
+            &signal_aliases,
             startup_failed,
         ),
         signal_entry(
@@ -2951,7 +2974,7 @@ fn build_llama_runtime_introspection_report(
                 "kv_cache_clear_observed",
             ) || declared_kv_cache_introspection_status.contains("available"),
             observed_signals,
-            &["kv_cache_clear_observed"],
+            &signal_aliases,
             startup_failed,
         ),
         signal_entry(
@@ -2965,7 +2988,7 @@ fn build_llama_runtime_introspection_report(
                 .model_unload_signal_status
                 .contains("available"),
             observed_signals,
-            &["model_unload_observed"],
+            &signal_aliases,
             startup_failed,
         ),
     ];
@@ -3238,17 +3261,12 @@ fn signal_entry(
     signal_label: &str,
     declared_support: bool,
     observed_signals: &[RuntimeIntrospectionSignal],
-    observed_event_ids: &[&str],
+    signal_aliases: &BTreeMap<String, Vec<String>>,
     startup_failed: bool,
 ) -> LlamaRuntimeCleanupSignalEntryReport {
     let matched_signals = observed_signals
         .iter()
-        .filter(|signal| {
-            signal.status != "failed"
-                && observed_event_ids
-                    .iter()
-                    .any(|event_id| signal.event.as_str() == *event_id)
-        })
+        .filter(|signal| observed_signal_matches(signal, signal_aliases, signal_id))
         .collect::<Vec<_>>();
     let observed = !matched_signals.is_empty();
     let declared_support_status = if declared_support {
@@ -3359,16 +3377,122 @@ fn observed_signal_sources(signals: &[RuntimeIntrospectionSignal]) -> Vec<String
 
 fn map_runtime_introspection_signal(
     signal: &RuntimeIntrospectionSignal,
+    signal_aliases: &BTreeMap<String, Vec<String>>,
 ) -> LlamaRuntimeIntrospectionEventReport {
+    let canonical_event = canonical_signal_id_for_event(&signal.event, signal_aliases);
+    let canonical_event_for_classification = canonical_event.clone();
+    let classification_event = canonical_event_for_classification
+        .as_deref()
+        .unwrap_or(signal.event.as_str());
     LlamaRuntimeIntrospectionEventReport {
         event: signal.event.clone(),
+        canonical_event,
         status: signal.status.clone(),
         source: signal.source_stream.clone(),
-        lifecycle_phase: introspection_event_phase(&signal.event).to_string(),
-        evidence_scope: introspection_event_scope(&signal.event).to_string(),
-        cleanup_relevance: introspection_event_cleanup_relevance(&signal.event).to_string(),
+        lifecycle_phase: introspection_event_phase(classification_event).to_string(),
+        evidence_scope: introspection_event_scope(classification_event).to_string(),
+        cleanup_relevance: introspection_event_cleanup_relevance(classification_event).to_string(),
         details: signal.details.clone(),
     }
+}
+
+fn build_signal_alias_lookup(
+    manifest_aliases: &BTreeMap<String, Vec<String>>,
+) -> BTreeMap<String, Vec<String>> {
+    let mut merged = BTreeMap::from([
+        (
+            "allocator_initialized".to_string(),
+            vec!["allocator_initialized".to_string()],
+        ),
+        (
+            "allocator_teardown_observed".to_string(),
+            vec![
+                "allocator_teardown".to_string(),
+                "allocator_teardown_observed".to_string(),
+            ],
+        ),
+        (
+            "allocator_reset_observed".to_string(),
+            vec![
+                "allocator_reset".to_string(),
+                "allocator_reset_observed".to_string(),
+            ],
+        ),
+        (
+            "kv_cache_initialized".to_string(),
+            vec!["kv_cache_initialized".to_string()],
+        ),
+        (
+            "kv_cache_reused".to_string(),
+            vec!["kv_cache_reused".to_string()],
+        ),
+        (
+            "kv_cache_clear_observed".to_string(),
+            vec![
+                "kv_cache_clear".to_string(),
+                "kv_cache_clear_observed".to_string(),
+            ],
+        ),
+        (
+            "model_unload_observed".to_string(),
+            vec![
+                "model_unload".to_string(),
+                "model_unload_observed".to_string(),
+            ],
+        ),
+    ]);
+
+    for (canonical_signal_id, aliases) in manifest_aliases {
+        let entry = merged.entry(canonical_signal_id.clone()).or_default();
+        entry.extend(aliases.iter().cloned());
+    }
+
+    for (canonical_signal_id, aliases) in &mut merged {
+        if !aliases.iter().any(|value| value == canonical_signal_id) {
+            aliases.push(canonical_signal_id.clone());
+        }
+        aliases.sort();
+        aliases.dedup();
+    }
+
+    merged
+}
+
+fn observed_signal_matches(
+    signal: &RuntimeIntrospectionSignal,
+    signal_aliases: &BTreeMap<String, Vec<String>>,
+    canonical_signal_id: &str,
+) -> bool {
+    if signal.status == "failed" {
+        return false;
+    }
+
+    canonical_signal_id_for_event(&signal.event, signal_aliases)
+        .as_deref()
+        .map(|value| value == canonical_signal_id)
+        .unwrap_or(false)
+}
+
+fn canonical_or_raw_signal_id(
+    signal: &RuntimeIntrospectionSignal,
+    signal_aliases: &BTreeMap<String, Vec<String>>,
+) -> String {
+    canonical_signal_id_for_event(&signal.event, signal_aliases)
+        .unwrap_or_else(|| signal.event.clone())
+}
+
+fn canonical_signal_id_for_event(
+    event: &str,
+    signal_aliases: &BTreeMap<String, Vec<String>>,
+) -> Option<String> {
+    signal_aliases
+        .iter()
+        .find_map(|(canonical_signal_id, aliases)| {
+            aliases
+                .iter()
+                .any(|alias| alias == event)
+                .then(|| canonical_signal_id.clone())
+        })
 }
 
 fn introspection_event_phase(event: &str) -> &'static str {

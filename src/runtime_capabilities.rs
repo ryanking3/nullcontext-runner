@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -11,6 +12,7 @@ pub struct RuntimeIntrospectionCapabilities {
     pub instrumentation_backend: String,
     pub declared_signal_ids: Vec<String>,
     pub declared_cleanup_signal_ids: Vec<String>,
+    pub signal_aliases: BTreeMap<String, Vec<String>>,
     pub allocator_introspection_status: String,
     pub kv_cache_introspection_status: String,
     pub model_unload_signal_status: String,
@@ -24,6 +26,7 @@ struct RuntimeIntrospectionManifest {
     instrumentation_backend: Option<String>,
     declared_signal_ids: Option<Vec<String>>,
     declared_cleanup_signal_ids: Option<Vec<String>>,
+    signal_aliases: Option<BTreeMap<String, Vec<String>>>,
     allocator_introspection_status: Option<String>,
     kv_cache_introspection_status: Option<String>,
     model_unload_signal_status: Option<String>,
@@ -70,6 +73,7 @@ pub fn detect_runtime_introspection_capabilities(
             .unwrap_or_else(|| "manifest_declared".to_string()),
         declared_signal_ids: manifest.declared_signal_ids.unwrap_or_default(),
         declared_cleanup_signal_ids: manifest.declared_cleanup_signal_ids.unwrap_or_default(),
+        signal_aliases: normalize_signal_aliases(manifest.signal_aliases.unwrap_or_default()),
         allocator_introspection_status: manifest
             .allocator_introspection_status
             .unwrap_or_else(|| "allocator_introspection_status_unspecified".to_string()),
@@ -108,6 +112,7 @@ fn stock_runtime_capabilities() -> RuntimeIntrospectionCapabilities {
         instrumentation_backend: "none".to_string(),
         declared_signal_ids: vec![],
         declared_cleanup_signal_ids: vec![],
+        signal_aliases: BTreeMap::new(),
         allocator_introspection_status: "allocator_introspection_unavailable".to_string(),
         kv_cache_introspection_status: "kv_cache_introspection_unavailable".to_string(),
         model_unload_signal_status: "model_unload_not_observed_directly".to_string(),
@@ -118,4 +123,24 @@ fn stock_runtime_capabilities() -> RuntimeIntrospectionCapabilities {
             "NullContext is treating this runtime as a stock external llama-server build.".to_string(),
         ],
     }
+}
+
+fn normalize_signal_aliases(
+    raw_aliases: BTreeMap<String, Vec<String>>,
+) -> BTreeMap<String, Vec<String>> {
+    raw_aliases
+        .into_iter()
+        .map(|(canonical_signal_id, aliases)| {
+            let mut normalized = aliases
+                .into_iter()
+                .filter(|value| !value.trim().is_empty())
+                .collect::<Vec<_>>();
+            if !normalized.iter().any(|value| value == &canonical_signal_id) {
+                normalized.push(canonical_signal_id.clone());
+            }
+            normalized.sort();
+            normalized.dedup();
+            (canonical_signal_id, normalized)
+        })
+        .collect()
 }

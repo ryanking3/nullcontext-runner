@@ -560,6 +560,7 @@ export type LlamaRuntimeCleanupSignalEntryReport = {
 
 export type LlamaRuntimeIntrospectionEventReport = {
   event: string;
+  canonical_event?: string | null;
   status: string;
   source: string;
   lifecycle_phase: string;

@@ -1476,6 +1476,12 @@ export function PrivacyReportViewer({
                       </div>
                       <div className="report-path-list">
                         <div>source: {event.source}</div>
+                        <div>
+                          canonical event:{" "}
+                          {event.canonical_event
+                            ? humanizeSnakeCase(event.canonical_event)
+                            : "none"}
+                        </div>
                         <div>phase: {humanizeSnakeCase(event.lifecycle_phase)}</div>
                         <div>scope: {humanizeSnakeCase(event.evidence_scope)}</div>
                         <div>
