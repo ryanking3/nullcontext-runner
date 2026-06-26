@@ -625,6 +625,7 @@ struct StageTrendAccumulator {
     cleanup_signal_partial_runs: u32,
     cleanup_signal_limited_runs: u32,
     cleanup_signal_runtime_global_only_runs: u32,
+    cleanup_signal_stage_local_helper_runs: u32,
     cleanup_signal_declared_only_runs: u32,
     cleanup_signal_scope_unavailable_runs: u32,
     stage_local_scan_runs: u32,
@@ -725,6 +726,11 @@ fn build_stage_trends(
                 }
             }
             match stage.cleanup_signal_support_scope_status.as_str() {
+                "cleanup_signal_scope_stage_local_helper_runtime" => {
+                    accumulator.cleanup_signal_stage_local_helper_runs = accumulator
+                        .cleanup_signal_stage_local_helper_runs
+                        .saturating_add(1);
+                }
                 "cleanup_signal_scope_runtime_global_only" => {
                     accumulator.cleanup_signal_runtime_global_only_runs = accumulator
                         .cleanup_signal_runtime_global_only_runs
@@ -848,6 +854,14 @@ fn build_stage_trends(
                     "{} is backed by repeated stage-local clear marker scans, making this the strongest current cleanup-stage evidence class in the repeated trend table.",
                     stage_label
                 ),
+                "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance"
+                    if accumulator.cleanup_signal_stage_local_helper_runs > 0 =>
+                {
+                    format!(
+                        "{} is currently supported by repeated allocator/KV/model cleanup-path signals, and at least part of that support came from stage-local helper-runtime probes rather than only from whole-runtime inheritance.",
+                        stage_label
+                    )
+                }
                 "recommendation_evidence_supported_by_marker_clearance_history" => format!(
                     "{} is backed by repeated clear marker history, but that support is not yet entirely stage-local across all recorded runs.",
                     stage_label
@@ -886,7 +900,7 @@ fn build_stage_trends(
                 ),
             };
             let summary = format!(
-                "{} was recorded in {} run(s), averaged {:.1}/100, improved {} time(s), stayed unchanged {} time(s), worsened {} time(s), and remained inconclusive {} time(s). Stage-local direct scans were recorded in {} run(s), with {} clear stage-local scan(s) and {} stage-local marker-detection run(s). Strong allocator/KV cleanup-signal support was present in {} run(s), and runtime-global-only cleanup-signal scope was recorded in {} run(s).",
+                "{} was recorded in {} run(s), averaged {:.1}/100, improved {} time(s), stayed unchanged {} time(s), worsened {} time(s), and remained inconclusive {} time(s). Stage-local direct scans were recorded in {} run(s), with {} clear stage-local scan(s) and {} stage-local marker-detection run(s). Strong allocator/KV cleanup-signal support was present in {} run(s), stage-local helper-runtime cleanup-signal scope was recorded in {} run(s), and runtime-global-only cleanup-signal scope was recorded in {} run(s).",
                 stage_label,
                 accumulator.runs_recorded,
                 avg_validation_score,
@@ -898,6 +912,7 @@ fn build_stage_trends(
                 accumulator.stage_local_scan_clear_runs,
                 accumulator.stage_local_scan_marker_detection_runs,
                 accumulator.cleanup_signal_strong_runs,
+                accumulator.cleanup_signal_stage_local_helper_runs,
                 accumulator.cleanup_signal_runtime_global_only_runs
             );
             let notes = vec![
@@ -920,7 +935,8 @@ fn build_stage_trends(
                     accumulator.cleanup_signal_limited_runs
                 ),
                 format!(
-                    "Cleanup-signal scope: {} runtime-global-only run(s), {} declared-but-unobserved run(s), {} unavailable/mixed run(s).",
+                    "Cleanup-signal scope: {} stage-local-helper run(s), {} runtime-global-only run(s), {} declared-but-unobserved run(s), {} unavailable/mixed run(s).",
+                    accumulator.cleanup_signal_stage_local_helper_runs,
                     accumulator.cleanup_signal_runtime_global_only_runs,
                     accumulator.cleanup_signal_declared_only_runs,
                     accumulator.cleanup_signal_scope_unavailable_runs
@@ -978,6 +994,8 @@ fn build_stage_trends(
                 cleanup_signal_limited_runs: accumulator.cleanup_signal_limited_runs,
                 cleanup_signal_runtime_global_only_runs: accumulator
                     .cleanup_signal_runtime_global_only_runs,
+                cleanup_signal_stage_local_helper_runs: accumulator
+                    .cleanup_signal_stage_local_helper_runs,
                 cleanup_signal_declared_only_runs: accumulator
                     .cleanup_signal_declared_only_runs,
                 cleanup_signal_scope_unavailable_runs: accumulator

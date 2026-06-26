@@ -220,6 +220,7 @@ Done or partially done:
 - runtime introspection now also carries the actual missing declared and undeclared observed signal IDs for both the full runtime contract and the cleanup-signal subset, so operators can inspect the exact contract gaps instead of only aggregate counts
 - manifest-declared signal aliases can now normalize raw runtime event variants into the canonical Track B contract, and the UI shows both the raw observed event name and the canonical mapped signal when that translation happens
 - manifest-declared runtime and cleanup signals are no longer limited to the fixed built-in allocator/KV/model rows, so richer instrumented runtimes can surface extra lifecycle evidence directly in the signal matrices
+- helper cleanup stages that launch their own temporary runtime now carry stage-local allocator/KV/model cleanup introspection, so those stages no longer have to inherit only runtime-global cleanup-signal scope from the main session runtime
 
 ### Remaining v1 Work
 
@@ -523,7 +524,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `4-12` commits
+- core security/evidence work across Tracks A-E: `3-11` commits
 - cross-cutting extra work: `4-7` commits
 - tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
@@ -532,7 +533,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `21-42` commits
+- `20-41` commits
 
 ### Track Breakdown
 
@@ -552,14 +553,14 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `1-2` commits
+- `0-1` commits
 
 Rough commit guide:
 
 - `B1` completed: the instrumented-runtime contract now exposes the exact missing declared and undeclared observed signal IDs for both runtime and cleanup-signal coverage
 - `B2` completed: manifest-declared signal aliases can now normalize raw instrumented runtime event variants into canonical allocator/KV/model lifecycle evidence instead of leaving them as undeclared one-off event names
 - `B3` completed: additional manifest-declared allocator/KV/model lifecycle signals can now appear directly in the runtime and cleanup signal matrices instead of being trapped in aggregate contract counts only
-- `B4` add true stage-local internal cleanup attribution or hooks where possible, instead of only runtime-global lifecycle evidence feeding cleanup stages
+- `B4` completed: helper cleanup stages that launch their own temporary runtime now retain stage-local allocator/KV/model cleanup introspection instead of inheriting only runtime-global cleanup signals from the main session runtime
 - `B5` final Track B wording/claim-boundary pass once the deeper instrumentation work lands and the real evidence ceiling is known
 
 ### Track C: CUDA / NVIDIA Inspection

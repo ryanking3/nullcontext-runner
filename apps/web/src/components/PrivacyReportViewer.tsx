@@ -997,6 +997,14 @@ export function PrivacyReportViewer({
                             : "none"}
                         </div>
                         <div>
+                          helper runtime introspection:{" "}
+                          {stage.helper_runtime_introspection
+                            ? humanizeSnakeCase(
+                                stage.helper_runtime_introspection.cleanup_path_evidence_status
+                              )
+                            : "none"}
+                        </div>
+                        <div>
                           peak gpu bytes:{" "}
                           {stage.evidence_snapshot.gpu_peak_memory_bytes
                             ? formatBytes(stage.evidence_snapshot.gpu_peak_memory_bytes)
@@ -1015,6 +1023,12 @@ export function PrivacyReportViewer({
                         {stage.helper_process_scan_report && (
                           <div>
                             helper scan summary: {stage.helper_process_scan_report.summary}
+                          </div>
+                        )}
+                        {stage.helper_runtime_introspection && (
+                          <div>
+                            helper runtime cleanup summary:{" "}
+                            {stage.helper_runtime_introspection.cleanup_signal_contract_summary}
                           </div>
                         )}
                         <div>{stage.selection_evidence_summary}</div>
@@ -2509,6 +2523,10 @@ export function PrivacyReportViewer({
                         </div>
                         <div>
                           cleanup signal limited runs: {trend.cleanup_signal_limited_runs}
+                        </div>
+                        <div>
+                          cleanup signal stage-local-helper runs:
+                          {" "}{trend.cleanup_signal_stage_local_helper_runs}
                         </div>
                         <div>
                           cleanup signal runtime-global-only runs:

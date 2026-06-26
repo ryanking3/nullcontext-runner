@@ -544,6 +544,28 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
       for (const stage of parsed.llama_runtime.vram_cleanup.stages) {
         stage.process_scan_phase ??= null;
         stage.helper_process_scan_report ??= null;
+        stage.helper_runtime_introspection ??= null;
+        if (stage.helper_runtime_introspection) {
+          stage.helper_runtime_introspection = {
+            ...legacyLlamaRuntimeIntrospectionReport(),
+            ...stage.helper_runtime_introspection,
+          };
+          stage.helper_runtime_introspection.cleanup_signal_matrix =
+            stage.helper_runtime_introspection.cleanup_signal_matrix.map((entry) => ({
+              ...legacyLlamaRuntimeCleanupSignalEntryReport(),
+              ...entry,
+            }));
+          stage.helper_runtime_introspection.runtime_signal_matrix =
+            stage.helper_runtime_introspection.runtime_signal_matrix.map((entry) => ({
+              ...legacyLlamaRuntimeCleanupSignalEntryReport(),
+              ...entry,
+            }));
+          stage.helper_runtime_introspection.observed_events =
+            stage.helper_runtime_introspection.observed_events.map((event) => ({
+              ...legacyLlamaRuntimeIntrospectionEventReport(),
+              ...event,
+            }));
+        }
         stage.selection_evidence_status ??= "cleanup_stage_selection_evidence_not_derived";
         stage.selection_evidence_summary ??=
           "This older report did not classify whether this cleanup stage selection result was backed by local marker evidence or only by GPU visibility.";
@@ -871,6 +893,7 @@ function legacyMemoryValidationStageTrendReport() {
     cleanup_signal_partial_runs: 0,
     cleanup_signal_limited_runs: 0,
     cleanup_signal_runtime_global_only_runs: 0,
+    cleanup_signal_stage_local_helper_runs: 0,
     cleanup_signal_declared_only_runs: 0,
     cleanup_signal_scope_unavailable_runs: 0,
     stage_local_scan_runs: 0,

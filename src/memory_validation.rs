@@ -452,6 +452,19 @@ fn build_stage_scorecard(
     }
 
     match cleanup_signal_support_scope_status.as_str() {
+        "cleanup_signal_scope_stage_local_helper_runtime" => strengths.push(
+            "Allocator/KV cleanup evidence for this stage came from a stage-local helper runtime probe rather than only from the main runtime lifecycle."
+                .to_string(),
+        ),
+        "cleanup_signal_scope_stage_local_helper_declared_but_not_observed" => gaps.push(
+            "Allocator/KV cleanup evidence for this stage only reached stage-local helper-runtime declaration scope and was not directly observed during the helper probe."
+                .to_string(),
+        ),
+        "cleanup_signal_scope_stage_local_helper_unavailable_due_to_startup_failure"
+        | "cleanup_signal_scope_stage_local_helper_unavailable" => gaps.push(
+            "A stage-local helper runtime probe existed for this stage, but NullContext still could not derive trustworthy internal cleanup scope from it."
+                .to_string(),
+        ),
         "cleanup_signal_scope_runtime_global_only" => gaps.push(
             "Allocator/KV cleanup evidence for this stage still comes from whole-runtime lifecycle observation rather than a stage-local internal cleanup hook."
                 .to_string(),

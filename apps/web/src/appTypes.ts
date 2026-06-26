@@ -429,6 +429,7 @@ export type MemoryValidationStageTrendReportData = {
   cleanup_signal_partial_runs: number;
   cleanup_signal_limited_runs: number;
   cleanup_signal_runtime_global_only_runs: number;
+  cleanup_signal_stage_local_helper_runs: number;
   cleanup_signal_declared_only_runs: number;
   cleanup_signal_scope_unavailable_runs: number;
   stage_local_scan_runs: number;
@@ -627,6 +628,7 @@ export type VramCleanupStrategyStageReport = {
   evidence_improvement_status: string;
   process_scan_phase?: ProcessScanPhaseReportData | null;
   helper_process_scan_report?: ProcessScanReportData | null;
+  helper_runtime_introspection?: LlamaRuntimeIntrospectionReport | null;
   selection_evidence_status: string;
   selection_evidence_summary: string;
   cleanup_signal_support_status: string;

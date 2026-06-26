@@ -378,6 +378,8 @@ pub struct MemoryValidationStageTrendReport {
     #[serde(default)]
     pub cleanup_signal_runtime_global_only_runs: u32,
     #[serde(default)]
+    pub cleanup_signal_stage_local_helper_runs: u32,
+    #[serde(default)]
     pub cleanup_signal_declared_only_runs: u32,
     #[serde(default)]
     pub cleanup_signal_scope_unavailable_runs: u32,
@@ -609,6 +611,8 @@ pub struct VramCleanupStrategyStageReport {
     pub process_scan_phase: Option<ProcessScanPhaseReport>,
     #[serde(default)]
     pub helper_process_scan_report: Option<ProcessScanReport>,
+    #[serde(default)]
+    pub helper_runtime_introspection: Option<LlamaRuntimeIntrospectionReport>,
     #[serde(default = "default_vram_cleanup_selection_evidence_status")]
     pub selection_evidence_status: String,
     #[serde(default = "default_vram_cleanup_selection_evidence_summary")]
@@ -1008,10 +1012,6 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
         &llama_runtime.introspection,
         &cleanup_signal_support_status,
     );
-    let cleanup_signal_support_scope_status =
-        derive_runtime_cleanup_signal_scope_status(&llama_runtime.introspection).to_string();
-    let contributing_cleanup_signals =
-        observed_cleanup_signal_labels(&llama_runtime.introspection.cleanup_signal_matrix);
 
     let previous_selected_stage_id = llama_runtime
         .vram_cleanup
@@ -1033,15 +1033,32 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
             &controlled_canary_signal_status,
         );
         stage.marker_evidence_status = marker_evidence_status;
-        stage.cleanup_signal_support_status = cleanup_signal_support_status.clone();
-        stage.cleanup_signal_support_summary = cleanup_signal_support_summary.clone();
-        stage.cleanup_signal_support_scope_status = cleanup_signal_support_scope_status.clone();
+        let stage_cleanup_introspection = stage
+            .helper_runtime_introspection
+            .as_ref()
+            .unwrap_or(&llama_runtime.introspection);
+        let (stage_cleanup_signal_support_status, stage_cleanup_signal_support_summary) =
+            if stage.helper_runtime_introspection.is_some() {
+                derive_stage_local_helper_cleanup_signal_support(stage_cleanup_introspection)
+            } else {
+                (
+                    cleanup_signal_support_status.clone(),
+                    cleanup_signal_support_summary.clone(),
+                )
+            };
+        let stage_cleanup_signal_support_scope_status =
+            derive_stage_cleanup_signal_scope_status(stage, &llama_runtime.introspection);
+        stage.cleanup_signal_support_status = stage_cleanup_signal_support_status;
+        stage.cleanup_signal_support_summary = stage_cleanup_signal_support_summary;
+        stage.cleanup_signal_support_scope_status =
+            stage_cleanup_signal_support_scope_status.clone();
         stage.cleanup_signal_support_scope_summary = runtime_cleanup_signal_scope_summary(
-            &llama_runtime.introspection,
-            &cleanup_signal_support_scope_status,
+            stage_cleanup_introspection,
+            &stage_cleanup_signal_support_scope_status,
             Some(stage.stage_label.as_str()),
         );
-        stage.contributing_cleanup_signals = contributing_cleanup_signals.clone();
+        stage.contributing_cleanup_signals =
+            observed_cleanup_signal_labels(&stage_cleanup_introspection.cleanup_signal_matrix);
     }
 
     if !llama_runtime.vram_cleanup.stages.is_empty()
@@ -1227,6 +1244,41 @@ fn derive_runtime_cleanup_signal_support_status(
     }
 }
 
+fn derive_stage_local_helper_cleanup_signal_support(
+    introspection: &LlamaRuntimeIntrospectionReport,
+) -> (String, String) {
+    let status = derive_runtime_cleanup_signal_support_status(introspection).to_string();
+    let observed_cleanup_signal_clause =
+        observed_cleanup_signal_evidence_clause(&introspection.cleanup_signal_matrix);
+    let summary = match status.as_str() {
+        "cleanup_signal_support_strong" => format!(
+            "This stage-local helper runtime observed allocator reset, KV clear, and model unload cleanup signals directly during the helper probe. {}",
+            observed_cleanup_signal_clause
+        ),
+        "cleanup_signal_support_partial" => format!(
+            "This stage-local helper runtime observed only part of the allocator/KV/model cleanup path: allocator reset observed={}, kv clear observed={}, model unload observed={}. {}",
+            introspection.allocator_reset_observed,
+            introspection.kv_cache_clear_observed,
+            introspection.model_unload_observed,
+            observed_cleanup_signal_clause
+        ),
+        "cleanup_signal_support_declared_but_unobserved" => {
+            "This stage-local helper runtime declared allocator/KV cleanup-signal support, but the helper probe did not directly observe allocator reset, KV clear, or model unload signals."
+                .to_string()
+        }
+        "cleanup_signal_support_startup_failed_or_unavailable" => {
+            "The stage-local helper runtime probe could not derive allocator/KV cleanup-path evidence because startup failed or direct cleanup signals remained unavailable."
+                .to_string()
+        }
+        _ => {
+            "This stage-local helper runtime did not provide direct allocator/KV cleanup-path signal support for the helper probe."
+                .to_string()
+        }
+    };
+
+    (status, summary)
+}
+
 fn runtime_cleanup_signal_support_summary(
     introspection: &LlamaRuntimeIntrospectionReport,
     status: &str,
@@ -1296,6 +1348,28 @@ fn derive_runtime_cleanup_signal_scope_status(
     }
 }
 
+fn derive_stage_cleanup_signal_scope_status(
+    stage: &VramCleanupStrategyStageReport,
+    session_introspection: &LlamaRuntimeIntrospectionReport,
+) -> String {
+    let Some(helper_introspection) = stage.helper_runtime_introspection.as_ref() else {
+        return derive_runtime_cleanup_signal_scope_status(session_introspection).to_string();
+    };
+
+    match derive_runtime_cleanup_signal_scope_status(helper_introspection) {
+        "cleanup_signal_scope_runtime_global_only" => {
+            "cleanup_signal_scope_stage_local_helper_runtime".to_string()
+        }
+        "cleanup_signal_scope_declared_but_not_observed" => {
+            "cleanup_signal_scope_stage_local_helper_declared_but_not_observed".to_string()
+        }
+        "cleanup_signal_scope_unavailable_due_to_startup_failure" => {
+            "cleanup_signal_scope_stage_local_helper_unavailable_due_to_startup_failure".to_string()
+        }
+        _ => "cleanup_signal_scope_stage_local_helper_unavailable".to_string(),
+    }
+}
+
 fn runtime_cleanup_signal_scope_summary(
     introspection: &LlamaRuntimeIntrospectionReport,
     scope_status: &str,
@@ -1313,6 +1387,25 @@ fn runtime_cleanup_signal_scope_summary(
     };
 
     match scope_status {
+        "cleanup_signal_scope_stage_local_helper_runtime" => format!(
+            "Allocator/KV cleanup evidence attached to {} came from a stage-local helper runtime probe rather than only from the main session runtime lifecycle. {}",
+            stage_subject,
+            observed_clause
+        ),
+        "cleanup_signal_scope_stage_local_helper_declared_but_not_observed" => format!(
+            "Allocator/KV cleanup support attached to {} stayed at stage-local helper-runtime capability scope only: the helper runtime declared cleanup-signal support, but the helper probe did not directly observe those cleanup events. {}",
+            stage_subject,
+            observed_clause
+        ),
+        "cleanup_signal_scope_stage_local_helper_unavailable_due_to_startup_failure" => format!(
+            "Allocator/KV cleanup scope for {} could not be derived because the stage-local helper runtime probe failed before a normal cleanup lifecycle completed.",
+            stage_subject
+        ),
+        "cleanup_signal_scope_stage_local_helper_unavailable" => format!(
+            "NullContext ran a stage-local helper runtime probe for {}, but it still could not derive trustworthy internal cleanup scope from that helper run. {}",
+            stage_subject,
+            observed_clause
+        ),
         "cleanup_signal_scope_runtime_global_only" => format!(
             "Allocator/KV cleanup evidence attached to {} comes from the overall llama runtime lifecycle, not from a stage-local cleanup hook inside that specific VRAM cleanup step. {}",
             stage_subject,
@@ -1993,6 +2086,7 @@ pub fn build_llama_runtime_report(
     );
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
     let vram_cleanup = build_vram_cleanup_strategy_report(
+        &config.llama_path,
         gpu_offload_requested,
         &vram_inspection_status,
         post_shutdown,
@@ -4604,6 +4698,7 @@ fn post_shutdown_gpu_visibility_status_from_gpu_window(
 }
 
 fn build_vram_cleanup_strategy_report(
+    llama_path: &str,
     gpu_offload_requested: bool,
     vram_inspection_status: &str,
     post_shutdown: &RuntimePostShutdownObservation,
@@ -4636,6 +4731,7 @@ fn build_vram_cleanup_strategy_report(
 
         for strategy_stage in &post_shutdown.vram_cleanup_strategy_windows {
             stage_reports.push(build_vram_cleanup_stage_report(
+                llama_path,
                 gpu_offload_requested,
                 &baseline_snapshot,
                 strategy_stage,
@@ -5266,6 +5362,7 @@ fn build_vram_cleanup_strategy_snapshot(
 }
 
 fn build_vram_cleanup_stage_report(
+    llama_path: &str,
     gpu_offload_requested: bool,
     baseline_snapshot: &VramCleanupEvidenceSnapshot,
     strategy_stage: &crate::runtime::RuntimeGpuObservationStrategyStage,
@@ -5293,6 +5390,34 @@ fn build_vram_cleanup_stage_report(
         &selection_evidence_status,
         &stage_process_scan_signal_status,
     );
+    let helper_runtime_introspection = if strategy_stage
+        .helper_runtime_introspection_signals
+        .is_empty()
+    {
+        None
+    } else {
+        Some(build_llama_runtime_introspection_report(
+            llama_path,
+            false,
+            &strategy_stage.helper_runtime_introspection_signals,
+        ))
+    };
+    let mut stage_notes = strategy_stage.action_notes.clone();
+    if let Some(helper_runtime_introspection) = helper_runtime_introspection.as_ref() {
+        stage_notes.push(format!(
+            "This stage recorded stage-local helper runtime introspection with cleanup scope {} and cleanup-path evidence {}.",
+            helper_runtime_introspection
+                .cleanup_signal_contract_status
+                .replace('_', " "),
+            helper_runtime_introspection
+                .cleanup_path_evidence_status
+                .replace('_', " ")
+        ));
+    }
+    stage_notes.extend(vram_cleanup_comparison_notes(
+        baseline_snapshot,
+        &evidence_snapshot,
+    ));
 
     VramCleanupStrategyStageReport {
         stage_id: strategy_stage.stage_id.clone(),
@@ -5311,6 +5436,7 @@ fn build_vram_cleanup_stage_report(
         ),
         process_scan_phase: strategy_stage.process_scan_phase.clone(),
         helper_process_scan_report: strategy_stage.helper_process_scan_report.clone(),
+        helper_runtime_introspection,
         selection_evidence_status,
         selection_evidence_summary,
         cleanup_signal_support_status: default_cleanup_signal_support_status(),
@@ -5320,14 +5446,7 @@ fn build_vram_cleanup_stage_report(
         contributing_cleanup_signals: vec![],
         marker_evidence_status: default_vram_cleanup_marker_evidence_status(),
         marker_evidence_summary: default_vram_cleanup_marker_evidence_summary(),
-        notes: {
-            let mut notes = strategy_stage.action_notes.clone();
-            notes.extend(vram_cleanup_comparison_notes(
-                baseline_snapshot,
-                &evidence_snapshot,
-            ));
-            notes
-        },
+        notes: stage_notes,
         evidence_improvement_status,
         evidence_snapshot,
     }
@@ -5662,6 +5781,18 @@ fn vram_cleanup_stage_cleanup_signal_clause(status: &str) -> &'static str {
 
 fn vram_cleanup_stage_cleanup_signal_scope_clause(status: &str) -> &'static str {
     match status {
+        "cleanup_signal_scope_stage_local_helper_runtime" => {
+            "That allocator/KV evidence came from a stage-local helper runtime probe, which is stronger than whole-runtime inheritance but still not proof about the exact original llama.cpp allocations from the main session runtime."
+        }
+        "cleanup_signal_scope_stage_local_helper_declared_but_not_observed" => {
+            "That allocator/KV evidence is only a stage-local helper-runtime declaration and not a directly observed internal cleanup event for this specific VRAM cleanup stage."
+        }
+        "cleanup_signal_scope_stage_local_helper_unavailable_due_to_startup_failure" => {
+            "A stage-local helper runtime probe existed for this VRAM cleanup stage, but startup failure prevented NullContext from deriving trustworthy internal cleanup scope from it."
+        }
+        "cleanup_signal_scope_stage_local_helper_unavailable" => {
+            "A stage-local helper runtime probe existed for this VRAM cleanup stage, but NullContext still could not derive trustworthy internal cleanup scope from it."
+        }
         "cleanup_signal_scope_runtime_global_only" => {
             "That allocator/KV evidence still applies only at whole-runtime lifecycle scope, not as proof that this specific VRAM cleanup stage triggered those internal cleanup signals."
         }

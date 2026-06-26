@@ -112,6 +112,7 @@ pub struct RuntimeGpuObservationStrategyStage {
     pub window: RuntimeGpuObservationWindow,
     pub process_scan_phase: Option<ProcessScanPhaseReport>,
     pub helper_process_scan_report: Option<ProcessScanReport>,
+    pub helper_runtime_introspection_signals: Vec<RuntimeIntrospectionSignal>,
 }
 
 #[derive(Debug, Clone)]
@@ -263,6 +264,7 @@ struct HelperRuntimeProbeOutcome {
     action_status: String,
     notes: Vec<String>,
     process_scan_report: Option<ProcessScanReport>,
+    introspection_signals: Vec<RuntimeIntrospectionSignal>,
 }
 
 impl RuntimePostShutdownGpuWindowObservation {
@@ -680,6 +682,7 @@ fn observe_post_shutdown_internal(
                     stage_process_scan_markers,
                 ),
                 helper_process_scan_report: stage_outcome.process_scan_report,
+                helper_runtime_introspection_signals: stage_outcome.introspection_signals,
             });
         }
 
@@ -792,6 +795,7 @@ fn execute_vram_cleanup_strategy_stage(
                 action_status: report.status,
                 notes: report.notes,
                 process_scan_report: None,
+                introspection_signals: vec![],
             }
         }
         "host_page_discard_probe" => {
@@ -800,6 +804,7 @@ fn execute_vram_cleanup_strategy_stage(
                 action_status: report.status,
                 notes: report.notes,
                 process_scan_report: None,
+                introspection_signals: vec![],
             }
         }
         "cuda_memory_pressure_probe" => {
@@ -808,6 +813,7 @@ fn execute_vram_cleanup_strategy_stage(
                 action_status: report.status,
                 notes: report.notes,
                 process_scan_report: None,
+                introspection_signals: vec![],
             }
         }
         "host_ram_then_page_discard_probe" => {
@@ -879,12 +885,14 @@ fn execute_vram_cleanup_strategy_stage(
                         .to_string(),
                 ],
                 process_scan_report: None,
+                introspection_signals: vec![],
             },
         },
         _ => HelperRuntimeProbeOutcome {
             action_status: "cooldown_recheck_completed".to_string(),
             notes: vec![],
             process_scan_report: None,
+            introspection_signals: vec![],
         },
     }
 }
@@ -947,6 +955,7 @@ fn build_composite_probe_outcome(
         action_status,
         notes,
         process_scan_report: None,
+        introspection_signals: vec![],
     }
 }
 
@@ -993,10 +1002,14 @@ fn execute_helper_runtime_probe_stage(
                 stage_plan.stage_kind == "helper_runtime_allocation_churn_probe",
             );
 
-            let (action_status, process_scan_report) = match helper_probe {
+            let (action_status, process_scan_report, introspection_signals) = match helper_probe {
                 Ok(probe) => {
                     notes.extend(probe.notes);
-                    (probe.action_status, probe.process_scan_report)
+                    (
+                        probe.action_status,
+                        probe.process_scan_report,
+                        probe.introspection_signals,
+                    )
                 }
                 Err(error) => {
                     match helper_runtime.shutdown() {
@@ -1018,7 +1031,11 @@ fn execute_helper_runtime_probe_stage(
                         "Helper runtime probe stage {} failed during canary completion or scanning: {error}.",
                         stage_plan.stage_id
                     ));
-                    (format!("{}_request_failed", stage_plan.stage_id), None)
+                    (
+                        format!("{}_request_failed", stage_plan.stage_id),
+                        None,
+                        vec![],
+                    )
                 }
             };
 
@@ -1026,6 +1043,7 @@ fn execute_helper_runtime_probe_stage(
                 action_status,
                 notes,
                 process_scan_report,
+                introspection_signals,
             }
         }
         Err(error) => HelperRuntimeProbeOutcome {
@@ -1035,6 +1053,7 @@ fn execute_helper_runtime_probe_stage(
                 stage_plan.stage_id
             )],
             process_scan_report: None,
+            introspection_signals: vec![],
         },
     }
 }
@@ -1136,6 +1155,7 @@ fn run_helper_runtime_completion_probe(
         },
         notes,
         process_scan_report: Some(process_scan_report),
+        introspection_signals: shutdown.introspection_signals,
     })
 }
 
