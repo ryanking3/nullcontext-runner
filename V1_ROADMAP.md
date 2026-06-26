@@ -219,6 +219,7 @@ Done or partially done:
 - VRAM cleanup stages and the selected-stage comparison now explicitly disclose when allocator/KV cleanup evidence is only runtime-global rather than stage-local, and they list which observed cleanup signals contributed to that interpretation
 - runtime introspection now also carries the actual missing declared and undeclared observed signal IDs for both the full runtime contract and the cleanup-signal subset, so operators can inspect the exact contract gaps instead of only aggregate counts
 - manifest-declared signal aliases can now normalize raw runtime event variants into the canonical Track B contract, and the UI shows both the raw observed event name and the canonical mapped signal when that translation happens
+- manifest-declared runtime and cleanup signals are no longer limited to the fixed built-in allocator/KV/model rows, so richer instrumented runtimes can surface extra lifecycle evidence directly in the signal matrices
 
 ### Remaining v1 Work
 
@@ -557,7 +558,7 @@ Rough commit guide:
 
 - `B1` completed: the instrumented-runtime contract now exposes the exact missing declared and undeclared observed signal IDs for both runtime and cleanup-signal coverage
 - `B2` completed: manifest-declared signal aliases can now normalize raw instrumented runtime event variants into canonical allocator/KV/model lifecycle evidence instead of leaving them as undeclared one-off event names
-- `B3` capture additional real allocator/KV/model lifecycle events from instrumented builds beyond the current normalized canonical set
+- `B3` completed: additional manifest-declared allocator/KV/model lifecycle signals can now appear directly in the runtime and cleanup signal matrices instead of being trapped in aggregate contract counts only
 - `B4` add true stage-local internal cleanup attribution or hooks where possible, instead of only runtime-global lifecycle evidence feeding cleanup stages
 - `B5` final Track B wording/claim-boundary pass once the deeper instrumentation work lands and the real evidence ceiling is known
 

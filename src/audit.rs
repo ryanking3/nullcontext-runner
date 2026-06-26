@@ -2544,12 +2544,12 @@ fn build_llama_runtime_introspection_report(
                         startup_failed,
                     ),
                     fallback_signal_entry(
-                        "allocator_teardown",
+                        "allocator_teardown_observed",
                         "Allocator Teardown",
                         startup_failed,
                     ),
                     fallback_signal_entry(
-                        "allocator_reset",
+                        "allocator_reset_observed",
                         "Allocator Reset",
                         startup_failed,
                     ),
@@ -2560,20 +2560,32 @@ fn build_llama_runtime_introspection_report(
                     ),
                     fallback_signal_entry("kv_cache_reused", "KV Cache Reused", startup_failed),
                     fallback_signal_entry(
-                        "kv_cache_clear",
+                        "kv_cache_clear_observed",
                         "KV Cache Clear",
                         startup_failed,
                     ),
-                    fallback_signal_entry("model_unload", "Model Unload", startup_failed),
+                    fallback_signal_entry(
+                        "model_unload_observed",
+                        "Model Unload",
+                        startup_failed,
+                    ),
                 ],
                 cleanup_signal_matrix: vec![
                     fallback_signal_entry(
-                        "allocator_reset",
+                        "allocator_reset_observed",
                         "Allocator Reset",
                         startup_failed,
                     ),
-                    fallback_signal_entry("kv_cache_clear", "KV Cache Clear", startup_failed),
-                    fallback_signal_entry("model_unload", "Model Unload", startup_failed),
+                    fallback_signal_entry(
+                        "kv_cache_clear_observed",
+                        "KV Cache Clear",
+                        startup_failed,
+                    ),
+                    fallback_signal_entry(
+                        "model_unload_observed",
+                        "Model Unload",
+                        startup_failed,
+                    ),
                 ],
                 observed_events: observed_signals
                     .iter()
@@ -2860,7 +2872,7 @@ fn build_llama_runtime_introspection_report(
     } else {
         "no_cleanup_signals_observed".to_string()
     };
-    let runtime_signal_matrix = vec![
+    let mut runtime_signal_matrix = vec![
         signal_entry(
             "allocator_initialized",
             "Allocator Initialized",
@@ -2874,7 +2886,7 @@ fn build_llama_runtime_introspection_report(
             startup_failed,
         ),
         signal_entry(
-            "allocator_teardown",
+            "allocator_teardown_observed",
             "Allocator Teardown",
             signal_declared(
                 &capabilities.declared_cleanup_signal_ids,
@@ -2886,7 +2898,7 @@ fn build_llama_runtime_introspection_report(
             startup_failed,
         ),
         signal_entry(
-            "allocator_reset",
+            "allocator_reset_observed",
             "Allocator Reset",
             signal_declared(
                 &capabilities.declared_cleanup_signal_ids,
@@ -2924,7 +2936,7 @@ fn build_llama_runtime_introspection_report(
             startup_failed,
         ),
         signal_entry(
-            "kv_cache_clear",
+            "kv_cache_clear_observed",
             "KV Cache Clear",
             signal_declared(
                 &capabilities.declared_cleanup_signal_ids,
@@ -2936,7 +2948,7 @@ fn build_llama_runtime_introspection_report(
             startup_failed,
         ),
         signal_entry(
-            "model_unload",
+            "model_unload_observed",
             "Model Unload",
             signal_declared(
                 &capabilities.declared_cleanup_signal_ids,
@@ -2950,9 +2962,16 @@ fn build_llama_runtime_introspection_report(
             startup_failed,
         ),
     ];
-    let cleanup_signal_matrix = vec![
+    runtime_signal_matrix.extend(build_additional_runtime_signal_entries(
+        &capabilities.declared_signal_ids,
+        &capabilities.declared_cleanup_signal_ids,
+        observed_signals,
+        &signal_aliases,
+        startup_failed,
+    ));
+    let mut cleanup_signal_matrix = vec![
         signal_entry(
-            "allocator_reset",
+            "allocator_reset_observed",
             "Allocator Reset",
             signal_declared(
                 &capabilities.declared_cleanup_signal_ids,
@@ -2966,7 +2985,7 @@ fn build_llama_runtime_introspection_report(
             startup_failed,
         ),
         signal_entry(
-            "kv_cache_clear",
+            "kv_cache_clear_observed",
             "KV Cache Clear",
             signal_declared(
                 &capabilities.declared_cleanup_signal_ids,
@@ -2978,7 +2997,7 @@ fn build_llama_runtime_introspection_report(
             startup_failed,
         ),
         signal_entry(
-            "model_unload",
+            "model_unload_observed",
             "Model Unload",
             signal_declared(
                 &capabilities.declared_cleanup_signal_ids,
@@ -2992,6 +3011,34 @@ fn build_llama_runtime_introspection_report(
             startup_failed,
         ),
     ];
+    cleanup_signal_matrix.extend(build_additional_cleanup_signal_entries(
+        &capabilities.declared_cleanup_signal_ids,
+        &capabilities.declared_signal_ids,
+        observed_signals,
+        &signal_aliases,
+        startup_failed,
+    ));
+    let additional_runtime_signal_count = runtime_signal_matrix
+        .iter()
+        .filter(|entry| {
+            !matches!(
+                entry.signal_id.as_str(),
+                "allocator_initialized"
+                    | "allocator_teardown_observed"
+                    | "allocator_reset_observed"
+                    | "kv_cache_initialized"
+                    | "kv_cache_reused"
+                    | "kv_cache_clear_observed"
+                    | "model_unload_observed"
+            )
+        })
+        .count();
+    if additional_runtime_signal_count > 0 {
+        notes.push(format!(
+            "This runtime declared {} additional manifest-driven runtime signal(s) beyond NullContext's built-in allocator/KV/model lifecycle rows, and they were included directly in the runtime signal matrix for this session.",
+            additional_runtime_signal_count
+        ));
+    }
     let declared_cleanup_signal_ids = cleanup_signal_matrix
         .iter()
         .filter(|entry| entry.declared_support_status == "declared_signal_support_available")
@@ -3365,6 +3412,99 @@ fn signal_declared(
         || declared_signal_ids.iter().any(|value| value == signal_id)
 }
 
+fn build_additional_runtime_signal_entries(
+    declared_signal_ids: &[String],
+    declared_cleanup_signal_ids: &[String],
+    observed_signals: &[RuntimeIntrospectionSignal],
+    signal_aliases: &BTreeMap<String, Vec<String>>,
+    startup_failed: bool,
+) -> Vec<LlamaRuntimeCleanupSignalEntryReport> {
+    let known_signal_ids = [
+        "allocator_initialized",
+        "allocator_teardown_observed",
+        "allocator_reset_observed",
+        "kv_cache_initialized",
+        "kv_cache_reused",
+        "kv_cache_clear_observed",
+        "model_unload_observed",
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+
+    declared_signal_ids
+        .iter()
+        .chain(declared_cleanup_signal_ids.iter())
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|signal_id| !known_signal_ids.contains(signal_id.as_str()))
+        .map(|signal_id| {
+            signal_entry(
+                &signal_id,
+                &signal_label_for_id(&signal_id),
+                signal_declared(declared_cleanup_signal_ids, declared_signal_ids, &signal_id),
+                observed_signals,
+                signal_aliases,
+                startup_failed,
+            )
+        })
+        .collect()
+}
+
+fn build_additional_cleanup_signal_entries(
+    declared_cleanup_signal_ids: &[String],
+    declared_signal_ids: &[String],
+    observed_signals: &[RuntimeIntrospectionSignal],
+    signal_aliases: &BTreeMap<String, Vec<String>>,
+    startup_failed: bool,
+) -> Vec<LlamaRuntimeCleanupSignalEntryReport> {
+    let known_cleanup_signal_ids = [
+        "allocator_reset_observed",
+        "kv_cache_clear_observed",
+        "model_unload_observed",
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+
+    declared_cleanup_signal_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|signal_id| !known_cleanup_signal_ids.contains(signal_id.as_str()))
+        .map(|signal_id| {
+            signal_entry(
+                &signal_id,
+                &signal_label_for_id(&signal_id),
+                signal_declared(declared_cleanup_signal_ids, declared_signal_ids, &signal_id),
+                observed_signals,
+                signal_aliases,
+                startup_failed,
+            )
+        })
+        .collect()
+}
+
+fn signal_label_for_id(signal_id: &str) -> String {
+    signal_id
+        .split('_')
+        .filter(|segment| !matches!(*segment, "observed"))
+        .map(|segment| {
+            if segment.eq_ignore_ascii_case("kv") {
+                return "KV".to_string();
+            }
+            let mut chars = segment.chars();
+            match chars.next() {
+                Some(first) => {
+                    format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn observed_signal_sources(signals: &[RuntimeIntrospectionSignal]) -> Vec<String> {
     let mut sources = signals
         .iter()
@@ -3504,6 +3644,25 @@ fn introspection_event_phase(event: &str) -> &'static str {
         | "kv_cache_clear_observed"
         | "model_unload_observed" => "cleanup",
         "introspection_signal_parse_failed" => "parse_failure",
+        _ if event.contains("init")
+            || event.contains("load")
+            || event.contains("alloc")
+            || event.contains("create") =>
+        {
+            "setup"
+        }
+        _ if event.contains("reuse") || event.contains("reused") => "reuse",
+        _ if event.contains("clear")
+            || event.contains("reset")
+            || event.contains("teardown")
+            || event.contains("unload")
+            || event.contains("cleanup")
+            || event.contains("free")
+            || event.contains("release")
+            || event.contains("destroy") =>
+        {
+            "cleanup"
+        }
         _ => "unknown",
     }
 }
@@ -3516,6 +3675,15 @@ fn introspection_event_scope(event: &str) -> &'static str {
         "kv_cache_initialized" | "kv_cache_reused" | "kv_cache_clear_observed" => "kv_cache",
         "model_unload_observed" => "model_lifecycle",
         "introspection_signal_parse_failed" => "parser",
+        _ if event.starts_with("allocator_") || event.contains("allocator") => "allocator",
+        _ if event.starts_with("kv_cache_")
+            || event.starts_with("kv_")
+            || event.contains("kv_cache")
+            || event.contains("context_cache") =>
+        {
+            "kv_cache"
+        }
+        _ if event.starts_with("model_") || event.contains("model") => "model_lifecycle",
         _ => "unknown",
     }
 }
@@ -3530,6 +3698,25 @@ fn introspection_event_cleanup_relevance(event: &str) -> &'static str {
             "setup_or_reuse_signal_only"
         }
         "introspection_signal_parse_failed" => "signal_capture_failure",
+        _ if event.contains("clear")
+            || event.contains("reset")
+            || event.contains("teardown")
+            || event.contains("unload")
+            || event.contains("cleanup")
+            || event.contains("free")
+            || event.contains("release")
+            || event.contains("destroy") =>
+        {
+            "direct_cleanup_path_signal"
+        }
+        _ if event.contains("init")
+            || event.contains("load")
+            || event.contains("alloc")
+            || event.contains("reuse")
+            || event.contains("create") =>
+        {
+            "setup_or_reuse_signal_only"
+        }
         _ => "unknown_cleanup_relevance",
     }
 }

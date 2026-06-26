@@ -8,6 +8,7 @@
     "kv_cache_initialized",
     "kv_cache_reused",
     "kv_cache_clear_observed",
+    "model_load_observed",
     "model_unload_observed"
   ],
   "declared_cleanup_signal_ids": [
@@ -24,6 +25,9 @@
     ],
     "kv_cache_clear_observed": [
       "kv_cache_clear"
+    ],
+    "model_load_observed": [
+      "model_load"
     ],
     "model_unload_observed": [
       "model_unload"
