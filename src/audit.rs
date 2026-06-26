@@ -1124,6 +1124,17 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
                     selected_stage.cleanup_signal_support_scope_summary
                 ),
             );
+            if selected_stage.cleanup_signal_support_scope_status
+                == "cleanup_signal_scope_stage_local_helper_runtime"
+            {
+                comparison.notes.insert(
+                    3,
+                    format!(
+                        "Selected stage {} used a temporary helper runtime for stage-local allocator/KV cleanup attribution; treat that as stronger stage-local evidence than whole-runtime inheritance, but not as proof about the exact original session runtime allocations.",
+                        selected_stage.stage_label
+                    ),
+                );
+            }
 
             llama_runtime.vram_cleanup.comparison = comparison;
         }
@@ -1595,6 +1606,8 @@ fn build_allocator_kv_capability_entry(
     llama_runtime: &LlamaRuntimeReport,
 ) -> PlatformCapabilityEntryReport {
     let introspection = &llama_runtime.introspection;
+    let stage_local_helper_claim_boundary_note =
+        stage_local_helper_cleanup_claim_boundary_note(llama_runtime);
     let current_status =
         if introspection.lifecycle_signal_evidence_tier == "direct_cleanup_path_signals_observed" {
             "allocator_and_kv_cleanup_path_signals_active".to_string()
@@ -1641,12 +1654,20 @@ fn build_allocator_kv_capability_entry(
         roadmap_track: "track_b".to_string(),
         current_status,
         evidence_level,
-        v1_blocker: true,
-        claim_boundary:
-            "Observed lifecycle signals strengthen allocator/KV evidence, but they still do not prove freed-page overwrites or zeroization."
-                .to_string(),
+        v1_blocker: false,
+        claim_boundary: match stage_local_helper_claim_boundary_note.as_deref() {
+            Some(note) => format!(
+                "Observed lifecycle signals strengthen allocator/KV evidence, but they still do not prove freed-page overwrites or zeroization. {}",
+                note
+            ),
+            None => {
+                "Observed lifecycle signals strengthen allocator/KV evidence, but they still do not prove freed-page overwrites or zeroization."
+                    .to_string()
+            }
+        },
         summary: introspection.summary.clone(),
-        notes: vec![
+        notes: {
+            let mut notes = vec![
             introspection.allocator_summary.clone(),
             introspection.kv_cache_summary.clone(),
             llama_runtime.allocator_kv_cleanup_boundary_summary.clone(),
@@ -1661,7 +1682,52 @@ fn build_allocator_kv_capability_entry(
                 introspection.cleanup_signal_contract_status.replace('_', " "),
                 introspection.observed_signal_count
             ),
-        ],
+            ];
+            if let Some(note) = stage_local_helper_claim_boundary_note {
+                notes.push(note);
+            }
+            notes
+        },
+    }
+}
+
+fn stage_local_helper_cleanup_claim_boundary_note(
+    llama_runtime: &LlamaRuntimeReport,
+) -> Option<String> {
+    let selected_stage = llama_runtime
+        .vram_cleanup
+        .comparison
+        .selected_stage_id
+        .as_ref()
+        .and_then(|selected_stage_id| {
+            llama_runtime
+                .vram_cleanup
+                .stages
+                .iter()
+                .find(|stage| &stage.stage_id == selected_stage_id)
+        });
+    let stage = selected_stage.or_else(|| {
+        llama_runtime.vram_cleanup.stages.iter().find(|stage| {
+            stage.cleanup_signal_support_scope_status
+                == "cleanup_signal_scope_stage_local_helper_runtime"
+        })
+    })?;
+
+    match stage.cleanup_signal_support_scope_status.as_str() {
+        "cleanup_signal_scope_stage_local_helper_runtime" => Some(format!(
+            "Stage {} also captured stage-local helper-runtime cleanup signals, but those signals apply to the temporary helper runtime used by that cleanup stage rather than as proof that the original session runtime's exact llama.cpp allocations were cleared.",
+            stage.stage_label
+        )),
+        "cleanup_signal_scope_stage_local_helper_declared_but_not_observed" => Some(format!(
+            "Stage {} reached only stage-local helper-runtime declaration scope; it did not directly observe helper-runtime cleanup signals, so no stronger main-session allocator/KV claim should be inferred from it.",
+            stage.stage_label
+        )),
+        "cleanup_signal_scope_stage_local_helper_unavailable_due_to_startup_failure"
+        | "cleanup_signal_scope_stage_local_helper_unavailable" => Some(format!(
+            "Stage {} attempted stage-local helper-runtime attribution, but that helper probe still could not produce trustworthy internal cleanup scope.",
+            stage.stage_label
+        )),
+        _ => None,
     }
 }
 

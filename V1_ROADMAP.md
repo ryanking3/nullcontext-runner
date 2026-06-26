@@ -122,10 +122,9 @@ It is not yet enough to call the security program complete.
 
 The main remaining blockers are:
 
-1. Track B still needs deeper allocator / KV introspection.
-2. Track C still needs stronger CUDA / NVIDIA API-level truth.
-3. Track D and Track E still need more repeated-run evidence and threshold tuning that tells us which cleanup stages actually help consistently.
-4. v1 claim wording still needs to be frozen around the real final evidence level.
+1. Track C still needs stronger CUDA / NVIDIA API-level truth.
+2. Track D and Track E still need more repeated-run evidence and threshold tuning that tells us which cleanup stages actually help consistently.
+3. final claim wording still needs to stay aligned with the real evidence ceiling across the remaining tracks.
 
 Those are the remaining hard blockers.
 
@@ -244,8 +243,8 @@ Done or partially done:
 
 ### Honest Status
 
-Track B is structurally strong now, but it is not actually finished for the stricter `v1` security bar.
-It remains a real blocker until allocator/KV evidence depends less on declarations and more on stronger observed runtime truth.
+Track B is now strong enough for the current `v1` evidence bar.
+It still does not prove allocator zeroization or exact freed-page overwrite, but it now distinguishes stock runtime, manifest-backed instrumentation, canonical and extended lifecycle signals, runtime-global cleanup evidence, and stage-local helper-runtime cleanup attribution clearly enough for truthful `v1` reporting.
 
 ---
 
@@ -524,7 +523,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `3-11` commits
+- core security/evidence work across Tracks A-E: `3-10` commits
 - cross-cutting extra work: `4-7` commits
 - tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
@@ -533,7 +532,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `20-41` commits
+- `19-40` commits
 
 ### Track Breakdown
 
@@ -553,7 +552,7 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `0-1` commits
+- `0` commits
 
 Rough commit guide:
 
@@ -561,7 +560,7 @@ Rough commit guide:
 - `B2` completed: manifest-declared signal aliases can now normalize raw instrumented runtime event variants into canonical allocator/KV/model lifecycle evidence instead of leaving them as undeclared one-off event names
 - `B3` completed: additional manifest-declared allocator/KV/model lifecycle signals can now appear directly in the runtime and cleanup signal matrices instead of being trapped in aggregate contract counts only
 - `B4` completed: helper cleanup stages that launch their own temporary runtime now retain stage-local allocator/KV/model cleanup introspection instead of inheriting only runtime-global cleanup signals from the main session runtime
-- `B5` final Track B wording/claim-boundary pass once the deeper instrumentation work lands and the real evidence ceiling is known
+- `B5` completed: Track B claim boundaries now explicitly distinguish main-session runtime evidence from stage-local helper-runtime cleanup evidence, so stronger wording is no longer silently implied
 
 ### Track C: CUDA / NVIDIA Inspection
 
