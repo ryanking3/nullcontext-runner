@@ -503,6 +503,10 @@ pub struct LlamaRuntimeReport {
     pub gpu_backend_provenance_status: String,
     #[serde(default = "default_gpu_backend_provenance_summary")]
     pub gpu_backend_provenance_summary: String,
+    #[serde(default = "default_gpu_driver_process_scope_status")]
+    pub gpu_driver_process_scope_status: String,
+    #[serde(default = "default_gpu_driver_process_scope_summary")]
+    pub gpu_driver_process_scope_summary: String,
     #[serde(default = "default_gpu_evidence_tier_status")]
     pub gpu_evidence_tier_status: String,
     #[serde(default = "default_gpu_evidence_tier_summary")]
@@ -1805,6 +1809,7 @@ fn build_gpu_inspection_capability_entry(
             llama_runtime.gpu_context_visibility_summary.clone(),
             llama_runtime.gpu_trust_boundary_summary.clone(),
             llama_runtime.gpu_backend_provenance_summary.clone(),
+            llama_runtime.gpu_driver_process_scope_summary.clone(),
             llama_runtime.gpu_evidence_summary.clone(),
             llama_runtime.gpu_limitation_summary.clone(),
             llama_runtime.cleanup_summary.clone(),
@@ -2135,6 +2140,13 @@ pub fn build_llama_runtime_report(
         usage.gpu_observation_backend.as_deref(),
         post_shutdown.gpu_check_backend.as_deref(),
     );
+    let gpu_driver_process_scope_status = gpu_driver_process_scope_status(
+        gpu_offload_requested,
+        usage.gpu_observation_backend.as_deref(),
+        usage.gpu_detail_status.as_deref(),
+        post_shutdown.gpu_check_backend.as_deref(),
+        post_shutdown.gpu_check_detail_status.as_deref(),
+    );
     let gpu_evidence_tier_status = gpu_evidence_tier_status(
         gpu_offload_requested,
         &gpu_trust_boundary_status,
@@ -2239,6 +2251,12 @@ pub fn build_llama_runtime_report(
             &gpu_backend_provenance_status,
             usage.gpu_observation_backend.as_deref(),
             post_shutdown.gpu_check_backend.as_deref(),
+        ),
+        gpu_driver_process_scope_status: gpu_driver_process_scope_status.clone(),
+        gpu_driver_process_scope_summary: gpu_driver_process_scope_summary(
+            &gpu_driver_process_scope_status,
+            usage.gpu_detail_summary.as_deref(),
+            post_shutdown.gpu_check_detail_summary.as_deref(),
         ),
         gpu_evidence_tier_status: gpu_evidence_tier_status.clone(),
         gpu_evidence_tier_summary: gpu_evidence_tier_summary(
@@ -2457,6 +2475,18 @@ pub fn build_failed_launch_llama_runtime_report(
                 .to_string()
         } else {
             "GPU offload was not requested, so no Windows/NVIDIA GPU backend-provenance verdict applied."
+                .to_string()
+        },
+        gpu_driver_process_scope_status: if gpu_offload_requested {
+            "gpu_driver_process_scope_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
+        gpu_driver_process_scope_summary: if gpu_offload_requested {
+            "Runtime startup failed before NullContext could establish whether NVML driver APIs saw the runtime as a compute process, a graphics process, both, or not at all."
+                .to_string()
+        } else {
+            "GPU offload was not requested, so no NVML driver-process scope verdict applied."
                 .to_string()
         },
         gpu_evidence_tier_status: if gpu_offload_requested {
@@ -4302,6 +4332,106 @@ fn gpu_backend_provenance_summary(
     }
 }
 
+fn gpu_driver_process_scope_status(
+    gpu_offload_requested: bool,
+    live_backend: Option<&str>,
+    live_detail_status: Option<&str>,
+    post_shutdown_backend: Option<&str>,
+    post_shutdown_detail_status: Option<&str>,
+) -> String {
+    if !gpu_offload_requested {
+        return "gpu_offload_not_requested".to_string();
+    }
+
+    let live_is_nvml = live_backend.unwrap_or_default().contains("nvml");
+    let post_is_nvml = post_shutdown_backend.unwrap_or_default().contains("nvml");
+
+    if !live_is_nvml && !post_is_nvml {
+        return "gpu_driver_process_scope_no_nvml_detail".to_string();
+    }
+
+    let statuses = [live_detail_status, post_shutdown_detail_status];
+    let has_compute_and_graphics = statuses
+        .iter()
+        .flatten()
+        .any(|status| status.contains("nvml_process_scope_compute_and_graphics"));
+    let has_compute_only = statuses
+        .iter()
+        .flatten()
+        .any(|status| status.contains("nvml_process_scope_compute_only"));
+    let has_graphics_only = statuses
+        .iter()
+        .flatten()
+        .any(|status| status.contains("nvml_process_scope_graphics_only"));
+
+    if has_compute_and_graphics || (has_compute_only && has_graphics_only) {
+        return "gpu_driver_process_scope_nvml_compute_and_graphics".to_string();
+    }
+
+    if has_compute_only {
+        return "gpu_driver_process_scope_nvml_compute_only".to_string();
+    }
+
+    if has_graphics_only {
+        return "gpu_driver_process_scope_nvml_graphics_only".to_string();
+    }
+
+    if statuses
+        .iter()
+        .flatten()
+        .any(|status| status.contains("nvml_process_scope_pid_not_observed"))
+    {
+        return "gpu_driver_process_scope_nvml_pid_not_observed".to_string();
+    }
+
+    "gpu_driver_process_scope_nvml_detail_unavailable".to_string()
+}
+
+fn gpu_driver_process_scope_summary(
+    scope_status: &str,
+    live_detail_summary: Option<&str>,
+    post_shutdown_detail_summary: Option<&str>,
+) -> String {
+    let live_summary = live_detail_summary.unwrap_or("no live NVML process-scope detail");
+    let post_summary =
+        post_shutdown_detail_summary.unwrap_or("no post-shutdown NVML process-scope detail");
+
+    match scope_status {
+        "gpu_offload_not_requested" => {
+            "GPU offload was not requested, so no NVML driver-process scope verdict applied."
+                .to_string()
+        }
+        "gpu_driver_process_scope_nvml_compute_and_graphics" => format!(
+            "NVML driver APIs saw the runtime in compute and graphics process scope across the recorded windows. Live detail: {}. Post-shutdown detail: {}.",
+            live_summary, post_summary
+        ),
+        "gpu_driver_process_scope_nvml_compute_only" => format!(
+            "NVML driver APIs saw the runtime only in compute-process scope across the recorded windows. Live detail: {}. Post-shutdown detail: {}.",
+            live_summary, post_summary
+        ),
+        "gpu_driver_process_scope_nvml_graphics_only" => format!(
+            "NVML driver APIs saw the runtime only in graphics-process scope across the recorded windows. Live detail: {}. Post-shutdown detail: {}.",
+            live_summary, post_summary
+        ),
+        "gpu_driver_process_scope_nvml_pid_not_observed" => format!(
+            "NVML driver APIs were exercised, but they did not report the runtime PID in compute or graphics process scope during the recorded windows. Live detail: {}. Post-shutdown detail: {}.",
+            live_summary, post_summary
+        ),
+        "gpu_driver_process_scope_no_nvml_detail" => {
+            "This run did not capture NVML driver-process scope detail; current GPU evidence came from CLI-only backends or unavailable inspection paths."
+                .to_string()
+        }
+        "gpu_driver_process_scope_unavailable_due_to_startup_failure" => {
+            "Runtime startup failed before NullContext could capture any NVML driver-process scope detail."
+                .to_string()
+        }
+        _ => format!(
+            "NVML driver-process scope detail remained limited or inconsistent across the recorded windows. Live detail: {}. Post-shutdown detail: {}.",
+            live_summary, post_summary
+        ),
+    }
+}
+
 fn gpu_evidence_tier_status(
     gpu_offload_requested: bool,
     trust_boundary_status: &str,
@@ -5188,6 +5318,15 @@ fn default_gpu_backend_provenance_status() -> String {
 
 fn default_gpu_backend_provenance_summary() -> String {
     "This report did not yet classify whether its GPU evidence came from NVML driver APIs, nvidia-smi CLI paths, or a mixed backend chain."
+        .to_string()
+}
+
+fn default_gpu_driver_process_scope_status() -> String {
+    "gpu_driver_process_scope_unavailable".to_string()
+}
+
+fn default_gpu_driver_process_scope_summary() -> String {
+    "This report did not yet classify whether NVML driver APIs saw the runtime in compute-process scope, graphics-process scope, both, or neither."
         .to_string()
 }
 

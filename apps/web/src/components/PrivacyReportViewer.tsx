@@ -667,6 +667,10 @@ export function PrivacyReportViewer({
               {currentReport.llama_runtime.gpu_backend_provenance_summary}
             </p>
             <p>
+              <strong>gpu driver-process scope:</strong>{" "}
+              {currentReport.llama_runtime.gpu_driver_process_scope_summary}
+            </p>
+            <p>
               <strong>allocator/kv cleanup boundary:</strong>{" "}
               {currentReport.llama_runtime.allocator_kv_cleanup_boundary_summary}
             </p>

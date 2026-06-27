@@ -53,6 +53,8 @@ pub struct RuntimeUsageSnapshot {
     pub gpu_memory_bytes: Option<u64>,
     pub gpu_observation_backend: Option<String>,
     pub gpu_memory_source: Option<String>,
+    pub gpu_detail_status: Option<String>,
+    pub gpu_detail_summary: Option<String>,
     pub observation_notes: Vec<String>,
 }
 
@@ -82,6 +84,8 @@ pub struct RuntimePostShutdownObservation {
     pub gpu_last_pid_observed_at_ms: Option<u64>,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
+    pub gpu_check_detail_status: Option<String>,
+    pub gpu_check_detail_summary: Option<String>,
     pub vram_cleanup_strategy_id: Option<String>,
     pub vram_cleanup_strategy_windows: Vec<RuntimeGpuObservationStrategyStage>,
     pub observation_notes: Vec<String>,
@@ -98,6 +102,8 @@ pub struct RuntimeGpuObservationWindow {
     pub gpu_last_pid_observed_at_ms: Option<u64>,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
+    pub gpu_check_detail_status: Option<String>,
+    pub gpu_check_detail_summary: Option<String>,
     pub observation_notes: Vec<String>,
 }
 
@@ -132,6 +138,8 @@ struct RuntimePostShutdownGpuWindowObservation {
     last_pid_observed_at_ms: Option<u64>,
     backends: Vec<String>,
     sources: Vec<String>,
+    detail_statuses: Vec<String>,
+    detail_summaries: Vec<String>,
     notes: Vec<String>,
 }
 
@@ -293,6 +301,8 @@ impl RuntimePostShutdownGpuWindowObservation {
 
         push_unique_label(&mut self.backends, sample.backend);
         push_unique_label(&mut self.sources, sample.source);
+        push_unique_label(&mut self.detail_statuses, sample.detail_status);
+        push_unique_label(&mut self.detail_summaries, sample.detail_summary);
         push_unique_label(&mut self.notes, sample.note);
     }
 
@@ -327,6 +337,16 @@ impl RuntimePostShutdownGpuWindowObservation {
                 None
             } else {
                 Some(merge_observation_labels(&self.sources))
+            },
+            gpu_check_detail_status: if self.detail_statuses.is_empty() {
+                None
+            } else {
+                Some(merge_observation_labels(&self.detail_statuses))
+            },
+            gpu_check_detail_summary: if self.detail_summaries.is_empty() {
+                None
+            } else {
+                Some(merge_observation_labels(&self.detail_summaries))
             },
             observation_notes,
         }
@@ -404,6 +424,8 @@ impl ManagedRuntime {
         snapshot.gpu_memory_bytes = gpu.memory_bytes;
         snapshot.gpu_observation_backend = gpu.backend;
         snapshot.gpu_memory_source = gpu.source;
+        snapshot.gpu_detail_status = gpu.detail_status;
+        snapshot.gpu_detail_summary = gpu.detail_summary;
 
         if let Some(note) = gpu.note {
             snapshot.observation_notes.push(note);
@@ -751,6 +773,8 @@ fn observe_post_shutdown_internal(
         gpu_last_pid_observed_at_ms: baseline_gpu_window.gpu_last_pid_observed_at_ms,
         gpu_check_backend: baseline_gpu_window.gpu_check_backend.clone(),
         gpu_check_source: baseline_gpu_window.gpu_check_source.clone(),
+        gpu_check_detail_status: baseline_gpu_window.gpu_check_detail_status.clone(),
+        gpu_check_detail_summary: baseline_gpu_window.gpu_check_detail_summary.clone(),
         vram_cleanup_strategy_id: (!vram_cleanup_strategy_windows.is_empty())
             .then(|| VRAM_CLEANUP_STRATEGY_ID.to_string()),
         vram_cleanup_strategy_windows,
@@ -1184,6 +1208,8 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                 gpu_memory_bytes: None,
                 gpu_observation_backend: None,
                 gpu_memory_source: None,
+                gpu_detail_status: None,
+                gpu_detail_summary: None,
                 observation_notes: vec![],
             }
         }
@@ -1199,6 +1225,8 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
             gpu_memory_bytes: None,
             gpu_observation_backend: None,
             gpu_memory_source: None,
+            gpu_detail_status: None,
+            gpu_detail_summary: None,
             observation_notes: vec![format!(
                 "Process memory observation via ps failed with status {}.",
                 output.status
@@ -1216,6 +1244,8 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
             gpu_memory_bytes: None,
             gpu_observation_backend: None,
             gpu_memory_source: None,
+            gpu_detail_status: None,
+            gpu_detail_summary: None,
             observation_notes: vec![format!(
                 "Process memory observation via ps was unavailable: {error}."
             )],
@@ -1298,6 +1328,8 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
                         gpu_memory_bytes: None,
                         gpu_observation_backend: None,
                         gpu_memory_source: None,
+                        gpu_detail_status: None,
+                        gpu_detail_summary: None,
                         observation_notes,
                     }
                 }
@@ -1313,6 +1345,8 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
                     gpu_memory_bytes: None,
                     gpu_observation_backend: None,
                     gpu_memory_source: None,
+                    gpu_detail_status: None,
+                    gpu_detail_summary: None,
                     observation_notes: vec![format!(
                         "Windows process memory observation returned unparsable JSON: {error}."
                     )],
@@ -1331,6 +1365,8 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
             gpu_memory_bytes: None,
             gpu_observation_backend: None,
             gpu_memory_source: None,
+            gpu_detail_status: None,
+            gpu_detail_summary: None,
             observation_notes: vec![format!(
                 "Windows process memory observation via PowerShell failed with status {}.",
                 output.status
@@ -1348,6 +1384,8 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
             gpu_memory_bytes: None,
             gpu_observation_backend: None,
             gpu_memory_source: None,
+            gpu_detail_status: None,
+            gpu_detail_summary: None,
             observation_notes: vec![format!(
                 "Windows process memory observation via PowerShell was unavailable: {error}."
             )],
@@ -1369,6 +1407,8 @@ fn observe_process_memory(_pid: u32) -> RuntimeUsageSnapshot {
         gpu_memory_bytes: None,
         gpu_observation_backend: None,
         gpu_memory_source: None,
+        gpu_detail_status: None,
+        gpu_detail_summary: None,
         observation_notes: vec![
             "Process memory observation is not yet implemented on this platform.".to_string(),
         ],
@@ -1484,6 +1524,8 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                     gpu_memory_bytes: None,
                     gpu_observation_backend: None,
                     gpu_memory_source: None,
+                    gpu_detail_status: None,
+                    gpu_detail_summary: None,
                     observation_notes: vec![],
                 }
             }
@@ -1499,6 +1541,8 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                 gpu_memory_bytes: None,
                 gpu_observation_backend: None,
                 gpu_memory_source: None,
+                gpu_detail_status: None,
+                gpu_detail_summary: None,
                 observation_notes: vec![format!(
                     "Process memory observation via ps failed with status {}.",
                     output.status
@@ -1516,6 +1560,8 @@ fn observe_process_memory(pid: u32) -> RuntimeUsageSnapshot {
                 gpu_memory_bytes: None,
                 gpu_observation_backend: None,
                 gpu_memory_source: None,
+                gpu_detail_status: None,
+                gpu_detail_summary: None,
                 observation_notes: vec![format!(
                     "Process memory observation via ps was unavailable: {error}."
                 )],

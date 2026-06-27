@@ -13,6 +13,8 @@ pub struct GpuInspectionObservation {
     pub source: Option<String>,
     pub backend: Option<String>,
     pub pid_observed: Option<bool>,
+    pub detail_status: Option<String>,
+    pub detail_summary: Option<String>,
     pub note: Option<String>,
 }
 
@@ -22,6 +24,8 @@ struct BackendObservation {
     source: Option<String>,
     backend: String,
     pid_observed: Option<bool>,
+    detail_status: Option<String>,
+    detail_summary: Option<String>,
     note: Option<String>,
 }
 
@@ -58,6 +62,8 @@ pub fn observe_gpu_process(pid: u32) -> GpuInspectionObservation {
                 source: observation.source,
                 backend: Some(observation.backend),
                 pid_observed: observation.pid_observed,
+                detail_status: observation.detail_status,
+                detail_summary: observation.detail_summary,
                 note: observation.note,
             };
         }
@@ -68,6 +74,8 @@ pub fn observe_gpu_process(pid: u32) -> GpuInspectionObservation {
                 source: observation.source.clone(),
                 backend: Some(observation.backend.clone()),
                 pid_observed: Some(true),
+                detail_status: observation.detail_status.clone(),
+                detail_summary: observation.detail_summary.clone(),
                 note: observation.note.clone(),
             });
         }
@@ -106,6 +114,8 @@ pub fn observe_gpu_process(pid: u32) -> GpuInspectionObservation {
         } else {
             None
         },
+        detail_status: None,
+        detail_summary: None,
         note: Some(if prior_notes.is_empty() {
             "GPU memory observation backends were unavailable or inconclusive.".to_string()
         } else {
@@ -187,6 +197,8 @@ impl GpuInspectionBackend for NvidiaSmiComputeAppsBackend {
                             source: Some("nvidia-smi compute-apps".to_string()),
                             backend: "nvidia_smi_compute_apps".to_string(),
                             pid_observed: Some(true),
+                            detail_status: None,
+                            detail_summary: None,
                             note: if memory_mb.is_none() {
                                 Some(compute_apps_memory_unavailable_note(
                                     memory_raw.unwrap_or("unknown"),
@@ -205,6 +217,8 @@ impl GpuInspectionBackend for NvidiaSmiComputeAppsBackend {
                 source: None,
                 backend: "nvidia_smi_compute_apps".to_string(),
                 pid_observed: None,
+                detail_status: None,
+                detail_summary: None,
                 note: Some(format!(
                     "GPU memory observation via nvidia-smi compute-apps failed with status {}.",
                     output.status
@@ -215,6 +229,8 @@ impl GpuInspectionBackend for NvidiaSmiComputeAppsBackend {
                 source: None,
                 backend: "nvidia_smi_compute_apps".to_string(),
                 pid_observed: None,
+                detail_status: None,
+                detail_summary: None,
                 note: Some(format!(
                     "GPU memory observation via nvidia-smi compute-apps was unavailable: {error}."
                 )),
@@ -256,6 +272,8 @@ impl GpuInspectionBackend for NvidiaSmiPmonBackend {
                             source: Some("nvidia-smi pmon".to_string()),
                             backend: "nvidia_smi_pmon".to_string(),
                             pid_observed: Some(true),
+                            detail_status: None,
+                            detail_summary: None,
                             note: Some(
                                 "llama-server PID was observed in nvidia-smi pmon, but per-process GPU memory bytes were unavailable from the current NVIDIA tooling path."
                                     .to_string(),
@@ -269,6 +287,8 @@ impl GpuInspectionBackend for NvidiaSmiPmonBackend {
                     source: Some("nvidia-smi compute-apps + pmon".to_string()),
                     backend: "nvidia_smi_pmon".to_string(),
                     pid_observed: Some(false),
+                    detail_status: None,
+                    detail_summary: None,
                     note: Some(no_matching_gpu_pid_note()),
                 })
             }
@@ -277,6 +297,8 @@ impl GpuInspectionBackend for NvidiaSmiPmonBackend {
                 source: None,
                 backend: "nvidia_smi_pmon".to_string(),
                 pid_observed: None,
+                detail_status: None,
+                detail_summary: None,
                 note: Some(format!(
                     "GPU process observation via nvidia-smi pmon failed with status {}.",
                     output.status
@@ -287,6 +309,8 @@ impl GpuInspectionBackend for NvidiaSmiPmonBackend {
                 source: None,
                 backend: "nvidia_smi_pmon".to_string(),
                 pid_observed: None,
+                detail_status: None,
+                detail_summary: None,
                 note: Some(format!(
                     "GPU process observation via nvidia-smi pmon was unavailable: {error}."
                 )),
@@ -529,6 +553,11 @@ impl NvmlApi {
         let mut total_memory_bytes = 0_u64;
         let mut any_memory_visible = false;
         let mut matched_process_entries = 0_u32;
+        let mut matched_device_indices = Vec::new();
+        let mut compute_match_count = 0_u32;
+        let mut compute_memory_visible_count = 0_u32;
+        let mut graphics_match_count = 0_u32;
+        let mut graphics_memory_visible_count = 0_u32;
         let mut notes = Vec::new();
 
         for index in 0..device_count {
@@ -539,10 +568,16 @@ impl NvmlApi {
                     for process in processes {
                         if process.pid == pid {
                             matched_process_entries += 1;
+                            compute_match_count = compute_match_count.saturating_add(1);
+                            if !matched_device_indices.contains(&index) {
+                                matched_device_indices.push(index);
+                            }
                             if let Some(memory_bytes) = process.memory_bytes {
                                 total_memory_bytes =
                                     total_memory_bytes.saturating_add(memory_bytes);
                                 any_memory_visible = true;
+                                compute_memory_visible_count =
+                                    compute_memory_visible_count.saturating_add(1);
                             }
                         }
                     }
@@ -557,10 +592,16 @@ impl NvmlApi {
                     for process in processes {
                         if process.pid == pid {
                             matched_process_entries += 1;
+                            graphics_match_count = graphics_match_count.saturating_add(1);
+                            if !matched_device_indices.contains(&index) {
+                                matched_device_indices.push(index);
+                            }
                             if let Some(memory_bytes) = process.memory_bytes {
                                 total_memory_bytes =
                                     total_memory_bytes.saturating_add(memory_bytes);
                                 any_memory_visible = true;
+                                graphics_memory_visible_count =
+                                    graphics_memory_visible_count.saturating_add(1);
                             }
                         }
                     }
@@ -580,6 +621,11 @@ impl NvmlApi {
             } else {
                 None
             },
+            matched_device_count: matched_device_indices.len() as u32,
+            compute_match_count,
+            compute_memory_visible_count,
+            graphics_match_count,
+            graphics_memory_visible_count,
             notes,
         })
     }
@@ -592,6 +638,11 @@ struct NvmlProcessQuerySummary {
     device_count: u32,
     pid_observed: bool,
     memory_bytes: Option<u64>,
+    matched_device_count: u32,
+    compute_match_count: u32,
+    compute_memory_visible_count: u32,
+    graphics_match_count: u32,
+    graphics_memory_visible_count: u32,
     notes: Vec<String>,
 }
 
@@ -605,6 +656,8 @@ fn inspect_process_via_nvml(pid: u32) -> Option<BackendObservation> {
                 source: None,
                 backend: "nvml_process_listing".to_string(),
                 pid_observed: None,
+                detail_status: None,
+                detail_summary: None,
                 note: Some(format!("NVML inspection backend was unavailable: {error}.")),
             });
         }
@@ -616,6 +669,8 @@ fn inspect_process_via_nvml(pid: u32) -> Option<BackendObservation> {
             source: None,
             backend: "nvml_process_listing".to_string(),
             pid_observed: None,
+            detail_status: None,
+            detail_summary: None,
             note: Some(format!(
                 "NVML inspection backend failed to initialize: {error}."
             )),
@@ -650,6 +705,8 @@ fn inspect_process_via_nvml(pid: u32) -> Option<BackendObservation> {
                     source: Some("NVML running-process APIs".to_string()),
                     backend: "nvml_process_listing".to_string(),
                     pid_observed: Some(true),
+                    detail_status: Some(nvml_process_scope_status(&summary)),
+                    detail_summary: Some(nvml_process_scope_summary(&summary)),
                     note: Some(notes.join(" ")),
                 })
             } else {
@@ -660,6 +717,8 @@ fn inspect_process_via_nvml(pid: u32) -> Option<BackendObservation> {
                     source: Some("NVML running-process APIs".to_string()),
                     backend: "nvml_process_listing".to_string(),
                     pid_observed: Some(false),
+                    detail_status: Some("nvml_process_scope_pid_not_observed".to_string()),
+                    detail_summary: Some(nvml_process_scope_summary(&summary)),
                     note: Some(notes.join(" ")),
                 })
             }
@@ -669,6 +728,8 @@ fn inspect_process_via_nvml(pid: u32) -> Option<BackendObservation> {
             source: Some("NVML running-process APIs".to_string()),
             backend: "nvml_process_listing".to_string(),
             pid_observed: None,
+            detail_status: None,
+            detail_summary: None,
             note: Some(format!("NVML process inspection failed: {error}.")),
         }),
     }
@@ -756,6 +817,49 @@ fn compute_apps_memory_unavailable_note(memory_raw: &str) -> String {
 fn compute_apps_memory_unavailable_note(memory_raw: &str) -> String {
     format!(
         "llama-server PID was observed in nvidia-smi compute-apps, but per-process GPU memory bytes were unavailable ({memory_raw})."
+    )
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn nvml_process_scope_status(summary: &NvmlProcessQuerySummary) -> String {
+    match (
+        summary.compute_match_count > 0,
+        summary.graphics_match_count > 0,
+    ) {
+        (true, true) => "nvml_process_scope_compute_and_graphics".to_string(),
+        (true, false) => "nvml_process_scope_compute_only".to_string(),
+        (false, true) => "nvml_process_scope_graphics_only".to_string(),
+        (false, false) => "nvml_process_scope_pid_not_observed".to_string(),
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn nvml_process_scope_summary(summary: &NvmlProcessQuerySummary) -> String {
+    if !summary.pid_observed {
+        return format!(
+            "NVML did not report the runtime PID in either compute or graphics process listings across {} queried GPU device(s).",
+            summary.device_count
+        );
+    }
+
+    let scope = match (
+        summary.compute_match_count > 0,
+        summary.graphics_match_count > 0,
+    ) {
+        (true, true) => "both compute and graphics",
+        (true, false) => "compute-only",
+        (false, true) => "graphics-only",
+        (false, false) => "no matching",
+    };
+
+    format!(
+        "NVML matched the runtime PID on {} GPU device(s) with {} process-list visibility: {} compute match(es) ({} with bytes) and {} graphics match(es) ({} with bytes).",
+        summary.matched_device_count,
+        scope,
+        summary.compute_match_count,
+        summary.compute_memory_visible_count,
+        summary.graphics_match_count,
+        summary.graphics_memory_visible_count
     )
 }
 
