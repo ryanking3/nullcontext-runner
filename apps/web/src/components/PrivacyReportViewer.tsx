@@ -495,6 +495,12 @@ export function PrivacyReportViewer({
                 ),
               },
               {
+                label: "gpu backend comparison",
+                value: humanizeSnakeCase(
+                  currentReport.llama_runtime.gpu_backend_comparison_status
+                ),
+              },
+              {
                 label: "allocator/kv cleanup boundary",
                 value: humanizeSnakeCase(
                   currentReport.llama_runtime.allocator_kv_cleanup_boundary_status
@@ -675,6 +681,10 @@ export function PrivacyReportViewer({
             <p>
               <strong>gpu backend provenance:</strong>{" "}
               {currentReport.llama_runtime.gpu_backend_provenance_summary}
+            </p>
+            <p>
+              <strong>gpu backend comparison:</strong>{" "}
+              {currentReport.llama_runtime.gpu_backend_comparison_summary}
             </p>
             <p>
               <strong>gpu driver-process scope:</strong>{" "}

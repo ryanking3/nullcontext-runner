@@ -503,6 +503,10 @@ pub struct LlamaRuntimeReport {
     pub gpu_backend_provenance_status: String,
     #[serde(default = "default_gpu_backend_provenance_summary")]
     pub gpu_backend_provenance_summary: String,
+    #[serde(default = "default_gpu_backend_comparison_status")]
+    pub gpu_backend_comparison_status: String,
+    #[serde(default = "default_gpu_backend_comparison_summary")]
+    pub gpu_backend_comparison_summary: String,
     #[serde(default = "default_gpu_driver_process_scope_status")]
     pub gpu_driver_process_scope_status: String,
     #[serde(default = "default_gpu_driver_process_scope_summary")]
@@ -1814,6 +1818,7 @@ fn build_gpu_inspection_capability_entry(
             llama_runtime.gpu_allocator_visibility_summary.clone(),
             llama_runtime.gpu_trust_boundary_summary.clone(),
             llama_runtime.gpu_backend_provenance_summary.clone(),
+            llama_runtime.gpu_backend_comparison_summary.clone(),
             llama_runtime.gpu_driver_process_scope_summary.clone(),
             llama_runtime.gpu_evidence_summary.clone(),
             llama_runtime.gpu_limitation_summary.clone(),
@@ -2145,6 +2150,14 @@ pub fn build_llama_runtime_report(
         usage.gpu_observation_backend.as_deref(),
         post_shutdown.gpu_check_backend.as_deref(),
     );
+    let gpu_backend_comparison_status = gpu_backend_comparison_status(
+        gpu_offload_requested,
+        usage.gpu_observation_backend.as_deref(),
+        &live_gpu_evidence_class,
+        post_shutdown.gpu_check_backend.as_deref(),
+        &post_shutdown_gpu_evidence_class,
+        &gpu_backend_provenance_status,
+    );
     let gpu_driver_process_scope_status = gpu_driver_process_scope_status(
         gpu_offload_requested,
         usage.gpu_observation_backend.as_deref(),
@@ -2262,6 +2275,14 @@ pub fn build_llama_runtime_report(
             &gpu_backend_provenance_status,
             usage.gpu_observation_backend.as_deref(),
             post_shutdown.gpu_check_backend.as_deref(),
+        ),
+        gpu_backend_comparison_status: gpu_backend_comparison_status.clone(),
+        gpu_backend_comparison_summary: gpu_backend_comparison_summary(
+            &gpu_backend_comparison_status,
+            usage.gpu_observation_backend.as_deref(),
+            &live_gpu_evidence_class,
+            post_shutdown.gpu_check_backend.as_deref(),
+            &post_shutdown_gpu_evidence_class,
         ),
         gpu_driver_process_scope_status: gpu_driver_process_scope_status.clone(),
         gpu_driver_process_scope_summary: gpu_driver_process_scope_summary(
@@ -2493,6 +2514,18 @@ pub fn build_failed_launch_llama_runtime_report(
                 .to_string()
         } else {
             "GPU offload was not requested, so no Windows/NVIDIA GPU backend-provenance verdict applied."
+                .to_string()
+        },
+        gpu_backend_comparison_status: if gpu_offload_requested {
+            "gpu_backend_comparison_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
+        gpu_backend_comparison_summary: if gpu_offload_requested {
+            "Runtime startup failed before NullContext could compare which GPU inspection backend actually carried the live versus post-shutdown evidence for this run."
+                .to_string()
+        } else {
+            "GPU offload was not requested, so no Windows/NVIDIA GPU backend-comparison verdict applied."
                 .to_string()
         },
         gpu_driver_process_scope_status: if gpu_offload_requested {
@@ -4362,6 +4395,170 @@ fn gpu_backend_provenance_summary(
     }
 }
 
+fn gpu_backend_window_role(backend: Option<&str>, evidence_class: &str) -> &'static str {
+    let backend = backend.unwrap_or_default();
+
+    if evidence_class.contains("gpu_offload_not_requested") {
+        return "offload_not_requested";
+    }
+
+    if evidence_class.contains("unavailable_due_to_startup_failure") {
+        return "startup_failure";
+    }
+
+    if evidence_class.contains("gpu_evidence_unavailable") || backend.is_empty() {
+        return "unavailable";
+    }
+
+    if evidence_class.contains("visibility_limited") {
+        return "visibility_limited";
+    }
+
+    if evidence_class.contains("pid_not_observed") {
+        return "pid_not_observed";
+    }
+
+    if backend.contains("nvml") && evidence_class.contains("pid_and_allocation_bytes_visible") {
+        return "nvml_bytes";
+    }
+
+    if backend.contains("compute_apps")
+        && evidence_class.contains("pid_and_allocation_bytes_visible")
+    {
+        return "compute_apps_bytes";
+    }
+
+    if backend.contains("nvml")
+        && evidence_class.contains("pid_visible_but_allocation_bytes_unavailable")
+    {
+        return "nvml_pid_only";
+    }
+
+    if backend.contains("compute_apps")
+        && evidence_class.contains("pid_visible_but_allocation_bytes_unavailable")
+    {
+        return "compute_apps_pid_only";
+    }
+
+    if backend.contains("pmon")
+        && evidence_class.contains("pid_visible_but_allocation_bytes_unavailable")
+    {
+        return "pmon_pid_only";
+    }
+
+    "mixed"
+}
+
+fn describe_gpu_backend_window_role(role: &str, backend: Option<&str>) -> String {
+    let backend_label = backend.unwrap_or("none");
+
+    match role {
+        "offload_not_requested" => "GPU offload not requested".to_string(),
+        "startup_failure" => "runtime startup failed before backend comparison".to_string(),
+        "unavailable" => "no usable backend evidence".to_string(),
+        "visibility_limited" => format!("visibility-limited backend path via {backend_label}"),
+        "pid_not_observed" => format!("PID not observed via {backend_label}"),
+        "nvml_bytes" => "NVML driver API bytes".to_string(),
+        "compute_apps_bytes" => "nvidia-smi compute-apps bytes".to_string(),
+        "nvml_pid_only" => "NVML PID-only visibility".to_string(),
+        "compute_apps_pid_only" => "nvidia-smi compute-apps PID-only visibility".to_string(),
+        "pmon_pid_only" => "nvidia-smi pmon PID-only visibility".to_string(),
+        _ => format!("mixed backend path via {backend_label}"),
+    }
+}
+
+fn gpu_backend_comparison_status(
+    gpu_offload_requested: bool,
+    live_backend: Option<&str>,
+    live_evidence_class: &str,
+    post_shutdown_backend: Option<&str>,
+    post_shutdown_evidence_class: &str,
+    provenance_status: &str,
+) -> String {
+    if !gpu_offload_requested {
+        return "gpu_offload_not_requested".to_string();
+    }
+
+    if live_evidence_class.contains("unavailable_due_to_startup_failure")
+        || post_shutdown_evidence_class.contains("unavailable_due_to_startup_failure")
+    {
+        return "gpu_backend_comparison_unavailable_due_to_startup_failure".to_string();
+    }
+
+    let live_role = gpu_backend_window_role(live_backend, live_evidence_class);
+    let post_role = gpu_backend_window_role(post_shutdown_backend, post_shutdown_evidence_class);
+
+    if live_role == post_role {
+        return "gpu_backend_comparison_consistent_across_windows".to_string();
+    }
+
+    if provenance_status == "gpu_backend_provenance_mixed_nvml_and_cli" {
+        return "gpu_backend_comparison_driver_and_cli_split".to_string();
+    }
+
+    let roles = [live_role, post_role];
+    let has_compute_apps_bytes = roles.contains(&"compute_apps_bytes");
+    let has_pmon_pid_only = roles.contains(&"pmon_pid_only");
+
+    if has_compute_apps_bytes && has_pmon_pid_only {
+        return "gpu_backend_comparison_cli_bytes_with_pmon_fallback".to_string();
+    }
+
+    if roles.contains(&"unavailable") || roles.contains(&"visibility_limited") {
+        return "gpu_backend_comparison_one_window_weaker".to_string();
+    }
+
+    "gpu_backend_comparison_mixed".to_string()
+}
+
+fn gpu_backend_comparison_summary(
+    comparison_status: &str,
+    live_backend: Option<&str>,
+    live_evidence_class: &str,
+    post_shutdown_backend: Option<&str>,
+    post_shutdown_evidence_class: &str,
+) -> String {
+    let live_role = describe_gpu_backend_window_role(
+        gpu_backend_window_role(live_backend, live_evidence_class),
+        live_backend,
+    );
+    let post_role = describe_gpu_backend_window_role(
+        gpu_backend_window_role(post_shutdown_backend, post_shutdown_evidence_class),
+        post_shutdown_backend,
+    );
+
+    match comparison_status {
+        "gpu_offload_not_requested" => {
+            "GPU offload was not requested, so no Windows/NVIDIA GPU backend-comparison verdict applied."
+                .to_string()
+        }
+        "gpu_backend_comparison_consistent_across_windows" => format!(
+            "The same class of GPU backend carried both observation windows cleanly. Live window: {}. Post-shutdown window: {}.",
+            live_role, post_role
+        ),
+        "gpu_backend_comparison_driver_and_cli_split" => format!(
+            "The live and post-shutdown windows split across driver-backed and CLI-backed GPU evidence paths. Live window: {}. Post-shutdown window: {}. Read this as a real mixed-backend run rather than a single stable backend story.",
+            live_role, post_role
+        ),
+        "gpu_backend_comparison_cli_bytes_with_pmon_fallback" => format!(
+            "This run used CLI backends with different strengths across windows: one window reached compute-apps byte visibility while another relied only on pmon PID visibility. Live window: {}. Post-shutdown window: {}.",
+            live_role, post_role
+        ),
+        "gpu_backend_comparison_one_window_weaker" => format!(
+            "One GPU observation window was materially weaker than the other, so the report should be read window-by-window rather than as one stable backend verdict. Live window: {}. Post-shutdown window: {}.",
+            live_role, post_role
+        ),
+        "gpu_backend_comparison_unavailable_due_to_startup_failure" => {
+            "Runtime startup failed before NullContext could compare which GPU inspection backend actually carried the live versus post-shutdown evidence."
+                .to_string()
+        }
+        _ => format!(
+            "GPU backend comparison remained mixed across the live and post-shutdown windows. Live window: {}. Post-shutdown window: {}.",
+            live_role, post_role
+        ),
+    }
+}
+
 fn gpu_driver_process_scope_status(
     gpu_offload_requested: bool,
     live_backend: Option<&str>,
@@ -5451,6 +5648,15 @@ fn default_gpu_backend_provenance_status() -> String {
 
 fn default_gpu_backend_provenance_summary() -> String {
     "This report did not yet classify whether its GPU evidence came from NVML driver APIs, nvidia-smi CLI paths, or a mixed backend chain."
+        .to_string()
+}
+
+fn default_gpu_backend_comparison_status() -> String {
+    "gpu_backend_comparison_unavailable".to_string()
+}
+
+fn default_gpu_backend_comparison_summary() -> String {
+    "This report did not yet compare which GPU inspection backend actually carried the live versus post-shutdown evidence windows."
         .to_string()
 }
 

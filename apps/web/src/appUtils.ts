@@ -346,6 +346,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         "gpu_backend_provenance_unavailable_in_legacy_report";
       parsed.llama_runtime.gpu_backend_provenance_summary ??=
         "This older report did not classify whether its GPU evidence came from NVML driver APIs, nvidia-smi CLI paths, or a mixed backend chain.";
+      parsed.llama_runtime.gpu_backend_comparison_status ??=
+        "gpu_backend_comparison_unavailable_in_legacy_report";
+      parsed.llama_runtime.gpu_backend_comparison_summary ??=
+        "This older report did not compare which GPU inspection backend actually carried the live versus post-shutdown evidence windows.";
       parsed.llama_runtime.gpu_driver_process_scope_status ??=
         "gpu_driver_process_scope_unavailable_in_legacy_report";
       parsed.llama_runtime.gpu_driver_process_scope_summary ??=
