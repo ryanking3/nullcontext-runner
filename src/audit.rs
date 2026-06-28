@@ -519,6 +519,10 @@ pub struct LlamaRuntimeReport {
     pub gpu_context_visibility_status: String,
     #[serde(default = "default_gpu_context_visibility_summary")]
     pub gpu_context_visibility_summary: String,
+    #[serde(default = "default_gpu_allocator_visibility_status")]
+    pub gpu_allocator_visibility_status: String,
+    #[serde(default = "default_gpu_allocator_visibility_summary")]
+    pub gpu_allocator_visibility_summary: String,
     pub gpu_check_backend: Option<String>,
     pub gpu_check_source: Option<String>,
     pub inspection_status: String,
@@ -1807,6 +1811,7 @@ fn build_gpu_inspection_capability_entry(
             llama_runtime.gpu_evidence_tier_summary.clone(),
             llama_runtime.gpu_claim_boundary_summary.clone(),
             llama_runtime.gpu_context_visibility_summary.clone(),
+            llama_runtime.gpu_allocator_visibility_summary.clone(),
             llama_runtime.gpu_trust_boundary_summary.clone(),
             llama_runtime.gpu_backend_provenance_summary.clone(),
             llama_runtime.gpu_driver_process_scope_summary.clone(),
@@ -2162,6 +2167,12 @@ pub fn build_llama_runtime_report(
         &gpu_evidence_tier_status,
         &gpu_backend_provenance_status,
     );
+    let gpu_allocator_visibility_status = gpu_allocator_visibility_status(
+        gpu_offload_requested,
+        &gpu_evidence_tier_status,
+        &gpu_backend_provenance_status,
+        &gpu_driver_process_scope_status,
+    );
     let vram_inspection_status = vram_inspection_status(gpu_offload_requested, post_shutdown);
     let vram_cleanup = build_vram_cleanup_strategy_report(
         &config.llama_path,
@@ -2276,6 +2287,13 @@ pub fn build_llama_runtime_report(
             &gpu_evidence_tier_status,
             &gpu_backend_provenance_status,
         ),
+        gpu_allocator_visibility_status: gpu_allocator_visibility_status.clone(),
+        gpu_allocator_visibility_summary: gpu_allocator_visibility_summary(
+            &gpu_allocator_visibility_status,
+            &gpu_evidence_tier_status,
+            &gpu_backend_provenance_status,
+            &gpu_driver_process_scope_status,
+        ),
         gpu_check_backend: post_shutdown.gpu_check_backend.clone(),
         gpu_check_source: post_shutdown.gpu_check_source.clone(),
         inspection_status,
@@ -2303,7 +2321,7 @@ pub fn build_llama_runtime_report(
         },
         residual_risk_summary: runtime_residual_risk_summary(
             gpu_offload_requested,
-            &gpu_trust_boundary_status,
+            &gpu_allocator_visibility_status,
         ),
         introspection,
         vram_cleanup,
@@ -2523,6 +2541,18 @@ pub fn build_failed_launch_llama_runtime_report(
                 .to_string()
         } else {
             "GPU offload was not requested, so no Windows/NVIDIA GPU context-visibility verdict applied."
+                .to_string()
+        },
+        gpu_allocator_visibility_status: if gpu_offload_requested {
+            "gpu_allocator_visibility_unavailable_due_to_startup_failure".to_string()
+        } else {
+            "gpu_offload_not_requested".to_string()
+        },
+        gpu_allocator_visibility_summary: if gpu_offload_requested {
+            "Runtime startup failed before NullContext could establish how far GPU evidence reached toward allocator ownership, context teardown, or released-allocation truth for this run."
+                .to_string()
+        } else {
+            "GPU offload was not requested, so no Windows/NVIDIA GPU allocator-visibility verdict applied."
                 .to_string()
         },
         gpu_check_backend: failure.post_cleanup_observation.gpu_check_backend.clone(),
@@ -4710,6 +4740,107 @@ fn gpu_context_visibility_summary(
     }
 }
 
+fn gpu_allocator_visibility_status(
+    gpu_offload_requested: bool,
+    evidence_tier_status: &str,
+    provenance_status: &str,
+    driver_process_scope_status: &str,
+) -> String {
+    if !gpu_offload_requested {
+        return "gpu_offload_not_requested".to_string();
+    }
+
+    match evidence_tier_status {
+        "gpu_evidence_tier_driver_api_per_process_bytes"
+        | "gpu_evidence_tier_mixed_driver_and_cli_bytes" => {
+            if driver_process_scope_status == "gpu_driver_process_scope_nvml_compute_and_graphics" {
+                "gpu_allocator_visibility_driver_process_scope_but_not_allocator_truth".to_string()
+            } else {
+                "gpu_allocator_visibility_driver_byte_visibility_but_not_allocator_truth"
+                    .to_string()
+            }
+        }
+        "gpu_evidence_tier_cli_per_process_bytes"
+        | "gpu_evidence_tier_cli_pid_only_visibility"
+        | "gpu_evidence_tier_pid_visible_without_bytes" => {
+            "gpu_allocator_visibility_host_tool_process_visibility_only".to_string()
+        }
+        "gpu_evidence_tier_visibility_limited" => {
+            "gpu_allocator_visibility_visibility_limited".to_string()
+        }
+        "gpu_evidence_tier_unavailable_or_inconclusive" => {
+            "gpu_allocator_visibility_unavailable_or_inconclusive".to_string()
+        }
+        "gpu_evidence_tier_pid_not_observed" => {
+            if provenance_status == "gpu_backend_provenance_nvml_driver_api"
+                || provenance_status == "gpu_backend_provenance_mixed_nvml_and_cli"
+            {
+                "gpu_allocator_visibility_driver_path_pid_not_observed".to_string()
+            } else {
+                "gpu_allocator_visibility_host_tool_pid_not_observed".to_string()
+            }
+        }
+        _ => "gpu_allocator_visibility_mixed".to_string(),
+    }
+}
+
+fn gpu_allocator_visibility_summary(
+    allocator_visibility_status: &str,
+    evidence_tier_status: &str,
+    provenance_status: &str,
+    driver_process_scope_status: &str,
+) -> String {
+    match allocator_visibility_status {
+        "gpu_offload_not_requested" => {
+            "GPU offload was not requested, so no Windows/NVIDIA GPU allocator-visibility verdict applied."
+                .to_string()
+        }
+        "gpu_allocator_visibility_driver_process_scope_but_not_allocator_truth" => format!(
+            "This run reached the strongest current pre-allocator GPU boundary in NullContext: driver-backed per-process visibility plus NVML process-scope detail. Even so, NullContext still did not observe CUDA allocator ownership, specific freed-allocation overwrite, context-teardown completeness, or which surviving bytes belonged to model weights, KV/cache, scratch buffers, or staging memory. Evidence tier: {}. Provenance: {}. Driver scope: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " "),
+            driver_process_scope_status.replace('_', " ")
+        ),
+        "gpu_allocator_visibility_driver_byte_visibility_but_not_allocator_truth" => format!(
+            "This run reached driver-backed per-process GPU visibility, but allocator-level truth still stopped short of CUDA allocator ownership, exact released-allocation state, context-teardown completeness, and per-buffer attribution. Evidence tier: {}. Provenance: {}. Driver scope: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " "),
+            driver_process_scope_status.replace('_', " ")
+        ),
+        "gpu_allocator_visibility_host_tool_process_visibility_only" => format!(
+            "This run only reached host-tool process visibility on the GPU boundary. That does not expose CUDA allocator ownership, released-allocation state, context-teardown completeness, or which buffers corresponded to model weights, KV/cache, scratch, or staging memory. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_allocator_visibility_visibility_limited" => format!(
+            "GPU inspection remained visibility-limited, so NullContext could not even stabilize a trustworthy process-level foundation for allocator-level interpretation. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_allocator_visibility_unavailable_or_inconclusive" => format!(
+            "GPU evidence remained unavailable or inconclusive, so CUDA allocator ownership, teardown, and residual-allocation state stayed entirely unknown. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_allocator_visibility_driver_path_pid_not_observed"
+        | "gpu_allocator_visibility_host_tool_pid_not_observed" => format!(
+            "The runtime PID was not observed in sampled GPU windows, but that still does not reveal whether CUDA allocator-owned memory, driver-retained allocations, or context-linked buffers had already been released, reused, or merely hidden from the observation path. Evidence tier: {}. Provenance: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " ")
+        ),
+        "gpu_allocator_visibility_unavailable_due_to_startup_failure" => {
+            "Runtime startup failed before NullContext could establish any useful GPU allocator-visibility verdict for this run."
+                .to_string()
+        }
+        _ => format!(
+            "GPU allocator visibility remained mixed for this run: NullContext could partially see process-level GPU state, but allocator ownership, released-allocation state, and context teardown still could not be stated cleanly. Evidence tier: {}. Provenance: {}. Driver scope: {}.",
+            evidence_tier_status.replace('_', " "),
+            provenance_status.replace('_', " "),
+            driver_process_scope_status.replace('_', " ")
+        ),
+    }
+}
+
 fn allocator_kv_cleanup_boundary_status(
     introspection: &LlamaRuntimeIntrospectionReport,
     startup_failed: bool,
@@ -4816,33 +4947,35 @@ fn model_weights_cleanup_summary(introspection: &LlamaRuntimeIntrospectionReport
 
 fn runtime_residual_risk_summary(
     gpu_offload_requested: bool,
-    gpu_trust_boundary_status: &str,
+    gpu_allocator_visibility_status: &str,
 ) -> String {
     if !gpu_offload_requested {
         return "Allocator state, KV/cache contents, and model-weight residency in the external llama.cpp process remain unverified even after the recorded shutdown path."
             .to_string();
     }
 
-    let gpu_clause = match gpu_trust_boundary_status {
-        "gpu_trust_boundary_nvml_backed_per_process_bytes" => {
-            "GPU evidence reached per-process allocation-byte visibility, but allocator-level VRAM contents and cleanup guarantees still remain unverified"
+    let gpu_clause = match gpu_allocator_visibility_status {
+        "gpu_allocator_visibility_driver_process_scope_but_not_allocator_truth" => {
+            "GPU evidence reached driver-backed process and process-scope visibility, but allocator ownership, released-allocation overwrite, and per-buffer attribution still remain unverified"
         }
-        "gpu_trust_boundary_host_tool_per_process_bytes" => {
-            "GPU evidence reached host-tool allocation-byte visibility, but allocator-level VRAM contents and cleanup guarantees still remain unverified"
+        "gpu_allocator_visibility_driver_byte_visibility_but_not_allocator_truth" => {
+            "GPU evidence reached driver-backed per-process byte visibility, but allocator ownership, released-allocation overwrite, and per-buffer attribution still remain unverified"
         }
-        "gpu_trust_boundary_pid_visible_but_byte_visibility_blocked"
-        | "gpu_trust_boundary_pid_visible_without_allocation_bytes" => {
-            "GPU evidence only reached process-presence visibility, so residual VRAM volume and contents remain unverified"
+        "gpu_allocator_visibility_host_tool_process_visibility_only" => {
+            "GPU evidence only reached host-tool process visibility, so allocator ownership, VRAM volume truth, and per-buffer attribution remain unverified"
         }
-        "gpu_trust_boundary_visibility_limited"
-        | "gpu_trust_boundary_unavailable_or_inconclusive"
-        | "gpu_trust_boundary_unavailable_due_to_startup_failure" => {
-            "GPU evidence did not reach a strong visibility boundary, so VRAM residency and contents remain unverified"
+        "gpu_allocator_visibility_visibility_limited"
+        | "gpu_allocator_visibility_unavailable_or_inconclusive"
+        | "gpu_allocator_visibility_unavailable_due_to_startup_failure" => {
+            "GPU evidence did not reach a trustworthy allocator-adjacent visibility boundary, so VRAM residency, ownership, and contents remain unverified"
         }
-        "gpu_trust_boundary_pid_not_observed" => {
-            "the runtime PID was not observed in sampled GPU windows, but VRAM absence still cannot be guaranteed from that alone"
+        "gpu_allocator_visibility_driver_path_pid_not_observed"
+        | "gpu_allocator_visibility_host_tool_pid_not_observed" => {
+            "the runtime PID was not observed in sampled GPU windows, but allocator-owned or driver-retained VRAM absence still cannot be guaranteed from that alone"
         }
-        _ => "GPU evidence remained mixed, so VRAM residency and contents remain unverified",
+        _ => {
+            "GPU evidence remained mixed, so allocator ownership, VRAM residency, and contents remain unverified"
+        }
     };
 
     format!(
@@ -5354,6 +5487,15 @@ fn default_gpu_context_visibility_status() -> String {
 
 fn default_gpu_context_visibility_summary() -> String {
     "This report did not yet say whether its GPU evidence reached any meaningful CUDA-context-level visibility."
+        .to_string()
+}
+
+fn default_gpu_allocator_visibility_status() -> String {
+    "gpu_allocator_visibility_unavailable".to_string()
+}
+
+fn default_gpu_allocator_visibility_summary() -> String {
+    "This report did not yet state how far its GPU evidence reached toward allocator ownership, released-allocation truth, or per-buffer attribution."
         .to_string()
 }
 

@@ -362,6 +362,10 @@ export function parsePrivacyReport(raw: string): PrivacyReportData | null {
         "gpu_context_visibility_unavailable_in_legacy_report";
       parsed.llama_runtime.gpu_context_visibility_summary ??=
         "This older report did not say whether its GPU evidence reached any meaningful CUDA-context-level visibility.";
+      parsed.llama_runtime.gpu_allocator_visibility_status ??=
+        "gpu_allocator_visibility_unavailable_in_legacy_report";
+      parsed.llama_runtime.gpu_allocator_visibility_summary ??=
+        "This older report did not state how far its GPU evidence reached toward allocator ownership, released-allocation truth, or per-buffer attribution.";
       parsed.llama_runtime.allocator_kv_cleanup_boundary_status ??=
         "allocator_kv_cleanup_boundary_unavailable_in_legacy_report";
       parsed.llama_runtime.allocator_kv_cleanup_boundary_summary ??=

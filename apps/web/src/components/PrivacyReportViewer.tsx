@@ -483,6 +483,12 @@ export function PrivacyReportViewer({
                 ),
               },
               {
+                label: "gpu allocator visibility",
+                value: humanizeSnakeCase(
+                  currentReport.llama_runtime.gpu_allocator_visibility_status
+                ),
+              },
+              {
                 label: "gpu backend provenance",
                 value: humanizeSnakeCase(
                   currentReport.llama_runtime.gpu_backend_provenance_status
@@ -661,6 +667,10 @@ export function PrivacyReportViewer({
             <p>
               <strong>gpu context visibility:</strong>{" "}
               {currentReport.llama_runtime.gpu_context_visibility_summary}
+            </p>
+            <p>
+              <strong>gpu allocator visibility:</strong>{" "}
+              {currentReport.llama_runtime.gpu_allocator_visibility_summary}
             </p>
             <p>
               <strong>gpu backend provenance:</strong>{" "}

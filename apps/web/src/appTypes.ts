@@ -703,6 +703,8 @@ export type LlamaRuntimeReportData = {
   gpu_claim_boundary_summary: string;
   gpu_context_visibility_status: string;
   gpu_context_visibility_summary: string;
+  gpu_allocator_visibility_status: string;
+  gpu_allocator_visibility_summary: string;
   gpu_check_backend?: string | null;
   gpu_check_source?: string | null;
   inspection_status: string;
