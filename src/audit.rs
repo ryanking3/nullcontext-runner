@@ -1751,55 +1751,64 @@ fn build_gpu_inspection_capability_entry(
         "windows_nvidia_track_not_applicable_on_current_platform".to_string()
     } else if !llama_runtime.gpu_offload_requested {
         "windows_nvidia_gpu_inspection_not_exercised_in_this_report".to_string()
-    } else if llama_runtime
-        .live_gpu_evidence_class
-        .contains("nvml_pid_and_allocation_bytes_visible")
-        || llama_runtime
-            .post_shutdown_gpu_evidence_class
-            .contains("nvml_pid_and_allocation_bytes_visible")
-    {
-        "windows_nvidia_gpu_inspection_supported_with_nvml_bytes".to_string()
-    } else if llama_runtime
-        .live_gpu_evidence_class
-        .contains("pid_and_allocation_bytes_visible")
-        || llama_runtime
-            .post_shutdown_gpu_evidence_class
-            .contains("pid_and_allocation_bytes_visible")
-    {
-        "windows_nvidia_gpu_inspection_supported_with_pid_and_bytes_visibility".to_string()
-    } else if llama_runtime
-        .live_gpu_evidence_class
-        .contains("pid_visible")
-        || llama_runtime
-            .post_shutdown_gpu_evidence_class
-            .contains("pid_visible")
-    {
-        "windows_nvidia_gpu_inspection_pid_visible_but_bytes_limited".to_string()
-    } else if llama_runtime
-        .live_gpu_limitation_status
-        .contains("wddm_or_driver_hides_allocation_bytes")
-        || llama_runtime
-            .post_shutdown_gpu_limitation_status
-            .contains("wddm_or_driver_hides_allocation_bytes")
-    {
-        "windows_nvidia_gpu_inspection_wddm_or_driver_byte_limit".to_string()
-    } else if llama_runtime
-        .live_gpu_evidence_class
-        .contains("visibility_limited")
-        || llama_runtime
-            .post_shutdown_gpu_evidence_class
-            .contains("visibility_limited")
-    {
-        "windows_nvidia_gpu_inspection_visibility_limited".to_string()
     } else {
-        "windows_nvidia_gpu_inspection_limited".to_string()
+        match llama_runtime.gpu_evidence_tier_status.as_str() {
+            "gpu_evidence_tier_driver_api_per_process_bytes" => {
+                match llama_runtime.gpu_backend_comparison_status.as_str() {
+                    "gpu_backend_comparison_consistent_across_windows" => {
+                        "windows_nvidia_gpu_inspection_driver_bytes_consistent".to_string()
+                    }
+                    "gpu_backend_comparison_driver_and_cli_split" => {
+                        "windows_nvidia_gpu_inspection_driver_bytes_mixed_with_cli_windows"
+                            .to_string()
+                    }
+                    _ => "windows_nvidia_gpu_inspection_driver_bytes_with_explicit_boundaries"
+                        .to_string(),
+                }
+            }
+            "gpu_evidence_tier_mixed_driver_and_cli_bytes" => {
+                "windows_nvidia_gpu_inspection_mixed_driver_and_cli_bytes".to_string()
+            }
+            "gpu_evidence_tier_cli_per_process_bytes" => {
+                if llama_runtime.gpu_backend_comparison_status
+                    == "gpu_backend_comparison_cli_bytes_with_pmon_fallback"
+                {
+                    "windows_nvidia_gpu_inspection_cli_bytes_with_pmon_fallback".to_string()
+                } else {
+                    "windows_nvidia_gpu_inspection_cli_bytes_only".to_string()
+                }
+            }
+            "gpu_evidence_tier_pid_visible_without_bytes"
+            | "gpu_evidence_tier_cli_pid_only_visibility" => {
+                "windows_nvidia_gpu_inspection_pid_visible_but_bytes_limited".to_string()
+            }
+            "gpu_evidence_tier_visibility_limited" => {
+                "windows_nvidia_gpu_inspection_visibility_limited".to_string()
+            }
+            "gpu_evidence_tier_unavailable_or_inconclusive" => {
+                "windows_nvidia_gpu_inspection_limited".to_string()
+            }
+            "gpu_evidence_tier_pid_not_observed" => {
+                "windows_nvidia_gpu_inspection_pid_not_observed".to_string()
+            }
+            _ if llama_runtime
+                .live_gpu_limitation_status
+                .contains("wddm_or_driver_hides_allocation_bytes")
+                || llama_runtime
+                    .post_shutdown_gpu_limitation_status
+                    .contains("wddm_or_driver_hides_allocation_bytes") =>
+            {
+                "windows_nvidia_gpu_inspection_wddm_or_driver_byte_limit".to_string()
+            }
+            _ => "windows_nvidia_gpu_inspection_limited".to_string(),
+        }
     };
     let evidence_level = if scope_platform != "windows" {
         "non_windows_scope".to_string()
     } else if !llama_runtime.gpu_offload_requested {
         "gpu_offload_not_exercised".to_string()
     } else {
-        llama_runtime.gpu_evidence_tier_status.clone()
+        llama_runtime.gpu_allocator_visibility_status.clone()
     };
 
     PlatformCapabilityEntryReport {
@@ -2343,6 +2352,7 @@ pub fn build_llama_runtime_report(
         residual_risk_summary: runtime_residual_risk_summary(
             gpu_offload_requested,
             &gpu_allocator_visibility_status,
+            &allocator_kv_cleanup_boundary_status,
         ),
         introspection,
         vram_cleanup,
@@ -5145,10 +5155,37 @@ fn model_weights_cleanup_summary(introspection: &LlamaRuntimeIntrospectionReport
 fn runtime_residual_risk_summary(
     gpu_offload_requested: bool,
     gpu_allocator_visibility_status: &str,
+    allocator_kv_cleanup_boundary_status: &str,
 ) -> String {
+    let runtime_clause = match allocator_kv_cleanup_boundary_status {
+        "allocator_kv_cleanup_boundary_allocator_kv_and_model_cleanup_observed" => {
+            "Direct allocator, KV/cache, and model-unload cleanup-path signals were observed, which materially strengthens the internal runtime story but still does not prove freed-page overwrite or zeroization"
+        }
+        "allocator_kv_cleanup_boundary_allocator_and_kv_cleanup_observed" => {
+            "Direct allocator reset and KV/cache clear signals were observed, but the internal runtime story still stopped short of proving a full model-unload-backed memory clearance path"
+        }
+        "allocator_kv_cleanup_boundary_partial_cleanup_signals_observed" => {
+            "Some direct allocator/KV/model cleanup-path signals were observed, but the internal runtime cleanup story remained partial"
+        }
+        "allocator_kv_cleanup_boundary_setup_or_teardown_only" => {
+            "Lifecycle setup or teardown signals were observed, but direct allocator/KV cleanup-path evidence remained incomplete"
+        }
+        "allocator_kv_cleanup_boundary_declared_but_unobserved" => {
+            "The runtime declared allocator/KV instrumentation support, but this run did not actually observe direct cleanup-path signals"
+        }
+        "allocator_kv_cleanup_boundary_stock_runtime_only" => {
+            "The run stayed on the stock external runtime path, so internal allocator/KV cleanup still remains largely bounded by process exit rather than direct cleanup-path evidence"
+        }
+        _ => {
+            "Internal allocator/KV cleanup evidence remained mixed or limited for this run"
+        }
+    };
+
     if !gpu_offload_requested {
-        return "Allocator state, KV/cache contents, and model-weight residency in the external llama.cpp process remain unverified even after the recorded shutdown path."
-            .to_string();
+        return format!(
+            "Allocator state, KV/cache contents, and model-weight residency in the external llama.cpp process remain unverified even after the recorded shutdown path; {}.",
+            runtime_clause
+        );
     }
 
     let gpu_clause = match gpu_allocator_visibility_status {
@@ -5176,8 +5213,8 @@ fn runtime_residual_risk_summary(
     };
 
     format!(
-        "Allocator state, KV/cache contents, model-weight residency, and possible VRAM-resident buffers remain unverified even after the recorded shutdown path; {}.",
-        gpu_clause
+        "Allocator state, KV/cache contents, model-weight residency, and possible VRAM-resident buffers remain unverified even after the recorded shutdown path; {}. {}.",
+        runtime_clause, gpu_clause
     )
 }
 

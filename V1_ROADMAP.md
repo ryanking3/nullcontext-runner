@@ -108,6 +108,8 @@ NullContext already has meaningful foundations in-tree:
 - NVML-backed reports now also classify whether the runtime was seen in compute-process scope, graphics-process scope, both, or neither, instead of flattening all driver-API visibility into one undifferentiated NVML label
 - runtime reports now also carry an explicit GPU allocator-visibility verdict that says, in one place, where process-level evidence stops and allocator ownership, released-allocation state, context teardown, and per-buffer attribution still remain unknown
 - runtime reports now also carry an explicit backend-comparison verdict that says which backend actually carried the live and post-shutdown evidence windows, instead of leaving NVML, compute-apps, and pmon comparisons scattered across overlapping summaries
+- the Track C capability-matrix row now keys off the richer GPU allocator-visibility and backend-comparison truth instead of flattening all strong Windows/NVIDIA evidence into the older coarse byte-visibility buckets
+- the top-level runtime residual-risk summary now also keys off the allocator/KV cleanup boundary directly, so Track B internal cleanup evidence changes the operator-facing risk story instead of living only in a lower-level introspection section
 - repeated cleanup-stage recommendations now explicitly classify whether the current “best stage” is backed by stage-local clear marker scans, broader marker-clearance history, cleanup-signal-only support, GPU-only improvement trends, or still-limited repeated evidence
 - repeated release-gating now also requires marker-backed cleanup-stage recommendation evidence instead of treating GPU-only or cleanup-signal-only stage wins as equally gate-worthy
 - repeated cleanup-stage trend entries now also classify their own evidence-support class, so stage-by-stage comparison is not limited to scores and raw counts
@@ -528,7 +530,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 Current rough estimate:
 
 - core security/evidence work across Tracks A-E: `0-6` commits
-- cross-cutting extra work: `4-7` commits
+- cross-cutting extra work: `2-5` commits
 - tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
 - packaging / release prep: `4-7` commits
@@ -536,7 +538,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `15-36` commits
+- `13-34` commits
 
 ### Track Breakdown
 
@@ -607,15 +609,15 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `4-7` commits
+- `2-5` commits
 
 Rough commit guide:
 
-- `X1` connect Track B allocator/KV truth more directly into the top-level RAM/VRAM cleanup summaries and residual-risk wording
-- `X2` unify capability-matrix wording with the richer backend evidence classes so the matrix never overstates a track
+- `X1` completed: Track B allocator/KV cleanup-boundary truth now feeds directly into the top-level runtime residual-risk summary instead of staying trapped in the lower-level introspection section
+- `X2` completed: the Track C capability-matrix row now uses the richer GPU allocator-visibility and backend-comparison truth, so the matrix no longer collapses all strong Windows/NVIDIA evidence into the older coarse byte-visibility buckets
 - `X3` close remaining backend/frontend field gaps where a report field exists but is still hidden, underexplained, or inconsistently rendered
 - `X4` normalize residual-risk summaries so they are less repetitive and more specific by platform/runtime situation
-- `X5-X7` reserve room for follow-on cross-cutting cleanups that fall out of B/C/D/E work but are too small to deserve their own roadmap track
+- `X5` reserve room for one final follow-on cross-cutting cleanup that falls out of B/C/D/E work but is too small to deserve its own roadmap track
 
 ### Tests And Validation
 
