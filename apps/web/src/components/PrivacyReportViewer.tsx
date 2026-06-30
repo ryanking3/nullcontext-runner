@@ -379,6 +379,74 @@ export function PrivacyReportViewer({
             </span>
           </div>
 
+          <details className="report-detail" open>
+            <summary>
+              <span>security boundaries</span>
+              <span className="pill neutral">9</span>
+            </summary>
+            <div className="report-list">
+              {[
+                {
+                  label: "gpu trust boundary",
+                  status: currentReport.llama_runtime.gpu_trust_boundary_status,
+                  summary: currentReport.llama_runtime.gpu_trust_boundary_summary,
+                },
+                {
+                  label: "gpu evidence tier",
+                  status: currentReport.llama_runtime.gpu_evidence_tier_status,
+                  summary: currentReport.llama_runtime.gpu_evidence_tier_summary,
+                },
+                {
+                  label: "gpu claim boundary",
+                  status: currentReport.llama_runtime.gpu_claim_boundary_status,
+                  summary: currentReport.llama_runtime.gpu_claim_boundary_summary,
+                },
+                {
+                  label: "gpu context visibility",
+                  status: currentReport.llama_runtime.gpu_context_visibility_status,
+                  summary: currentReport.llama_runtime.gpu_context_visibility_summary,
+                },
+                {
+                  label: "gpu allocator visibility",
+                  status: currentReport.llama_runtime.gpu_allocator_visibility_status,
+                  summary: currentReport.llama_runtime.gpu_allocator_visibility_summary,
+                },
+                {
+                  label: "gpu backend provenance",
+                  status: currentReport.llama_runtime.gpu_backend_provenance_status,
+                  summary: currentReport.llama_runtime.gpu_backend_provenance_summary,
+                },
+                {
+                  label: "gpu backend comparison",
+                  status: currentReport.llama_runtime.gpu_backend_comparison_status,
+                  summary: currentReport.llama_runtime.gpu_backend_comparison_summary,
+                },
+                {
+                  label: "gpu driver-process scope",
+                  status: currentReport.llama_runtime.gpu_driver_process_scope_status,
+                  summary: currentReport.llama_runtime.gpu_driver_process_scope_summary,
+                },
+                {
+                  label: "allocator/kv cleanup boundary",
+                  status: currentReport.llama_runtime.allocator_kv_cleanup_boundary_status,
+                  summary: currentReport.llama_runtime.allocator_kv_cleanup_boundary_summary,
+                },
+              ].map((entry) => (
+                <div className="report-item" key={entry.label}>
+                  <div className="report-item-header">
+                    <strong>{entry.label}</strong>
+                    <span className={inspectionStatusClass(entry.status)}>
+                      {humanizeSnakeCase(entry.status)}
+                    </span>
+                  </div>
+                  <div className="report-path-list">
+                    <div>{entry.summary}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+
           <ReportGrid
             entries={[
               { label: "runtime kind", value: currentReport.llama_runtime.runtime_kind },
