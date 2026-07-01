@@ -2655,7 +2655,11 @@ pub fn build_failed_launch_llama_runtime_report(
                 allocator_kv_cleanup_boundary_summary
             )
         },
-        residual_risk_summary: failed_start_runtime_residual_risk_summary(gpu_offload_requested),
+        residual_risk_summary: failed_start_runtime_residual_risk_summary(
+            gpu_offload_requested,
+            failure.cleanup_succeeded,
+            &allocator_kv_cleanup_boundary_status,
+        ),
         introspection,
         vram_cleanup,
         memory_domains: vec![
@@ -5152,79 +5156,107 @@ fn model_weights_cleanup_summary(introspection: &LlamaRuntimeIntrospectionReport
     }
 }
 
+fn allocator_kv_residual_risk_clause(allocator_kv_cleanup_boundary_status: &str) -> &'static str {
+    match allocator_kv_cleanup_boundary_status {
+        "allocator_kv_cleanup_boundary_allocator_kv_and_model_cleanup_observed" => {
+            "direct allocator reset, KV/cache clear, and model-unload signals were observed, which materially strengthens the internal runtime cleanup story but still does not prove freed-page overwrite or zeroization."
+        }
+        "allocator_kv_cleanup_boundary_allocator_and_kv_cleanup_observed" => {
+            "direct allocator reset and KV/cache clear signals were observed, but the internal runtime story still stopped short of a full model-unload-backed clearance path."
+        }
+        "allocator_kv_cleanup_boundary_partial_cleanup_signals_observed" => {
+            "some direct allocator/KV/model cleanup-path signals were observed, but internal runtime cleanup evidence remained partial."
+        }
+        "allocator_kv_cleanup_boundary_setup_or_teardown_only" => {
+            "lifecycle setup or teardown signals were observed, but direct allocator/KV cleanup-path evidence remained incomplete."
+        }
+        "allocator_kv_cleanup_boundary_declared_but_unobserved" => {
+            "the runtime declared allocator/KV instrumentation support, but this run did not actually observe direct cleanup-path signals."
+        }
+        "allocator_kv_cleanup_boundary_stock_runtime_only" => {
+            "the run stayed on the stock external runtime path, so internal allocator/KV cleanup remains largely bounded by process exit rather than direct cleanup-path evidence."
+        }
+        _ => "internal allocator/KV cleanup evidence remained mixed or limited for this run.",
+    }
+}
+
+fn gpu_allocator_residual_risk_clause(gpu_allocator_visibility_status: &str) -> &'static str {
+    match gpu_allocator_visibility_status {
+        "gpu_allocator_visibility_driver_process_scope_but_not_allocator_truth" => {
+            "driver-backed process and process-scope visibility was reached, but allocator ownership, released-allocation overwrite, and per-buffer attribution still remain unverified."
+        }
+        "gpu_allocator_visibility_driver_byte_visibility_but_not_allocator_truth" => {
+            "driver-backed per-process byte visibility was reached, but allocator ownership, released-allocation overwrite, and per-buffer attribution still remain unverified."
+        }
+        "gpu_allocator_visibility_host_tool_process_visibility_only" => {
+            "only host-tool process visibility was reached, so allocator ownership, VRAM volume truth, and per-buffer attribution remain unverified."
+        }
+        "gpu_allocator_visibility_visibility_limited"
+        | "gpu_allocator_visibility_unavailable_or_inconclusive"
+        | "gpu_allocator_visibility_unavailable_due_to_startup_failure" => {
+            "GPU evidence did not reach a trustworthy allocator-adjacent visibility boundary, so VRAM residency, ownership, and contents remain unverified."
+        }
+        "gpu_allocator_visibility_driver_path_pid_not_observed"
+        | "gpu_allocator_visibility_host_tool_pid_not_observed" => {
+            "the runtime PID was not observed in sampled GPU windows, but allocator-owned or driver-retained VRAM absence still cannot be guaranteed from that alone."
+        }
+        _ => "GPU evidence remained mixed, so allocator ownership, VRAM residency, and contents remain unverified.",
+    }
+}
+
 fn runtime_residual_risk_summary(
     gpu_offload_requested: bool,
     gpu_allocator_visibility_status: &str,
     allocator_kv_cleanup_boundary_status: &str,
 ) -> String {
-    let runtime_clause = match allocator_kv_cleanup_boundary_status {
-        "allocator_kv_cleanup_boundary_allocator_kv_and_model_cleanup_observed" => {
-            "Direct allocator, KV/cache, and model-unload cleanup-path signals were observed, which materially strengthens the internal runtime story but still does not prove freed-page overwrite or zeroization"
-        }
-        "allocator_kv_cleanup_boundary_allocator_and_kv_cleanup_observed" => {
-            "Direct allocator reset and KV/cache clear signals were observed, but the internal runtime story still stopped short of proving a full model-unload-backed memory clearance path"
-        }
-        "allocator_kv_cleanup_boundary_partial_cleanup_signals_observed" => {
-            "Some direct allocator/KV/model cleanup-path signals were observed, but the internal runtime cleanup story remained partial"
-        }
-        "allocator_kv_cleanup_boundary_setup_or_teardown_only" => {
-            "Lifecycle setup or teardown signals were observed, but direct allocator/KV cleanup-path evidence remained incomplete"
-        }
-        "allocator_kv_cleanup_boundary_declared_but_unobserved" => {
-            "The runtime declared allocator/KV instrumentation support, but this run did not actually observe direct cleanup-path signals"
-        }
-        "allocator_kv_cleanup_boundary_stock_runtime_only" => {
-            "The run stayed on the stock external runtime path, so internal allocator/KV cleanup still remains largely bounded by process exit rather than direct cleanup-path evidence"
-        }
-        _ => {
-            "Internal allocator/KV cleanup evidence remained mixed or limited for this run"
-        }
-    };
+    let runtime_clause = allocator_kv_residual_risk_clause(allocator_kv_cleanup_boundary_status);
 
     if !gpu_offload_requested {
         return format!(
-            "Allocator state, KV/cache contents, and model-weight residency in the external llama.cpp process remain unverified even after the recorded shutdown path; {}.",
+            "Host-side residual risk remains in llama.cpp-owned RAM domains. {}",
             runtime_clause
         );
     }
 
-    let gpu_clause = match gpu_allocator_visibility_status {
-        "gpu_allocator_visibility_driver_process_scope_but_not_allocator_truth" => {
-            "GPU evidence reached driver-backed process and process-scope visibility, but allocator ownership, released-allocation overwrite, and per-buffer attribution still remain unverified"
-        }
-        "gpu_allocator_visibility_driver_byte_visibility_but_not_allocator_truth" => {
-            "GPU evidence reached driver-backed per-process byte visibility, but allocator ownership, released-allocation overwrite, and per-buffer attribution still remain unverified"
-        }
-        "gpu_allocator_visibility_host_tool_process_visibility_only" => {
-            "GPU evidence only reached host-tool process visibility, so allocator ownership, VRAM volume truth, and per-buffer attribution remain unverified"
-        }
-        "gpu_allocator_visibility_visibility_limited"
-        | "gpu_allocator_visibility_unavailable_or_inconclusive"
-        | "gpu_allocator_visibility_unavailable_due_to_startup_failure" => {
-            "GPU evidence did not reach a trustworthy allocator-adjacent visibility boundary, so VRAM residency, ownership, and contents remain unverified"
-        }
-        "gpu_allocator_visibility_driver_path_pid_not_observed"
-        | "gpu_allocator_visibility_host_tool_pid_not_observed" => {
-            "the runtime PID was not observed in sampled GPU windows, but allocator-owned or driver-retained VRAM absence still cannot be guaranteed from that alone"
-        }
-        _ => {
-            "GPU evidence remained mixed, so allocator ownership, VRAM residency, and contents remain unverified"
-        }
-    };
+    let gpu_clause = gpu_allocator_residual_risk_clause(gpu_allocator_visibility_status);
 
     format!(
-        "Allocator state, KV/cache contents, model-weight residency, and possible VRAM-resident buffers remain unverified even after the recorded shutdown path; {}. {}.",
+        "Residual risk remains across both host RAM and GPU-visible memory domains. Host side: {} GPU side: {}",
         runtime_clause, gpu_clause
     )
 }
 
-fn failed_start_runtime_residual_risk_summary(gpu_offload_requested: bool) -> String {
+fn failed_start_runtime_residual_risk_summary(
+    gpu_offload_requested: bool,
+    cleanup_succeeded: bool,
+    allocator_kv_cleanup_boundary_status: &str,
+) -> String {
+    let runtime_clause = allocator_kv_residual_risk_clause(allocator_kv_cleanup_boundary_status);
+
     if gpu_offload_requested {
-        "Because runtime startup failed before readiness, allocator state, RAM residency, and any possible GPU-offloaded setup state were not inspected through the normal shutdown path."
-            .to_string()
+        if cleanup_succeeded {
+            format!(
+                "Startup failed before readiness, so no healthy runtime window existed for normal RAM/VRAM inspection. Host side: {} GPU side: any partially initialized or driver-retained GPU state remained outside the normal post-shutdown evidence path.",
+                runtime_clause
+            )
+        } else {
+            format!(
+                "Startup failed before readiness and automatic cleanup was not confirmed. Host side: {} GPU side: any partially initialized or driver-retained GPU state remained outside the normal post-shutdown evidence path.",
+                runtime_clause
+            )
+        }
     } else {
-        "Because runtime startup failed before readiness, allocator state and RAM residency were not inspected through the normal shutdown path."
-            .to_string()
+        if cleanup_succeeded {
+            format!(
+                "Startup failed before readiness, so no healthy runtime window existed for normal RAM inspection. Host side: {}",
+                runtime_clause
+            )
+        } else {
+            format!(
+                "Startup failed before readiness and automatic cleanup was not confirmed. Host side: {}",
+                runtime_clause
+            )
+        }
     }
 }
 

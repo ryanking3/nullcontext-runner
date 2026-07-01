@@ -111,6 +111,7 @@ NullContext already has meaningful foundations in-tree:
 - the Track C capability-matrix row now keys off the richer GPU allocator-visibility and backend-comparison truth instead of flattening all strong Windows/NVIDIA evidence into the older coarse byte-visibility buckets
 - the top-level runtime residual-risk summary now also keys off the allocator/KV cleanup boundary directly, so Track B internal cleanup evidence changes the operator-facing risk story instead of living only in a lower-level introspection section
 - the runtime report UI now surfaces the key GPU/runtime security boundaries together in one dedicated section, so the operator does not have to reconstruct the main trust story from scattered grids and note lists
+- the runtime residual-risk wording is now normalized into clearer host-side versus GPU-side clauses, reducing repetition while making startup-failure and GPU-offload cases read like sharper operator verdicts
 - repeated cleanup-stage recommendations now explicitly classify whether the current “best stage” is backed by stage-local clear marker scans, broader marker-clearance history, cleanup-signal-only support, GPU-only improvement trends, or still-limited repeated evidence
 - repeated release-gating now also requires marker-backed cleanup-stage recommendation evidence instead of treating GPU-only or cleanup-signal-only stage wins as equally gate-worthy
 - repeated cleanup-stage trend entries now also classify their own evidence-support class, so stage-by-stage comparison is not limited to scores and raw counts
@@ -531,7 +532,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 Current rough estimate:
 
 - core security/evidence work across Tracks A-E: `0-6` commits
-- cross-cutting extra work: `1-4` commits
+- cross-cutting extra work: `0-3` commits
 - tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
 - packaging / release prep: `4-7` commits
@@ -539,7 +540,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `12-33` commits
+- `11-32` commits
 
 ### Track Breakdown
 
@@ -610,14 +611,14 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `1-4` commits
+- `0-3` commits
 
 Rough commit guide:
 
 - `X1` completed: Track B allocator/KV cleanup-boundary truth now feeds directly into the top-level runtime residual-risk summary instead of staying trapped in the lower-level introspection section
 - `X2` completed: the Track C capability-matrix row now uses the richer GPU allocator-visibility and backend-comparison truth, so the matrix no longer collapses all strong Windows/NVIDIA evidence into the older coarse byte-visibility buckets
 - `X3` completed: the runtime report UI now surfaces the main GPU/runtime security boundaries together in one dedicated section instead of scattering them only across raw grids and note lists
-- `X4` normalize residual-risk summaries so they are less repetitive and more specific by platform/runtime situation
+- `X4` completed: runtime residual-risk summaries are now normalized into clearer host-side versus GPU-side clauses, making shutdown, GPU-offload, and startup-failure cases less repetitive and more operator-specific
 - `X5` reserve room for one final follow-on cross-cutting cleanup that falls out of B/C/D/E work but is too small to deserve its own roadmap track
 
 ### Tests And Validation
