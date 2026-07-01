@@ -987,6 +987,9 @@ function legacyValidationReleaseGateReport() {
     gate_status: "release_gate_not_derived",
     cleanup_stage_gate_status: "cleanup_stage_gate_not_derived",
     controlled_canary_gate_status: "controlled_canary_gate_not_derived",
+    release_readiness_status: "release_readiness_not_derived",
+    release_readiness_summary:
+      "This older report did not collapse the release gate into one repeated-evidence readiness verdict.",
     min_stage_runs_required: 2,
     min_clear_canary_runs_required: 2,
     max_marker_detection_runs_allowed_for_clean_claim: 0,

@@ -348,6 +348,8 @@ export type ValidationReleaseGateReportData = {
   gate_status: string;
   cleanup_stage_gate_status: string;
   controlled_canary_gate_status: string;
+  release_readiness_status: string;
+  release_readiness_summary: string;
   min_stage_runs_required: number;
   min_clear_canary_runs_required: number;
   max_marker_detection_runs_allowed_for_clean_claim: number;

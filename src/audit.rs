@@ -285,6 +285,10 @@ pub struct ValidationReleaseGateReport {
     pub gate_status: String,
     pub cleanup_stage_gate_status: String,
     pub controlled_canary_gate_status: String,
+    #[serde(default = "default_release_readiness_status_not_derived")]
+    pub release_readiness_status: String,
+    #[serde(default = "default_release_readiness_summary_not_derived")]
+    pub release_readiness_summary: String,
     pub min_stage_runs_required: u32,
     pub min_clear_canary_runs_required: u32,
     pub max_marker_detection_runs_allowed_for_clean_claim: u32,
@@ -1875,40 +1879,20 @@ fn build_validation_harness_capability_entry(
     memory_validation: &MemoryValidationReport,
     memory_validation_history: &MemoryValidationHistoryReport,
 ) -> PlatformCapabilityEntryReport {
-    let current_status = if memory_validation_history
-        .cleanup_stage_recommendation
-        .clean_claim_status
-        == "clean_claim_eligible_under_current_thresholds"
+    let release_gate = &memory_validation_history.release_gate;
+    let current_status = if memory_validation.controlled_canary_run.requested_passes == 0
+        && memory_validation_history.runs_recorded == 0
     {
-        "validation_harness_active_with_clean_stage_candidate".to_string()
-    } else if memory_validation_history
-        .controlled_canary_history
-        .recommendation_status
-        == "controlled_canary_repeated_clear_history"
-    {
-        "validation_harness_active_with_repeated_clear_canary_history".to_string()
-    } else if memory_validation_history
-        .cleanup_stage_recommendation
-        .recommendation_status
-        == "recommendation_available"
-    {
-        "validation_harness_active_with_repeated_stage_guidance".to_string()
-    } else if memory_validation.controlled_canary_run.requested_passes > 0
-        && memory_validation_history.runs_recorded > 0
-    {
-        "validation_harness_active_with_cross_session_history".to_string()
-    } else if memory_validation.controlled_canary_run.requested_passes > 0 {
-        "validation_harness_active_for_current_report_only".to_string()
-    } else {
         "validation_harness_not_exercised".to_string()
-    };
-    let evidence_level = if memory_validation.controlled_canary_run.requested_passes > 0 {
-        memory_validation
-            .controlled_canary_run
-            .aggregate_signal_status
-            .clone()
     } else {
+        release_gate.release_readiness_status.clone()
+    };
+    let evidence_level = if memory_validation.controlled_canary_run.requested_passes == 0
+        && memory_validation_history.runs_recorded == 0
+    {
         memory_validation.validation_status.clone()
+    } else {
+        release_gate.gate_status.clone()
     };
 
     PlatformCapabilityEntryReport {
@@ -1921,9 +1905,10 @@ fn build_validation_harness_capability_entry(
         claim_boundary:
             "Validation history and repeated canary passes improve confidence, but they are still comparative evidence rather than release-proof forensic guarantees."
                 .to_string(),
-        summary: memory_validation.summary.clone(),
+        summary: release_gate.release_readiness_summary.clone(),
         notes: vec![
             memory_validation_history.summary.clone(),
+            release_gate.summary.clone(),
             memory_validation_history
                 .controlled_canary_history
                 .summary
@@ -5515,6 +5500,8 @@ fn default_validation_release_gate_report() -> ValidationReleaseGateReport {
         gate_status: "release_gate_not_derived".to_string(),
         cleanup_stage_gate_status: "cleanup_stage_gate_not_derived".to_string(),
         controlled_canary_gate_status: "controlled_canary_gate_not_derived".to_string(),
+        release_readiness_status: default_release_readiness_status_not_derived(),
+        release_readiness_summary: default_release_readiness_summary_not_derived(),
         min_stage_runs_required: 2,
         min_clear_canary_runs_required: 2,
         max_marker_detection_runs_allowed_for_clean_claim: 0,
@@ -5534,6 +5521,15 @@ fn default_validation_release_gate_report() -> ValidationReleaseGateReport {
             "Older reports may not include repeated-evidence release-gating guidance.".to_string(),
         ],
     }
+}
+
+fn default_release_readiness_status_not_derived() -> String {
+    "release_readiness_not_derived".to_string()
+}
+
+fn default_release_readiness_summary_not_derived() -> String {
+    "NullContext had not yet collapsed the release gate into one repeated-evidence readiness verdict for this report."
+        .to_string()
 }
 
 fn default_recommendation_evidence_not_derived() -> String {

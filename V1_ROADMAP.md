@@ -112,6 +112,7 @@ NullContext already has meaningful foundations in-tree:
 - the top-level runtime residual-risk summary now also keys off the allocator/KV cleanup boundary directly, so Track B internal cleanup evidence changes the operator-facing risk story instead of living only in a lower-level introspection section
 - the runtime report UI now surfaces the key GPU/runtime security boundaries together in one dedicated section, so the operator does not have to reconstruct the main trust story from scattered grids and note lists
 - the runtime residual-risk wording is now normalized into clearer host-side versus GPU-side clauses, reducing repetition while making startup-failure and GPU-offload cases read like sharper operator verdicts
+- release-gating now also collapses its raw stage/canary thresholds into one explicit release-readiness verdict, so Track E reads as a stable operator story instead of only a threshold table
 - repeated cleanup-stage recommendations now explicitly classify whether the current “best stage” is backed by stage-local clear marker scans, broader marker-clearance history, cleanup-signal-only support, GPU-only improvement trends, or still-limited repeated evidence
 - repeated release-gating now also requires marker-backed cleanup-stage recommendation evidence instead of treating GPU-only or cleanup-signal-only stage wins as equally gate-worthy
 - repeated cleanup-stage trend entries now also classify their own evidence-support class, so stage-by-stage comparison is not limited to scores and raw counts
@@ -531,7 +532,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `0-6` commits
+- core security/evidence work across Tracks A-E: `0-5` commits
 - cross-cutting extra work: `0-3` commits
 - tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
@@ -540,7 +541,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `11-32` commits
+- `10-31` commits
 
 ### Track Breakdown
 
@@ -600,12 +601,12 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `0-1` commits
+- `0` commits
 
 Rough commit guide:
 
 - `E1` completed: repeated-evidence ordering and gate semantics now distinguish runtime-global-only cleanup-signal support from stronger stage-local marker-backed evidence
-- `E2` freeze final release-gating semantics and operator wording once Track B/C/D evidence settles
+- `E2` completed: release gating now collapses stage/canary thresholds into one explicit release-readiness verdict, and the validation capability/report UI use that verdict instead of making the operator reconstruct readiness only from raw gate fields
 
 ### Cross-Cutting Extra Work
 

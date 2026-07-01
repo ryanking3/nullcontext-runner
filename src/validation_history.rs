@@ -1750,6 +1750,73 @@ fn build_release_gate(
         }
     };
 
+    let release_readiness_status = if stage_gate_passed && controlled_canary_gate_passed {
+        "release_readiness_repeated_evidence_ready_under_current_thresholds".to_string()
+    } else if stage_gate_passed && !controlled_canary_gate_passed {
+        "release_readiness_waiting_on_controlled_canary_history".to_string()
+    } else if !stage_gate_passed && controlled_canary_gate_passed {
+        "release_readiness_waiting_on_cleanup_stage_history".to_string()
+    } else if cleanup_stage_gate_status.contains("waiting_for_more")
+        || cleanup_stage_gate_status.contains("waiting_for_recommendation_evidence_history")
+        || controlled_canary_gate_status.contains("waiting_for_more")
+        || controlled_canary_gate_status == "controlled_canary_gate_not_exercised"
+    {
+        "release_readiness_waiting_for_more_history".to_string()
+    } else if cleanup_stage_gate_status.contains("marker")
+        || controlled_canary_gate_status.contains("marker")
+    {
+        "release_readiness_blocked_by_marker_persistence".to_string()
+    } else if cleanup_stage_gate_status.contains("cleanup_signal_only")
+        || cleanup_stage_gate_status.contains("runtime_global_cleanup_signal")
+        || cleanup_stage_gate_status.contains("gpu_only")
+        || cleanup_stage_gate_status.contains("fallback_scan_only")
+    {
+        "release_readiness_blocked_by_evidence_quality".to_string()
+    } else if cleanup_stage_gate_status.contains("worsened")
+        || cleanup_stage_gate_status.contains("inconclusive")
+        || controlled_canary_gate_status.contains("mixed_or_inconclusive")
+        || controlled_canary_gate_status.contains("backend_unsupported")
+    {
+        "release_readiness_blocked_by_inconsistent_or_unsupported_history".to_string()
+    } else {
+        "release_readiness_blocked_mixed".to_string()
+    };
+
+    let release_readiness_summary = match release_readiness_status.as_str() {
+        "release_readiness_repeated_evidence_ready_under_current_thresholds" => {
+            "Under the current in-report thresholds, repeated cleanup-stage evidence and repeated controlled-canary evidence are both strong enough to support a release-ready validation story for this scope."
+                .to_string()
+        }
+        "release_readiness_waiting_on_controlled_canary_history" => {
+            "Cleanup-stage history is currently stronger than the controlled-canary history for this scope; the release story is waiting on canary repetition rather than on stage scoring."
+                .to_string()
+        }
+        "release_readiness_waiting_on_cleanup_stage_history" => {
+            "Controlled-canary history is currently stronger than the cleanup-stage recommendation for this scope; the release story is waiting on repeated stage evidence rather than on canary repetition."
+                .to_string()
+        }
+        "release_readiness_waiting_for_more_history" => {
+            "The current validation story still needs more repeated history before it can be treated as release-ready for this scope."
+                .to_string()
+        }
+        "release_readiness_blocked_by_marker_persistence" => {
+            "Repeated validation is currently blocked by marker persistence, so the release story is not clean enough yet for this scope."
+                .to_string()
+        }
+        "release_readiness_blocked_by_evidence_quality" => {
+            "Repeated validation exists, but it is still backed by evidence classes that are weaker than the marker-backed threshold required for a clean release story."
+                .to_string()
+        }
+        "release_readiness_blocked_by_inconsistent_or_unsupported_history" => {
+            "Repeated validation is currently blocked by inconsistent, regressive, inconclusive, or backend-limited history, so the release story remains unstable for this scope."
+                .to_string()
+        }
+        _ => {
+            "Repeated validation remains mixed for this scope, so the release story still requires manual reading of the stage gate and controlled-canary gate details."
+                .to_string()
+        }
+    };
+
     let notes = vec![
         format!(
             "Cleanup-stage threshold requires at least {} repeated runs, {} marker-detection runs, {} worsened runs, and {} inconclusive runs for the recommended stage.",
@@ -1785,6 +1852,8 @@ fn build_release_gate(
         gate_status: gate_status.to_string(),
         cleanup_stage_gate_status: cleanup_stage_gate_status.to_string(),
         controlled_canary_gate_status: controlled_canary_gate_status.to_string(),
+        release_readiness_status,
+        release_readiness_summary,
         min_stage_runs_required,
         min_clear_canary_runs_required,
         max_marker_detection_runs_allowed_for_clean_claim,
@@ -1806,6 +1875,10 @@ fn default_release_gate_report() -> ValidationReleaseGateReport {
         gate_status: "release_gate_not_derived".to_string(),
         cleanup_stage_gate_status: "cleanup_stage_gate_not_derived".to_string(),
         controlled_canary_gate_status: "controlled_canary_gate_not_derived".to_string(),
+        release_readiness_status: "release_readiness_not_derived".to_string(),
+        release_readiness_summary:
+            "NullContext does not yet have enough repeated evidence to collapse this scope into one release-readiness verdict."
+                .to_string(),
         min_stage_runs_required: 2,
         min_clear_canary_runs_required: 2,
         max_marker_detection_runs_allowed_for_clean_claim: 0,

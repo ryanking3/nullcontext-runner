@@ -2142,8 +2142,22 @@ export function PrivacyReportViewer({
                 </span>
               </summary>
 
+              <div className="report-risk-block">
+                <p>
+                  <strong>release readiness:</strong>{" "}
+                  {currentReport.memory_validation_history.release_gate.release_readiness_summary}
+                </p>
+              </div>
+
               <ReportGrid
                 entries={[
+                  {
+                    label: "release readiness",
+                    value: humanizeSnakeCase(
+                      currentReport.memory_validation_history.release_gate
+                        .release_readiness_status
+                    ),
+                  },
                   {
                     label: "cleanup-stage gate",
                     value: humanizeSnakeCase(
