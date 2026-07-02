@@ -384,6 +384,8 @@ export type ControlledCanaryHistoryReportData = {
 export type MemoryValidationStageRecommendationReportData = {
   recommendation_status: string;
   clean_claim_status: string;
+  selection_fitness_status: string;
+  selection_fitness_summary: string;
   evidence_support_status: string;
   evidence_support_summary: string;
   stage_id?: string | null;
@@ -447,6 +449,8 @@ export type MemoryValidationStageTrendReportData = {
   latest_contributing_cleanup_signals: string[];
   latest_process_scan_context_status: string;
   latest_process_scan_context_scope: string;
+  selection_fitness_status: string;
+  selection_fitness_summary: string;
   evidence_support_status: string;
   evidence_support_summary: string;
   summary: string;

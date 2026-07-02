@@ -118,6 +118,7 @@ NullContext already has meaningful foundations in-tree:
 - repeated cleanup-stage trend entries now also classify their own evidence-support class, so stage-by-stage comparison is not limited to scores and raw counts
 - repeated cleanup-stage ordering now explicitly prefers stronger evidence-support classes instead of treating all stage scores as equally trustworthy
 - single-report cleanup-stage selection now also prefers stronger local marker-backed evidence classes instead of relying only on GPU visibility deltas
+- repeated cleanup-stage ranking now also classifies explicit selection fitness, so runtime-global-only and session-fallback-heavy stages can be demoted even when their raw scores look superficially strong
 - the final single-report cleanup-stage selection is now re-evaluated after full RAM-side marker context is attached, so the chosen stage is not frozen from an earlier GPU-first pass
 - VRAM cleanup stage reports now also carry allocator/KV cleanup-signal support directly, so stage interpretation is no longer only a GPU-plus-marker story
 
@@ -532,7 +533,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `0-5` commits
+- core security/evidence work across Tracks A-E: `0-4` commits
 - cross-cutting extra work: `0-3` commits
 - tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
@@ -541,7 +542,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `10-31` commits
+- `13-30` commits
 
 ### Track Breakdown
 
@@ -575,7 +576,7 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `0-2` commits
+- `0-1` commits
 
 Rough commit guide:
 
@@ -594,8 +595,8 @@ Estimated remaining:
 Rough commit guide:
 
 - `D1` completed: repeated cleanup-stage effectiveness is now aggregated explicitly so the report can say which stages actually help over time instead of only showing a winning recommendation
+- `D3` completed: repeated cleanup-stage ranking now carries explicit selection-fitness classes, and runtime-global-only or session-fallback-heavy stages are demoted before raw score alone can make them look like strong winners
 - `D2` add one more invasive cleanup experiment only if it improves evidence quality instead of just increasing stage count
-- `D3` prune or demote low-value stages and tighten final selection logic once repeated results make the weak stages obvious
 
 ### Track E: Validation and Release Gating
 

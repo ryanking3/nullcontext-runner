@@ -327,6 +327,10 @@ pub struct ControlledCanaryHistoryReport {
 pub struct MemoryValidationStageRecommendationReport {
     pub recommendation_status: String,
     pub clean_claim_status: String,
+    #[serde(default = "default_stage_selection_fitness_status_not_derived")]
+    pub selection_fitness_status: String,
+    #[serde(default = "default_stage_selection_fitness_summary_not_derived")]
+    pub selection_fitness_summary: String,
     #[serde(default = "default_memory_validation_stage_recommendation_evidence_support_status")]
     pub evidence_support_status: String,
     #[serde(default = "default_memory_validation_stage_recommendation_evidence_support_summary")]
@@ -410,6 +414,10 @@ pub struct MemoryValidationStageTrendReport {
     pub latest_process_scan_context_status: String,
     #[serde(default = "default_process_scan_context_scope")]
     pub latest_process_scan_context_scope: String,
+    #[serde(default = "default_stage_selection_fitness_status_not_derived")]
+    pub selection_fitness_status: String,
+    #[serde(default = "default_stage_selection_fitness_summary_not_derived")]
+    pub selection_fitness_summary: String,
     #[serde(default = "default_memory_validation_stage_trend_evidence_support_status")]
     pub evidence_support_status: String,
     #[serde(default = "default_memory_validation_stage_trend_evidence_support_summary")]
@@ -5566,6 +5574,8 @@ fn default_memory_validation_stage_recommendation_report(
     MemoryValidationStageRecommendationReport {
         recommendation_status: "recommendation_not_derived".to_string(),
         clean_claim_status: "clean_claim_not_derived".to_string(),
+        selection_fitness_status: default_stage_selection_fitness_status_not_derived(),
+        selection_fitness_summary: default_stage_selection_fitness_summary_not_derived(),
         evidence_support_status:
             default_memory_validation_stage_recommendation_evidence_support_status(),
         evidence_support_summary:
@@ -5603,6 +5613,15 @@ fn default_memory_validation_stage_recommendation_report(
 
 fn default_memory_validation_stage_recommendation_evidence_support_status() -> String {
     "recommendation_evidence_not_derived".to_string()
+}
+
+fn default_stage_selection_fitness_status_not_derived() -> String {
+    "selection_fitness_not_derived".to_string()
+}
+
+fn default_stage_selection_fitness_summary_not_derived() -> String {
+    "NullContext had not yet classified whether this cleanup stage was preferred, provisional, demoted, or blocked in the repeated-stage ranking."
+        .to_string()
 }
 
 fn default_memory_validation_stage_recommendation_evidence_support_summary() -> String {

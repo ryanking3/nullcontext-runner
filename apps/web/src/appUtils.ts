@@ -921,6 +921,9 @@ function legacyMemoryValidationStageTrendReport() {
     latest_contributing_cleanup_signals: [],
     latest_process_scan_context_status: "process_scan_context_unavailable",
     latest_process_scan_context_scope: "process_scan_context_unavailable",
+    selection_fitness_status: "selection_fitness_not_derived",
+    selection_fitness_summary:
+      "This older report did not classify whether the repeated cleanup-stage trend was preferred, provisional, demoted, or blocked in the repeated-stage ranking.",
     evidence_support_status: "recommendation_evidence_not_derived",
     evidence_support_summary:
       "This older report did not classify whether the repeated cleanup-stage trend was marker-backed, cleanup-signal-backed, GPU/process-trend-backed, or still too limited.",
@@ -933,6 +936,9 @@ function legacyMemoryValidationStageRecommendationReport() {
   return {
     recommendation_status: "recommendation_not_derived",
     clean_claim_status: "clean_claim_not_derived",
+    selection_fitness_status: "selection_fitness_not_derived",
+    selection_fitness_summary:
+      "This older report did not classify whether the cleanup-stage recommendation was preferred, provisional, demoted, or blocked in the repeated-stage ranking.",
     evidence_support_status: "recommendation_evidence_not_derived",
     evidence_support_summary:
       "This older report did not classify whether the cleanup-stage recommendation was marker-backed, only GPU-backed, or still too limited.",

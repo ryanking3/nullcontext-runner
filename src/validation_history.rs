@@ -899,80 +899,7 @@ fn build_stage_trends(
                     stage_label
                 ),
             };
-            let summary = format!(
-                "{} was recorded in {} run(s), averaged {:.1}/100, improved {} time(s), stayed unchanged {} time(s), worsened {} time(s), and remained inconclusive {} time(s). Stage-local direct scans were recorded in {} run(s), with {} clear stage-local scan(s) and {} stage-local marker-detection run(s). Strong allocator/KV cleanup-signal support was present in {} run(s), stage-local helper-runtime cleanup-signal scope was recorded in {} run(s), and runtime-global-only cleanup-signal scope was recorded in {} run(s).",
-                stage_label,
-                accumulator.runs_recorded,
-                avg_validation_score,
-                accumulator.improved_runs,
-                accumulator.unchanged_runs,
-                accumulator.worsened_runs,
-                accumulator.inconclusive_runs,
-                accumulator.stage_local_scan_runs,
-                accumulator.stage_local_scan_clear_runs,
-                accumulator.stage_local_scan_marker_detection_runs,
-                accumulator.cleanup_signal_strong_runs,
-                accumulator.cleanup_signal_stage_local_helper_runs,
-                accumulator.cleanup_signal_runtime_global_only_runs
-            );
-            let notes = vec![
-                format!(
-                    "Strong/moderate runs: {}, marker-detection runs: {}, clear marker support runs: {}.",
-                    accumulator.strong_or_moderate_runs,
-                    accumulator.marker_detection_runs,
-                    accumulator.clear_marker_support_runs
-                ),
-                format!(
-                    "Helper-stage scan runs: {}, clear helper scans: {}, helper marker detections: {}.",
-                    accumulator.helper_scan_runs,
-                    accumulator.helper_scan_clear_runs,
-                    accumulator.helper_scan_marker_detection_runs
-                ),
-                format!(
-                    "Cleanup-signal support: {} strong, {} partial, {} limited/unavailable.",
-                    accumulator.cleanup_signal_strong_runs,
-                    accumulator.cleanup_signal_partial_runs,
-                    accumulator.cleanup_signal_limited_runs
-                ),
-                format!(
-                    "Cleanup-signal scope: {} stage-local-helper run(s), {} runtime-global-only run(s), {} declared-but-unobserved run(s), {} unavailable/mixed run(s).",
-                    accumulator.cleanup_signal_stage_local_helper_runs,
-                    accumulator.cleanup_signal_runtime_global_only_runs,
-                    accumulator.cleanup_signal_declared_only_runs,
-                    accumulator.cleanup_signal_scope_unavailable_runs
-                ),
-                format!(
-                    "Repeated evidence support class: {}.",
-                    evidence_support_status.replace('_', " ")
-                ),
-                format!(
-                    "Stage-local direct scans: {} total, {} clear, {} marker-detected, {} limited. Session-fallback scan usage: {} run(s).",
-                    accumulator.stage_local_scan_runs,
-                    accumulator.stage_local_scan_clear_runs,
-                    accumulator.stage_local_scan_marker_detection_runs,
-                    accumulator.stage_local_scan_limited_runs,
-                    accumulator.session_fallback_scan_runs
-                ),
-                format!(
-                    "Latest VRAM evidence: {}. Latest verdict: {}. Latest marker evidence: {}. Latest cleanup-signal support: {}. Latest cleanup-signal scope: {}. Latest process-scan context: {} via {}.",
-                    latest_vram_evidence_status.replace('_', " "),
-                    latest_validation_verdict.replace('_', " "),
-                    latest_marker_evidence_status.replace('_', " "),
-                    latest_cleanup_signal_support_status.replace('_', " "),
-                    latest_cleanup_signal_support_scope_status.replace('_', " "),
-                    latest_process_scan_context_status.replace('_', " "),
-                    latest_process_scan_context_scope.replace('_', " ")
-                ),
-                format!(
-                    "Latest contributing cleanup signals: {}.",
-                    if latest_contributing_cleanup_signals.is_empty() {
-                        "none".to_string()
-                    } else {
-                        latest_contributing_cleanup_signals.join(", ")
-                    }
-                ),
-            ];
-            MemoryValidationStageTrendReport {
+            let mut trend = MemoryValidationStageTrendReport {
                 stage_id,
                 stage_label,
                 stage_kind,
@@ -1014,17 +941,108 @@ fn build_stage_trends(
                 latest_contributing_cleanup_signals,
                 latest_process_scan_context_status,
                 latest_process_scan_context_scope,
+                selection_fitness_status: "selection_fitness_not_derived".to_string(),
+                selection_fitness_summary: String::new(),
                 evidence_support_status: evidence_support_status.to_string(),
                 evidence_support_summary,
-                summary,
-                notes,
-            }
+                summary: String::new(),
+                notes: vec![],
+            };
+            trend.selection_fitness_status =
+                derive_stage_selection_fitness_status(&trend).to_string();
+            trend.selection_fitness_summary = stage_selection_fitness_summary(&trend);
+            let summary = format!(
+                "{} was recorded in {} run(s), averaged {:.1}/100, improved {} time(s), stayed unchanged {} time(s), worsened {} time(s), and remained inconclusive {} time(s). Stage-local direct scans were recorded in {} run(s), with {} clear stage-local scan(s) and {} stage-local marker-detection run(s). Strong allocator/KV cleanup-signal support was present in {} run(s), stage-local helper-runtime cleanup-signal scope was recorded in {} run(s), and runtime-global-only cleanup-signal scope was recorded in {} run(s).",
+                trend.stage_label,
+                trend.runs_recorded,
+                trend.avg_validation_score,
+                trend.improved_runs,
+                trend.unchanged_runs,
+                trend.worsened_runs,
+                trend.inconclusive_runs,
+                trend.stage_local_scan_runs,
+                trend.stage_local_scan_clear_runs,
+                trend.stage_local_scan_marker_detection_runs,
+                trend.cleanup_signal_strong_runs,
+                trend.cleanup_signal_stage_local_helper_runs,
+                trend.cleanup_signal_runtime_global_only_runs
+            );
+            let notes = vec![
+                format!(
+                    "Strong/moderate runs: {}, marker-detection runs: {}, clear marker support runs: {}.",
+                    trend.strong_or_moderate_runs,
+                    trend.marker_detection_runs,
+                    trend.clear_marker_support_runs
+                ),
+                format!(
+                    "Helper-stage scan runs: {}, clear helper scans: {}, helper marker detections: {}.",
+                    trend.helper_scan_runs,
+                    trend.helper_scan_clear_runs,
+                    trend.helper_scan_marker_detection_runs
+                ),
+                format!(
+                    "Cleanup-signal support: {} strong, {} partial, {} limited/unavailable.",
+                    trend.cleanup_signal_strong_runs,
+                    trend.cleanup_signal_partial_runs,
+                    trend.cleanup_signal_limited_runs
+                ),
+                format!(
+                    "Cleanup-signal scope: {} stage-local-helper run(s), {} runtime-global-only run(s), {} declared-but-unobserved run(s), {} unavailable/mixed run(s).",
+                    trend.cleanup_signal_stage_local_helper_runs,
+                    trend.cleanup_signal_runtime_global_only_runs,
+                    trend.cleanup_signal_declared_only_runs,
+                    trend.cleanup_signal_scope_unavailable_runs
+                ),
+                format!(
+                    "Selection fitness: {}.",
+                    trend.selection_fitness_status.replace('_', " ")
+                ),
+                format!(
+                    "Repeated evidence support class: {}.",
+                    trend.evidence_support_status.replace('_', " ")
+                ),
+                format!(
+                    "Stage-local direct scans: {} total, {} clear, {} marker-detected, {} limited. Session-fallback scan usage: {} run(s).",
+                    trend.stage_local_scan_runs,
+                    trend.stage_local_scan_clear_runs,
+                    trend.stage_local_scan_marker_detection_runs,
+                    trend.stage_local_scan_limited_runs,
+                    trend.session_fallback_scan_runs
+                ),
+                format!(
+                    "Latest VRAM evidence: {}. Latest verdict: {}. Latest marker evidence: {}. Latest cleanup-signal support: {}. Latest cleanup-signal scope: {}. Latest process-scan context: {} via {}.",
+                    trend.latest_vram_evidence_status.replace('_', " "),
+                    trend.latest_validation_verdict.replace('_', " "),
+                    trend.latest_marker_evidence_status.replace('_', " "),
+                    trend.latest_cleanup_signal_support_status.replace('_', " "),
+                    trend.latest_cleanup_signal_support_scope_status.replace('_', " "),
+                    trend.latest_process_scan_context_status.replace('_', " "),
+                    trend.latest_process_scan_context_scope.replace('_', " ")
+                ),
+                format!(
+                    "Latest contributing cleanup signals: {}.",
+                    if trend.latest_contributing_cleanup_signals.is_empty() {
+                        "none".to_string()
+                    } else {
+                        trend.latest_contributing_cleanup_signals.join(", ")
+                    }
+                ),
+            ];
+            trend.summary = summary;
+            trend.notes = notes;
+            trend
         })
         .collect::<Vec<_>>();
 
     stage_trends.sort_by(|a, b| {
-        stage_evidence_support_priority(&b.evidence_support_status)
-            .cmp(&stage_evidence_support_priority(&a.evidence_support_status))
+        stage_selection_fitness_priority(&b.selection_fitness_status)
+            .cmp(&stage_selection_fitness_priority(
+                &a.selection_fitness_status,
+            ))
+            .then_with(|| {
+                stage_evidence_support_priority(&b.evidence_support_status)
+                    .cmp(&stage_evidence_support_priority(&a.evidence_support_status))
+            })
             .then_with(|| b.avg_validation_score.total_cmp(&a.avg_validation_score))
             .then_with(|| b.runs_recorded.cmp(&a.runs_recorded))
             .then_with(|| b.strong_or_moderate_runs.cmp(&a.strong_or_moderate_runs))
@@ -1242,10 +1260,15 @@ fn build_stage_recommendation(
         .map(|trend| (trend, stage_effectiveness_score(trend)))
         .collect::<Vec<_>>();
     ranked_stages.sort_by(|(left_trend, left_score), (right_trend, right_score)| {
-        stage_evidence_support_priority(&right_trend.evidence_support_status)
-            .cmp(&stage_evidence_support_priority(
-                &left_trend.evidence_support_status,
+        stage_selection_fitness_priority(&right_trend.selection_fitness_status)
+            .cmp(&stage_selection_fitness_priority(
+                &left_trend.selection_fitness_status,
             ))
+            .then_with(|| {
+                stage_evidence_support_priority(&right_trend.evidence_support_status).cmp(
+                    &stage_evidence_support_priority(&left_trend.evidence_support_status),
+                )
+            })
             .then_with(|| right_score.total_cmp(left_score))
             .then_with(|| {
                 right_trend
@@ -1283,6 +1306,12 @@ fn build_stage_recommendation(
         "recommendation_mixed_no_clear_improvement"
     } else if trend.inconclusive_runs * 2 >= trend.runs_recorded {
         "recommendation_limited_by_inconclusive_history"
+    } else if trend.selection_fitness_status
+        == "selection_fitness_demoted_runtime_global_or_fallback_only"
+    {
+        "recommendation_limited_by_low_fitness_evidence"
+    } else if trend.selection_fitness_status == "selection_fitness_provisional_visibility_only" {
+        "recommendation_limited_by_visibility_only_history"
     } else {
         "recommendation_available"
     };
@@ -1294,6 +1323,16 @@ fn build_stage_recommendation(
         "clean_claim_blocked_by_worsened_history"
     } else if trend.inconclusive_runs > 0 {
         "clean_claim_blocked_by_inconclusive_history"
+    } else if trend.selection_fitness_status
+        == "selection_fitness_demoted_runtime_global_or_fallback_only"
+    {
+        "clean_claim_blocked_by_runtime_global_or_fallback_evidence"
+    } else if trend.selection_fitness_status
+        == "selection_fitness_provisional_stage_local_cleanup_signal_backed"
+    {
+        "clean_claim_blocked_by_cleanup_signal_only_evidence"
+    } else if trend.selection_fitness_status == "selection_fitness_provisional_visibility_only" {
+        "clean_claim_blocked_by_visibility_only_evidence"
     } else if effectiveness_gap.is_some_and(|gap| gap <= 3.0) {
         "clean_claim_blocked_by_narrow_lead_over_runner_up"
     } else if recommendation_status != "recommendation_available" {
@@ -1337,13 +1376,19 @@ fn build_stage_recommendation(
         ),
         "This recommendation is comparative operator guidance, not proof of full RAM or VRAM sanitization."
             .to_string(),
-        "Repeated cleanup-stage ranking now explicitly prefers stronger evidence-support classes before falling back to numeric effectiveness scoring."
+        "Repeated cleanup-stage ranking now explicitly prefers stronger selection-fitness classes before evidence-support classes and raw numeric effectiveness."
             .to_string(),
+        format!(
+            "Selection fitness: {}.",
+            trend.selection_fitness_status.replace('_', " ")
+        ),
+        trend.selection_fitness_summary.clone(),
     ];
     if let Some((runner_up_trend, runner_up_score)) = runner_up {
         notes.push(format!(
-            "Runner-up stage: {} with evidence class {}, effectiveness score {:.1}, and average validation score {:.1}/100.",
+            "Runner-up stage: {} with selection fitness {}, evidence class {}, effectiveness score {:.1}, and average validation score {:.1}/100.",
             runner_up_trend.stage_label,
+            runner_up_trend.selection_fitness_status.replace('_', " "),
             runner_up_trend.evidence_support_status.replace('_', " "),
             runner_up_score,
             runner_up_trend.avg_validation_score
@@ -1453,17 +1498,17 @@ fn build_stage_recommendation(
         }
     }
     if let Some((runner_up_trend, _)) = runner_up {
-        let leading_priority = stage_evidence_support_priority(&trend.evidence_support_status);
+        let leading_priority = stage_selection_fitness_priority(&trend.selection_fitness_status);
         let runner_up_priority =
-            stage_evidence_support_priority(&runner_up_trend.evidence_support_status);
+            stage_selection_fitness_priority(&runner_up_trend.selection_fitness_status);
         if leading_priority > runner_up_priority {
             notes.push(
-                "The leading stage outranked the runner-up partly because it belongs to a stronger repeated evidence-support class, not just because of raw score."
+                "The leading stage outranked the runner-up partly because it belongs to a stronger selection-fitness class, not just because of raw score."
                     .to_string(),
             );
         } else if leading_priority < runner_up_priority {
             notes.push(
-                "The runner-up had a stronger repeated evidence-support class, but the current ordering still favored the leading stage on the remaining ranking fields."
+                "The runner-up had a stronger selection-fitness class, but the current ordering still favored the leading stage on the remaining ranking fields."
                     .to_string(),
             );
         }
@@ -1501,6 +1546,14 @@ fn build_stage_recommendation(
             "{} currently ranks highest overall, but too many of its runs remained inconclusive to call it a clean winner yet.",
             trend.stage_label
         ),
+        "recommendation_limited_by_low_fitness_evidence" => format!(
+            "{} currently ranks highest overall, but its repeated evidence is still dominated by runtime-global-only or session-fallback support, so the win remains demoted.",
+            trend.stage_label
+        ),
+        "recommendation_limited_by_visibility_only_history" => format!(
+            "{} currently ranks highest overall, but the repeated history is still mostly visibility-only rather than marker-backed.",
+            trend.stage_label
+        ),
         _ => format!(
             "{} currently ranks highest overall, but the repeated evidence still looks mixed rather than clearly improved.",
             trend.stage_label
@@ -1521,6 +1574,18 @@ fn build_stage_recommendation(
         ),
         "clean_claim_blocked_by_inconclusive_history" => format!(
             "{} is currently the best repeated stage, but it is not a clean stage candidate because some repeated runs remain inconclusive.",
+            trend.stage_label
+        ),
+        "clean_claim_blocked_by_runtime_global_or_fallback_evidence" => format!(
+            "{} is currently the best repeated stage, but it is not a clean stage candidate because its support is still dominated by runtime-global-only or session-fallback evidence.",
+            trend.stage_label
+        ),
+        "clean_claim_blocked_by_cleanup_signal_only_evidence" => format!(
+            "{} is currently the best repeated stage, but it is not a clean stage candidate because it still relies on cleanup-signal support without equally strong repeated direct marker-clearance evidence.",
+            trend.stage_label
+        ),
+        "clean_claim_blocked_by_visibility_only_evidence" => format!(
+            "{} is currently the best repeated stage, but it is not a clean stage candidate because it still depends mostly on visibility-only evidence rather than direct marker clearance.",
             trend.stage_label
         ),
         "clean_claim_blocked_by_narrow_lead_over_runner_up" => format!(
@@ -1582,6 +1647,8 @@ fn build_stage_recommendation(
     MemoryValidationStageRecommendationReport {
         recommendation_status: recommendation_status.to_string(),
         clean_claim_status: clean_claim_status.to_string(),
+        selection_fitness_status: trend.selection_fitness_status.clone(),
+        selection_fitness_summary: trend.selection_fitness_summary.clone(),
         evidence_support_status: evidence_support_status.to_string(),
         evidence_support_summary,
         stage_id: Some(trend.stage_id.clone()),
@@ -1921,6 +1988,72 @@ fn stage_effectiveness_score(trend: &MemoryValidationStageTrendReport) -> f64 {
         - (trend.inconclusive_runs as f64 * 2.0)
 }
 
+fn derive_stage_selection_fitness_status(trend: &MemoryValidationStageTrendReport) -> &'static str {
+    if trend.runs_recorded < 2 {
+        "selection_fitness_waiting_for_repeated_runs"
+    } else if trend.marker_detection_runs > 0 || trend.worsened_runs > 0 {
+        "selection_fitness_blocked_by_marker_persistence_or_regressions"
+    } else if trend.stage_local_scan_clear_runs > 0 {
+        "selection_fitness_preferred_stage_local_marker_backed"
+    } else if trend.clear_marker_support_runs > 0 || trend.helper_scan_clear_runs > 0 {
+        "selection_fitness_acceptable_marker_history_backed"
+    } else if trend.inconclusive_runs * 2 >= trend.runs_recorded {
+        "selection_fitness_limited_by_inconclusive_history"
+    } else if (trend.cleanup_signal_strong_runs > 0 || trend.cleanup_signal_partial_runs > 0)
+        && trend.cleanup_signal_stage_local_helper_runs > 0
+        && trend.stage_local_scan_runs > 0
+    {
+        "selection_fitness_provisional_stage_local_cleanup_signal_backed"
+    } else if (trend.stage_local_scan_runs == 0 && trend.session_fallback_scan_runs > 0)
+        || (trend.cleanup_signal_runtime_global_only_runs > 0
+            && trend.cleanup_signal_runtime_global_only_runs
+                + trend.cleanup_signal_declared_only_runs
+                + trend.cleanup_signal_scope_unavailable_runs
+                == trend.runs_recorded)
+    {
+        "selection_fitness_demoted_runtime_global_or_fallback_only"
+    } else {
+        "selection_fitness_provisional_visibility_only"
+    }
+}
+
+fn stage_selection_fitness_summary(trend: &MemoryValidationStageTrendReport) -> String {
+    match trend.selection_fitness_status.as_str() {
+        "selection_fitness_preferred_stage_local_marker_backed" => format!(
+            "{} is currently a preferred repeated-stage candidate because it has repeated stage-local clear marker scans and no recorded regressions or marker persistence in this scope.",
+            trend.stage_label
+        ),
+        "selection_fitness_acceptable_marker_history_backed" => format!(
+            "{} is currently acceptable as a repeated-stage recommendation because it has clear marker history, but that support is not yet stage-local across every run.",
+            trend.stage_label
+        ),
+        "selection_fitness_provisional_stage_local_cleanup_signal_backed" => format!(
+            "{} is currently only provisional: it has some stage-local cleanup-signal support, but it still lacks equally strong repeated direct marker-clearance evidence.",
+            trend.stage_label
+        ),
+        "selection_fitness_provisional_visibility_only" => format!(
+            "{} is currently only provisional because the repeated history still leans more on visibility/process trends than on direct repeated marker-clearance evidence.",
+            trend.stage_label
+        ),
+        "selection_fitness_demoted_runtime_global_or_fallback_only" => format!(
+            "{} is currently demoted because its repeated history is still dominated by runtime-global-only cleanup signals or session-fallback scan context rather than stage-local proof.",
+            trend.stage_label
+        ),
+        "selection_fitness_limited_by_inconclusive_history" => format!(
+            "{} is currently limited because too much of its repeated history is still inconclusive to trust the selection strongly.",
+            trend.stage_label
+        ),
+        "selection_fitness_blocked_by_marker_persistence_or_regressions" => format!(
+            "{} is currently blocked from being treated as a clean repeated-stage candidate because its history still includes marker persistence or worsened outcomes.",
+            trend.stage_label
+        ),
+        _ => format!(
+            "{} has not yet been exercised enough times in this scope for NullContext to classify its repeated-stage fitness strongly.",
+            trend.stage_label
+        ),
+    }
+}
+
 fn stage_evidence_support_priority(status: &str) -> u8 {
     match status {
         "recommendation_evidence_supported_by_stage_local_marker_clearance" => 7,
@@ -1933,6 +2066,20 @@ fn stage_evidence_support_priority(status: &str) -> u8 {
         "recommendation_evidence_waiting_for_repeated_runs" => 1,
         "recommendation_evidence_limited_mixed_history" => 1,
         "recommendation_evidence_limited_by_marker_persistence" => 0,
+        _ => 0,
+    }
+}
+
+fn stage_selection_fitness_priority(status: &str) -> u8 {
+    match status {
+        "selection_fitness_preferred_stage_local_marker_backed" => 7,
+        "selection_fitness_acceptable_marker_history_backed" => 6,
+        "selection_fitness_provisional_stage_local_cleanup_signal_backed" => 5,
+        "selection_fitness_provisional_visibility_only" => 4,
+        "selection_fitness_demoted_runtime_global_or_fallback_only" => 3,
+        "selection_fitness_limited_by_inconclusive_history" => 2,
+        "selection_fitness_waiting_for_repeated_runs" => 1,
+        "selection_fitness_blocked_by_marker_persistence_or_regressions" => 0,
         _ => 0,
     }
 }
@@ -1955,6 +2102,10 @@ fn default_stage_recommendation_report(
     MemoryValidationStageRecommendationReport {
         recommendation_status: recommendation_status.to_string(),
         clean_claim_status: "clean_claim_not_derived".to_string(),
+        selection_fitness_status: "selection_fitness_not_derived".to_string(),
+        selection_fitness_summary:
+            "NullContext does not yet have enough repeated cleanup-stage history to classify whether the current recommendation would be preferred, provisional, demoted, or blocked."
+                .to_string(),
         evidence_support_status: "recommendation_evidence_not_derived".to_string(),
         evidence_support_summary:
             "NullContext does not yet have enough repeated cleanup-stage history to classify whether the recommendation is marker-backed, only GPU-backed, or still too limited."

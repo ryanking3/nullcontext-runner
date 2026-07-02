@@ -2402,6 +2402,13 @@ export function PrivacyReportViewer({
                     ),
                   },
                   {
+                    label: "selection fitness",
+                    value: humanizeSnakeCase(
+                      currentReport.memory_validation_history.cleanup_stage_recommendation
+                        .selection_fitness_status
+                    ),
+                  },
+                  {
                     label: "recommended stage",
                     value:
                       currentReport.memory_validation_history.cleanup_stage_recommendation
@@ -2565,6 +2572,13 @@ export function PrivacyReportViewer({
               <p className="report-summary">
                 {
                   currentReport.memory_validation_history.cleanup_stage_recommendation
+                    .selection_fitness_summary
+                }
+              </p>
+
+              <p className="report-summary">
+                {
+                  currentReport.memory_validation_history.cleanup_stage_recommendation
                     .evidence_support_summary
                 }
               </p>
@@ -2602,6 +2616,10 @@ export function PrivacyReportViewer({
                       <div className="report-path-list">
                         <div>stage id: {trend.stage_id}</div>
                         <div>kind: {humanizeSnakeCase(trend.stage_kind)}</div>
+                        <div>
+                          selection fitness:{" "}
+                          {humanizeSnakeCase(trend.selection_fitness_status)}
+                        </div>
                         <div>
                           evidence support:{" "}
                           {humanizeSnakeCase(trend.evidence_support_status)}
@@ -2694,6 +2712,7 @@ export function PrivacyReportViewer({
                           latest process scan scope:{" "}
                           {humanizeSnakeCase(trend.latest_process_scan_context_scope)}
                         </div>
+                        <div>{trend.selection_fitness_summary}</div>
                         <div>{trend.evidence_support_summary}</div>
                         <div>{trend.summary}</div>
                         {trend.notes.map((note) => (
