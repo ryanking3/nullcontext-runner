@@ -18,6 +18,7 @@ const HOST_PAGE_DISCARD_TARGET_FRACTION: u64 = 8;
 const HOST_PAGE_DISCARD_MAX_BYTES: u64 = 512 * 1024 * 1024;
 const HOST_PAGE_DISCARD_MIN_BYTES: u64 = 64 * 1024 * 1024;
 const HOST_PAGE_DISCARD_CHUNK_BYTES: usize = 32 * 1024 * 1024;
+const HOST_PAGE_DISCARD_CHURN_ROUNDS: u32 = 3;
 
 pub fn run_host_ram_pressure_probe() -> HostRamPressureProbeReport {
     let budget = detect_host_memory_budget();
@@ -123,21 +124,37 @@ pub fn run_host_ram_pressure_probe() -> HostRamPressureProbeReport {
 }
 
 pub fn run_host_page_discard_probe() -> HostRamPressureProbeReport {
+    run_host_page_discard_probe_impl("Host page discard probe", "host_page_discard_probe", 1)
+}
+
+pub fn run_host_page_discard_churn_probe() -> HostRamPressureProbeReport {
+    run_host_page_discard_probe_impl(
+        "Host page discard churn probe",
+        "host_page_discard_churn_probe",
+        HOST_PAGE_DISCARD_CHURN_ROUNDS,
+    )
+}
+
+fn run_host_page_discard_probe_impl(
+    probe_label: &str,
+    status_prefix: &str,
+    rounds: u32,
+) -> HostRamPressureProbeReport {
     let budget = detect_host_memory_budget();
     let mut notes = vec![format!(
-        "Host page discard probe memory budget source: {}.",
+        "{probe_label} memory budget source: {}.",
         budget.source
     )];
 
     if let Some(total_bytes) = budget.total_bytes {
         notes.push(format!(
-            "Host page discard probe observed total physical memory: {total_bytes} bytes."
+            "{probe_label} observed total physical memory: {total_bytes} bytes."
         ));
     }
 
     if let Some(available_bytes) = budget.available_bytes {
         notes.push(format!(
-            "Host page discard probe observed available physical memory: {available_bytes} bytes."
+            "{probe_label} observed available physical memory: {available_bytes} bytes."
         ));
     }
 
@@ -147,7 +164,7 @@ pub fn run_host_page_discard_probe() -> HostRamPressureProbeReport {
 
     let page_size = detect_host_page_size();
     notes.push(format!(
-        "Host page discard probe page-size source: {}.",
+        "{probe_label} page-size source: {}.",
         page_size.source
     ));
 
@@ -157,28 +174,32 @@ pub fn run_host_page_discard_probe() -> HostRamPressureProbeReport {
 
     let Some(available_bytes) = budget.available_bytes else {
         notes.push(
-            "Host page discard probe could not determine available physical memory, so it skipped page mapping pressure."
+            format!(
+                "{probe_label} could not determine available physical memory, so it skipped page mapping pressure."
+            )
                 .to_string(),
         );
         return HostRamPressureProbeReport {
-            status: "host_page_discard_probe_unavailable".to_string(),
+            status: format!("{status_prefix}_unavailable"),
             notes,
         };
     };
 
     let Some(page_bytes) = page_size.bytes else {
         notes.push(
-            "Host page discard probe could not determine the host page size, so it skipped page mapping pressure."
+            format!(
+                "{probe_label} could not determine the host page size, so it skipped page mapping pressure."
+            )
                 .to_string(),
         );
         return HostRamPressureProbeReport {
-            status: "host_page_discard_probe_unavailable".to_string(),
+            status: format!("{status_prefix}_unavailable"),
             notes,
         };
     };
 
     notes.push(format!(
-        "Host page discard probe observed page size: {page_bytes} bytes."
+        "{probe_label} observed page size: {page_bytes} bytes."
     ));
 
     let target_bytes = align_down_u64(
@@ -188,77 +209,126 @@ pub fn run_host_page_discard_probe() -> HostRamPressureProbeReport {
 
     if target_bytes < HOST_PAGE_DISCARD_MIN_BYTES {
         notes.push(format!(
-            "Host page discard probe skipped because the computed target ({} bytes) was below the {}-byte minimum.",
+            "{probe_label} skipped because the computed target ({} bytes) was below the {}-byte minimum.",
             target_bytes, HOST_PAGE_DISCARD_MIN_BYTES
         ));
         return HostRamPressureProbeReport {
-            status: "host_page_discard_probe_skipped_low_available_memory".to_string(),
+            status: format!("{status_prefix}_skipped_low_available_memory"),
             notes,
         };
     }
 
     let chunk_bytes = align_down_u64(HOST_PAGE_DISCARD_CHUNK_BYTES as u64, page_bytes as u64)
         .max(page_bytes as u64) as usize;
-    let mut remaining = target_bytes;
     let mut total_mapped = 0_u64;
+    let mut completed_rounds = 0_u32;
     let mut warnings = Vec::new();
 
-    while remaining > 0 {
-        let mapping_bytes = remaining.min(chunk_bytes as u64) as usize;
-        let mapping_result = unsafe { allocate_page_probe_mapping(mapping_bytes) };
+    for round in 0..rounds {
+        let mut remaining = target_bytes;
+        let mut round_mapped = 0_u64;
 
-        let mapping = match mapping_result {
-            Ok(mapping) => mapping,
-            Err(error) => {
+        while remaining > 0 {
+            let mapping_bytes = remaining.min(chunk_bytes as u64) as usize;
+            let mapping_result = unsafe { allocate_page_probe_mapping(mapping_bytes) };
+
+            let mapping = match mapping_result {
+                Ok(mapping) => mapping,
+                Err(error) => {
+                    warnings.push(format!(
+                        "{probe_label} failed to map a {}-byte region during round {} of {}: {error}.",
+                        mapping_bytes,
+                        round + 1,
+                        rounds
+                    ));
+                    break;
+                }
+            };
+
+            let fill_result = unsafe { fill_page_probe_mapping(mapping.ptr, mapping_bytes) };
+            if let Err(error) = fill_result {
                 warnings.push(format!(
-                    "Host page discard probe failed to map a {}-byte region: {error}.",
-                    mapping_bytes
+                    "{probe_label} failed while writing a {}-byte region during round {} of {}: {error}.",
+                    mapping_bytes,
+                    round + 1,
+                    rounds
                 ));
-                break;
+            } else {
+                total_mapped = total_mapped.saturating_add(mapping_bytes as u64);
+                round_mapped = round_mapped.saturating_add(mapping_bytes as u64);
             }
-        };
 
-        let fill_result = unsafe { fill_page_probe_mapping(mapping.ptr, mapping_bytes) };
-        if let Err(error) = fill_result {
-            warnings.push(format!(
-                "Host page discard probe failed while writing a {}-byte region: {error}.",
-                mapping_bytes
+            if let Some(error) = unsafe { discard_page_probe_mapping(mapping.ptr, mapping_bytes) } {
+                warnings.push(format!(
+                    "{probe_label} discard step reported an issue during round {} of {}: {error}",
+                    round + 1,
+                    rounds
+                ));
+            }
+
+            if let Some(error) = unsafe { release_page_probe_mapping(mapping.ptr, mapping_bytes) } {
+                warnings.push(format!(
+                    "{probe_label} release step reported an issue during round {} of {}: {error}",
+                    round + 1,
+                    rounds
+                ));
+            }
+
+            remaining = remaining.saturating_sub(mapping_bytes as u64);
+        }
+
+        if round_mapped > 0 {
+            completed_rounds = completed_rounds.saturating_add(1);
+        }
+
+        notes.push(format!(
+            "{probe_label} round {} of {} mapped/touched {} bytes.",
+            round + 1,
+            rounds,
+            round_mapped
+        ));
+
+        if round_mapped == 0 {
+            notes.push(format!(
+                "{probe_label} stopped after round {} because it could not complete any page-mapping work in that round.",
+                round + 1
             ));
-        } else {
-            total_mapped = total_mapped.saturating_add(mapping_bytes as u64);
+            break;
         }
-
-        if let Some(error) = unsafe { discard_page_probe_mapping(mapping.ptr, mapping_bytes) } {
-            warnings.push(error);
-        }
-
-        if let Some(error) = unsafe { release_page_probe_mapping(mapping.ptr, mapping_bytes) } {
-            warnings.push(error);
-        }
-
-        remaining = remaining.saturating_sub(mapping_bytes as u64);
     }
 
     notes.push(format!(
-        "Host page discard probe targeted {} bytes and mapped/touched {} bytes.",
-        target_bytes, total_mapped
+        "{probe_label} targeted {} bytes per round, completed {} round(s), and mapped/touched {} bytes total.",
+        target_bytes, completed_rounds, total_mapped
     ));
-    notes.push(
-        "Each mapped region was filled with 0xA5, overwritten with 0x00, then explicitly discarded/decommitted before release."
-            .to_string(),
-    );
-    notes.push(
-        "This moves closer to OS-page-level cleanup behavior than allocator-only churn, but it still does not prove that the exact prior llama.cpp pages were reclaimed and overwritten."
-            .to_string(),
-    );
+    if rounds > 1 {
+        notes.push(format!(
+            "{probe_label} repeatedly mapped fresh regions, filled them with 0xA5, overwrote them with 0x00, then explicitly discarded/decommitted and released them across {} rounds.",
+            rounds
+        ));
+        notes.push(
+            "This is more invasive than a single discard pass because it creates repeated OS-page reuse pressure after shutdown, but it still does not prove that the exact prior llama.cpp pages were reclaimed and overwritten."
+                .to_string(),
+        );
+    } else {
+        notes.push(
+            "Each mapped region was filled with 0xA5, overwritten with 0x00, then explicitly discarded/decommitted before release."
+                .to_string(),
+        );
+        notes.push(
+            "This moves closer to OS-page-level cleanup behavior than allocator-only churn, but it still does not prove that the exact prior llama.cpp pages were reclaimed and overwritten."
+                .to_string(),
+        );
+    }
+    let had_warnings = !warnings.is_empty();
     notes.extend(warnings);
 
-    let status = if total_mapped == 0 {
-        "host_page_discard_probe_no_mappings_completed".to_string()
-    } else if notes.iter().any(|note| note.contains("failed")) {
-        "host_page_discard_probe_completed_with_warnings".to_string()
+    let status = if total_mapped == 0 || completed_rounds == 0 {
+        format!("{status_prefix}_no_mappings_completed")
+    } else if had_warnings {
+        format!("{status_prefix}_completed_with_warnings")
     } else {
-        "host_page_discard_probe_completed".to_string()
+        format!("{status_prefix}_completed")
     };
 
     HostRamPressureProbeReport { status, notes }

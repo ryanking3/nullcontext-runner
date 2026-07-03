@@ -7,7 +7,9 @@ use crate::process_scan::{
     build_process_scan_report, scan_live_process_phase, scan_post_shutdown_process_phase,
     scan_process_phase_with_presence, ProcessScanMarker,
 };
-use crate::ram_pressure::{run_host_page_discard_probe, run_host_ram_pressure_probe};
+use crate::ram_pressure::{
+    run_host_page_discard_churn_probe, run_host_page_discard_probe, run_host_ram_pressure_probe,
+};
 use crate::runtime_introspection::{
     parse_runtime_introspection_signals, RuntimeIntrospectionSignal,
 };
@@ -162,7 +164,7 @@ const POST_SHUTDOWN_VERIFICATION_WINDOW_MS: u64 = 1500;
 const POST_SHUTDOWN_VERIFICATION_INTERVAL_MS: u64 = 150;
 const VRAM_CLEANUP_STRATEGY_ID: &str = "multi_stage_cleanup_experiments";
 const VRAM_CLEANUP_STRATEGY_VERIFICATION_WINDOW_MS: u64 = 1000;
-const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 11] = [
+const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 12] = [
     VramCleanupStrategyStagePlan {
         stage_id: "short_cooldown_recheck",
         stage_label: "Short Cooldown Recheck",
@@ -202,6 +204,13 @@ const VRAM_CLEANUP_STRATEGY_STAGES: [VramCleanupStrategyStagePlan; 11] = [
         stage_id: "host_page_discard_probe",
         stage_label: "Host Page Discard Probe",
         stage_kind: "host_page_discard_probe",
+        cooldown_ms_before_stage: 250,
+        perform_helper_relaunch_probe: false,
+    },
+    VramCleanupStrategyStagePlan {
+        stage_id: "host_page_discard_churn_probe",
+        stage_label: "Host Page Discard Churn Probe",
+        stage_kind: "host_page_discard_churn_probe",
         cooldown_ms_before_stage: 250,
         perform_helper_relaunch_probe: false,
     },
@@ -824,6 +833,15 @@ fn execute_vram_cleanup_strategy_stage(
         }
         "host_page_discard_probe" => {
             let report = run_host_page_discard_probe();
+            HelperRuntimeProbeOutcome {
+                action_status: report.status,
+                notes: report.notes,
+                process_scan_report: None,
+                introspection_signals: vec![],
+            }
+        }
+        "host_page_discard_churn_probe" => {
+            let report = run_host_page_discard_churn_probe();
             HelperRuntimeProbeOutcome {
                 action_status: report.status,
                 notes: report.notes,

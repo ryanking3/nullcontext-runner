@@ -72,6 +72,7 @@ NullContext already has meaningful foundations in-tree:
   - cooldown rechecks
   - host RAM pressure
   - host page discard/decommit pressure
+  - repeated host page-discard churn
   - composite host RAM plus page-discard pressure
   - CUDA memory pressure
   - composite CUDA plus host-RAM pressure
@@ -119,6 +120,7 @@ NullContext already has meaningful foundations in-tree:
 - repeated cleanup-stage ordering now explicitly prefers stronger evidence-support classes instead of treating all stage scores as equally trustworthy
 - single-report cleanup-stage selection now also prefers stronger local marker-backed evidence classes instead of relying only on GPU visibility deltas
 - repeated cleanup-stage ranking now also classifies explicit selection fitness, so runtime-global-only and session-fallback-heavy stages can be demoted even when their raw scores look superficially strong
+- the cleanup strategy now also includes a repeated host page-discard churn stage, giving Track D one more genuinely invasive host-memory cleanup experiment beyond the single-pass discard path
 - the final single-report cleanup-stage selection is now re-evaluated after full RAM-side marker context is attached, so the chosen stage is not frozen from an earlier GPU-first pass
 - VRAM cleanup stage reports now also carry allocator/KV cleanup-signal support directly, so stage interpretation is no longer only a GPU-plus-marker story
 
@@ -338,6 +340,7 @@ Current in-tree cleanup stages:
 - helper runtime allocation churn probe
 - host RAM pressure probe
 - host page discard probe
+- host page discard churn probe
 - host RAM then page discard probe
 - CUDA memory pressure probe
 - CUDA then host RAM pressure probe
@@ -346,10 +349,9 @@ Current in-tree cleanup stages:
 
 ### Remaining v1 Work
 
-- aggregate cleanup-stage outcomes across runs
-- determine which stages help consistently versus randomly
-- improve helper-stage interpretation using repeated results, not isolated wins
-- possibly add one or two stronger invasive stages only if they produce better evidence, not just more noise
+- no separate Track D implementation commits are currently planned
+- keep judging cleanup-stage usefulness through Track E repeated-history evidence rather than stage-count growth
+- only add another invasive cleanup stage later if real repeated evidence shows a meaningful missing experiment instead of just another noisy variant
 
 ### v1 Exit Criteria
 
@@ -533,7 +535,7 @@ It is meant to answer: how much real work is still likely left before a truthful
 
 Current rough estimate:
 
-- core security/evidence work across Tracks A-E: `0-4` commits
+- core security/evidence work across Tracks A-E: `0-3` commits
 - cross-cutting extra work: `0-3` commits
 - tests / validation / real-machine verification: `5-8` commits
 - docs / wording / claim-boundary pass: `2-4` commits
@@ -542,7 +544,7 @@ Current rough estimate:
 
 Estimated total remaining before `v1`:
 
-- `13-30` commits
+- `13-29` commits
 
 ### Track Breakdown
 
@@ -590,13 +592,13 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `0-2` commits
+- `0` commits
 
 Rough commit guide:
 
 - `D1` completed: repeated cleanup-stage effectiveness is now aggregated explicitly so the report can say which stages actually help over time instead of only showing a winning recommendation
+- `D2` completed: the cleanup strategy now includes a repeated host page-discard churn stage, so Track D has one more truly invasive host-memory cleanup experiment instead of only single-pass discard pressure
 - `D3` completed: repeated cleanup-stage ranking now carries explicit selection-fitness classes, and runtime-global-only or session-fallback-heavy stages are demoted before raw score alone can make them look like strong winners
-- `D2` add one more invasive cleanup experiment only if it improves evidence quality instead of just increasing stage count
 
 ### Track E: Validation and Release Gating
 
