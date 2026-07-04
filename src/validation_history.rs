@@ -2264,3 +2264,161 @@ fn history_scope_label(report: &PrivacyReport) -> String {
 
     format!("{model_id} on {platform} (gpu_offload_requested={gpu})")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_trend(stage_id: &str, stage_label: &str) -> MemoryValidationStageTrendReport {
+        MemoryValidationStageTrendReport {
+            stage_id: stage_id.to_string(),
+            stage_label: stage_label.to_string(),
+            stage_kind: "test_stage".to_string(),
+            runs_recorded: 3,
+            avg_validation_score: 60.0,
+            best_validation_score: 60,
+            improved_runs: 2,
+            unchanged_runs: 1,
+            worsened_runs: 0,
+            inconclusive_runs: 0,
+            strong_or_moderate_runs: 2,
+            marker_detection_runs: 0,
+            clear_marker_support_runs: 0,
+            helper_scan_runs: 0,
+            helper_scan_clear_runs: 0,
+            helper_scan_marker_detection_runs: 0,
+            cleanup_signal_strong_runs: 0,
+            cleanup_signal_partial_runs: 0,
+            cleanup_signal_limited_runs: 0,
+            cleanup_signal_runtime_global_only_runs: 0,
+            cleanup_signal_stage_local_helper_runs: 0,
+            cleanup_signal_declared_only_runs: 0,
+            cleanup_signal_scope_unavailable_runs: 0,
+            stage_local_scan_runs: 0,
+            stage_local_scan_clear_runs: 0,
+            stage_local_scan_marker_detection_runs: 0,
+            stage_local_scan_limited_runs: 0,
+            session_fallback_scan_runs: 0,
+            latest_vram_evidence_status: "evidence_unchanged_not_observed".to_string(),
+            latest_validation_verdict: "moderate_improvement_signal".to_string(),
+            latest_marker_evidence_status: "marker_scan_clear_in_scanned_regions".to_string(),
+            latest_cleanup_signal_support_status: "cleanup_signal_support_unavailable".to_string(),
+            latest_cleanup_signal_support_scope_status: "cleanup_signal_scope_unavailable"
+                .to_string(),
+            latest_contributing_cleanup_signals: vec![],
+            latest_process_scan_context_status: "marker_scan_clear_in_scanned_regions".to_string(),
+            latest_process_scan_context_scope: "process_scan_context_unavailable".to_string(),
+            selection_fitness_status: "selection_fitness_not_derived".to_string(),
+            selection_fitness_summary: String::new(),
+            evidence_support_status: "recommendation_evidence_limited_mixed_history".to_string(),
+            evidence_support_summary: String::new(),
+            summary: String::new(),
+            notes: vec![],
+        }
+    }
+
+    fn finalize_selection_fitness(
+        mut trend: MemoryValidationStageTrendReport,
+    ) -> MemoryValidationStageTrendReport {
+        trend.selection_fitness_status = derive_stage_selection_fitness_status(&trend).to_string();
+        trend.selection_fitness_summary = stage_selection_fitness_summary(&trend);
+        trend
+    }
+
+    #[test]
+    fn recommendation_prefers_marker_backed_stage_over_fallback_heavy_stage() {
+        let mut marker_backed = make_trend("marker-backed", "Marker Backed Stage");
+        marker_backed.avg_validation_score = 72.0;
+        marker_backed.best_validation_score = 72;
+        marker_backed.stage_local_scan_runs = 3;
+        marker_backed.stage_local_scan_clear_runs = 2;
+        marker_backed.clear_marker_support_runs = 2;
+        marker_backed.latest_process_scan_context_scope = "stage_local_cleanup_phase".to_string();
+        marker_backed.evidence_support_status =
+            "recommendation_evidence_supported_by_stage_local_marker_clearance".to_string();
+        let marker_backed = finalize_selection_fitness(marker_backed);
+
+        let mut fallback_heavy = make_trend("fallback-heavy", "Fallback Heavy Stage");
+        fallback_heavy.avg_validation_score = 95.0;
+        fallback_heavy.best_validation_score = 95;
+        fallback_heavy.improved_runs = 3;
+        fallback_heavy.strong_or_moderate_runs = 3;
+        fallback_heavy.session_fallback_scan_runs = 3;
+        fallback_heavy.latest_process_scan_context_scope = "session_fallback".to_string();
+        fallback_heavy.evidence_support_status =
+            "recommendation_evidence_limited_to_session_fallback_scans".to_string();
+        let fallback_heavy = finalize_selection_fitness(fallback_heavy);
+
+        let recommendation = build_stage_recommendation(&[fallback_heavy, marker_backed]);
+
+        assert_eq!(
+            recommendation.stage_id.as_deref(),
+            Some("marker-backed"),
+            "marker-backed stage should outrank a fallback-heavy stage even when the fallback stage has a higher raw score"
+        );
+        assert_eq!(
+            recommendation.selection_fitness_status,
+            "selection_fitness_preferred_stage_local_marker_backed"
+        );
+    }
+
+    #[test]
+    fn recommendation_blocks_clean_claim_for_cleanup_signal_only_stage() {
+        let mut cleanup_signal_only = make_trend("cleanup-signal-only", "Cleanup Signal Stage");
+        cleanup_signal_only.avg_validation_score = 83.0;
+        cleanup_signal_only.best_validation_score = 83;
+        cleanup_signal_only.cleanup_signal_strong_runs = 3;
+        cleanup_signal_only.cleanup_signal_stage_local_helper_runs = 3;
+        cleanup_signal_only.stage_local_scan_runs = 3;
+        cleanup_signal_only.stage_local_scan_limited_runs = 3;
+        cleanup_signal_only.latest_process_scan_context_scope =
+            "stage_local_helper_scan".to_string();
+        cleanup_signal_only.latest_cleanup_signal_support_status =
+            "cleanup_signal_support_strong".to_string();
+        cleanup_signal_only.latest_cleanup_signal_support_scope_status =
+            "cleanup_signal_scope_stage_local_helper_runtime".to_string();
+        cleanup_signal_only.evidence_support_status =
+            "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance"
+                .to_string();
+        let cleanup_signal_only = finalize_selection_fitness(cleanup_signal_only);
+
+        let recommendation = build_stage_recommendation(&[cleanup_signal_only]);
+
+        assert_eq!(
+            recommendation.selection_fitness_status,
+            "selection_fitness_provisional_stage_local_cleanup_signal_backed"
+        );
+        assert_eq!(
+            recommendation.clean_claim_status,
+            "clean_claim_blocked_by_cleanup_signal_only_evidence"
+        );
+        assert_eq!(
+            recommendation.recommendation_status,
+            "recommendation_available",
+            "cleanup-signal-only stages can still be the best available stage while remaining blocked from a stronger clean-stage claim"
+        );
+    }
+
+    #[test]
+    fn selection_fitness_demotes_runtime_global_only_history() {
+        let mut runtime_global_only = make_trend("runtime-global", "Runtime Global Stage");
+        runtime_global_only.cleanup_signal_runtime_global_only_runs = 3;
+        runtime_global_only.cleanup_signal_scope_unavailable_runs = 0;
+        runtime_global_only.cleanup_signal_declared_only_runs = 0;
+        runtime_global_only.latest_cleanup_signal_support_status =
+            "cleanup_signal_support_strong".to_string();
+        runtime_global_only.latest_cleanup_signal_support_scope_status =
+            "cleanup_signal_scope_runtime_global_only".to_string();
+        runtime_global_only.evidence_support_status =
+            "recommendation_evidence_limited_to_runtime_global_cleanup_signals".to_string();
+        let runtime_global_only = finalize_selection_fitness(runtime_global_only);
+
+        assert_eq!(
+            runtime_global_only.selection_fitness_status,
+            "selection_fitness_demoted_runtime_global_or_fallback_only"
+        );
+        assert!(runtime_global_only
+            .selection_fitness_summary
+            .contains("runtime-global-only cleanup signals"));
+    }
+}

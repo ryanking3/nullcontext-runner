@@ -537,14 +537,14 @@ Current rough estimate:
 
 - core security/evidence work across Tracks A-E: `0-3` commits
 - cross-cutting extra work: `0-3` commits
-- tests / validation / real-machine verification: `5-8` commits
+- tests / validation / real-machine verification: `4-7` commits
 - docs / wording / claim-boundary pass: `2-4` commits
 - packaging / release prep: `4-7` commits
 - cleanup / polish / final pass: `2-4` commits
 
 Estimated total remaining before `v1`:
 
-- `13-29` commits
+- `12-28` commits
 
 ### Track Breakdown
 
@@ -629,11 +629,11 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `5-8` commits
+- `4-7` commits
 
 Rough commit guide:
 
-- `T1` targeted Rust tests for allocator/KV report derivation and cleanup-stage selection logic
+- `T1` completed: targeted Rust tests now cover cleanup-stage ranking, marker-backed-versus-fallback recommendation ordering, runtime-global-only demotion, and cleanup-signal-only clean-claim blocking
 - `T2` targeted Rust tests for validation-history aggregation, recommendation ordering, and gate behavior
 - `T3` compatibility coverage for older report shapes and legacy hydration paths
 - `T4` macOS manual validation pass with repeated canary runs and repeated cleanup-stage runs
