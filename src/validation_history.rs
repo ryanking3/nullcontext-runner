@@ -2268,6 +2268,7 @@ fn history_scope_label(report: &PrivacyReport) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audit::ControlledCanaryHistoryReport;
 
     fn make_trend(stage_id: &str, stage_label: &str) -> MemoryValidationStageTrendReport {
         MemoryValidationStageTrendReport {
@@ -2323,6 +2324,76 @@ mod tests {
         trend.selection_fitness_status = derive_stage_selection_fitness_status(&trend).to_string();
         trend.selection_fitness_summary = stage_selection_fitness_summary(&trend);
         trend
+    }
+
+    fn make_stage_result_entry(
+        stage_id: &str,
+        stage_label: &str,
+    ) -> ValidationHistoryStageResultEntry {
+        ValidationHistoryStageResultEntry {
+            stage_id: stage_id.to_string(),
+            stage_label: stage_label.to_string(),
+            stage_kind: "test_stage".to_string(),
+            vram_evidence_status: "evidence_unchanged_not_observed".to_string(),
+            validation_score: 60,
+            validation_verdict: "moderate_improvement_signal".to_string(),
+            marker_evidence_status: "marker_evidence_limited_or_visibility_only".to_string(),
+            process_scan_context_status: "process_scan_context_unavailable".to_string(),
+            process_scan_context_scope: "process_scan_context_unavailable".to_string(),
+            cleanup_signal_support_status: "cleanup_signal_support_unavailable".to_string(),
+            cleanup_signal_support_scope_status: "cleanup_signal_scope_unavailable".to_string(),
+            contributing_cleanup_signals: vec![],
+            helper_process_scan_status: "helper_process_scan_not_recorded".to_string(),
+        }
+    }
+
+    fn make_history_entry(
+        session_id: &str,
+        recorded_at: &str,
+        stage_results: Vec<ValidationHistoryStageResultEntry>,
+    ) -> ValidationHistoryEntry {
+        ValidationHistoryEntry {
+            session_id: session_id.to_string(),
+            recorded_at: recorded_at.to_string(),
+            started_at: recorded_at.to_string(),
+            scope_key: "test-scope".to_string(),
+            model_id: Some("test-model".to_string()),
+            model_name: Some("Test Model".to_string()),
+            platform: Some("test-platform".to_string()),
+            gpu_offload_requested: Some(true),
+            validation_status: "stage_scoring_ready".to_string(),
+            process_scan_signal_status: "marker_scan_clear_in_scanned_regions".to_string(),
+            canary_execution_status: "controlled_canary_completed".to_string(),
+            canary_aggregate_signal_status: "controlled_canary_clear_across_passes".to_string(),
+            canary_aggregate_process_scan_status: "no_markers_detected_in_scanned_regions"
+                .to_string(),
+            canary_requested_passes: 2,
+            canary_completed_passes: 2,
+            canary_failed_passes: 0,
+            best_stage_score: 60,
+            best_stage_verdict: "moderate_improvement_signal".to_string(),
+            stage_results,
+        }
+    }
+
+    fn make_controlled_canary_history(clear_runs: u32) -> ControlledCanaryHistoryReport {
+        ControlledCanaryHistoryReport {
+            history_status: "controlled_canary_history_ready".to_string(),
+            recommendation_status: "controlled_canary_recommendation_available".to_string(),
+            runs_with_canary_requested: clear_runs,
+            runs_with_completed_passes: clear_runs,
+            total_requested_passes: clear_runs * 2,
+            total_completed_passes: clear_runs * 2,
+            total_failed_passes: 0,
+            clear_runs,
+            marker_detection_runs: 0,
+            mixed_or_inconclusive_runs: 0,
+            backend_unsupported_runs: 0,
+            latest_execution_status: "controlled_canary_completed".to_string(),
+            latest_aggregate_signal_status: "controlled_canary_clear_across_passes".to_string(),
+            summary: "test controlled canary history".to_string(),
+            notes: vec![],
+        }
     }
 
     #[test]
@@ -2420,5 +2491,141 @@ mod tests {
         assert!(runtime_global_only
             .selection_fitness_summary
             .contains("runtime-global-only cleanup signals"));
+    }
+
+    #[test]
+    fn build_stage_trends_aggregates_and_orders_stage_history() {
+        let mut marker_backed_result = make_stage_result_entry("stage-a", "Stage A");
+        marker_backed_result.vram_evidence_status =
+            "evidence_improved_pid_no_longer_observed_after_strategy".to_string();
+        marker_backed_result.validation_score = 82;
+        marker_backed_result.validation_verdict = "strong_improvement_signal".to_string();
+        marker_backed_result.marker_evidence_status =
+            "gpu_evidence_supported_by_clear_session_and_canary_scans".to_string();
+        marker_backed_result.process_scan_context_status =
+            "marker_scan_clear_in_scanned_regions".to_string();
+        marker_backed_result.process_scan_context_scope = "stage_local_cleanup_phase".to_string();
+        marker_backed_result.cleanup_signal_support_status =
+            "cleanup_signal_support_strong".to_string();
+        marker_backed_result.cleanup_signal_support_scope_status =
+            "cleanup_signal_scope_stage_local_helper_runtime".to_string();
+        marker_backed_result.contributing_cleanup_signals =
+            vec!["allocator_reset".to_string(), "kv_clear".to_string()];
+        marker_backed_result.helper_process_scan_status = "helper_process_scan_clear".to_string();
+
+        let mut fallback_result = make_stage_result_entry("stage-b", "Stage B");
+        fallback_result.vram_evidence_status =
+            "evidence_improved_peak_bytes_lower_but_residency_still_observed".to_string();
+        fallback_result.validation_score = 91;
+        fallback_result.process_scan_context_scope = "session_fallback".to_string();
+        fallback_result.cleanup_signal_support_status = "cleanup_signal_support_strong".to_string();
+        fallback_result.cleanup_signal_support_scope_status =
+            "cleanup_signal_scope_runtime_global_only".to_string();
+
+        let entry_one = make_history_entry(
+            "session-one",
+            "2026-07-05T10:00:00Z",
+            vec![marker_backed_result.clone(), fallback_result.clone()],
+        );
+
+        let mut marker_backed_result_two = marker_backed_result.clone();
+        marker_backed_result_two.validation_score = 70;
+        marker_backed_result_two.validation_verdict = "moderate_improvement_signal".to_string();
+        marker_backed_result_two.helper_process_scan_status =
+            "helper_process_scan_not_recorded".to_string();
+
+        let mut fallback_result_two = fallback_result.clone();
+        fallback_result_two.validation_score = 93;
+
+        let entry_two = make_history_entry(
+            "session-two",
+            "2026-07-05T11:00:00Z",
+            vec![marker_backed_result_two, fallback_result_two],
+        );
+
+        let trends = build_stage_trends(&[&entry_one, &entry_two]);
+
+        assert_eq!(trends.len(), 2);
+        assert_eq!(trends[0].stage_id, "stage-a");
+        assert_eq!(trends[0].runs_recorded, 2);
+        assert_eq!(trends[0].stage_local_scan_clear_runs, 2);
+        assert_eq!(trends[0].helper_scan_clear_runs, 1);
+        assert_eq!(trends[0].cleanup_signal_stage_local_helper_runs, 2);
+        assert_eq!(
+            trends[0].selection_fitness_status,
+            "selection_fitness_preferred_stage_local_marker_backed"
+        );
+        assert_eq!(
+            trends[0].evidence_support_status,
+            "recommendation_evidence_supported_by_stage_local_marker_clearance"
+        );
+
+        assert_eq!(trends[1].stage_id, "stage-b");
+        assert_eq!(trends[1].session_fallback_scan_runs, 2);
+        assert_eq!(trends[1].cleanup_signal_runtime_global_only_runs, 2);
+        assert_eq!(
+            trends[1].selection_fitness_status,
+            "selection_fitness_demoted_runtime_global_or_fallback_only"
+        );
+    }
+
+    #[test]
+    fn release_gate_blocks_cleanup_signal_only_evidence_even_with_strong_canary_history() {
+        let mut recommendation = default_stage_recommendation_report("test");
+        recommendation.recommendation_status = "recommendation_available".to_string();
+        recommendation.clean_claim_status =
+            "clean_claim_blocked_by_cleanup_signal_only_evidence".to_string();
+        recommendation.selection_fitness_status =
+            "selection_fitness_provisional_stage_local_cleanup_signal_backed".to_string();
+        recommendation.evidence_support_status =
+            "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance"
+                .to_string();
+        recommendation.runs_recorded = 3;
+        recommendation.marker_detection_runs = 0;
+        recommendation.worsened_runs = 0;
+        recommendation.inconclusive_runs = 0;
+
+        let gate = build_release_gate(&recommendation, &make_controlled_canary_history(2));
+
+        assert!(!gate.stage_gate_passed);
+        assert!(gate.controlled_canary_gate_passed);
+        assert_eq!(
+            gate.cleanup_stage_gate_status,
+            "cleanup_stage_gate_blocked_by_cleanup_signal_only_evidence"
+        );
+        assert_eq!(
+            gate.release_readiness_status,
+            "release_readiness_waiting_on_cleanup_stage_history"
+        );
+    }
+
+    #[test]
+    fn release_gate_passes_for_marker_backed_stage_and_clear_canary_history() {
+        let mut recommendation = default_stage_recommendation_report("test");
+        recommendation.recommendation_status = "recommendation_available".to_string();
+        recommendation.clean_claim_status =
+            "clean_claim_eligible_under_current_thresholds".to_string();
+        recommendation.selection_fitness_status =
+            "selection_fitness_preferred_stage_local_marker_backed".to_string();
+        recommendation.evidence_support_status =
+            "recommendation_evidence_supported_by_stage_local_marker_clearance".to_string();
+        recommendation.runs_recorded = 3;
+        recommendation.marker_detection_runs = 0;
+        recommendation.worsened_runs = 0;
+        recommendation.inconclusive_runs = 0;
+
+        let gate = build_release_gate(&recommendation, &make_controlled_canary_history(2));
+
+        assert!(gate.stage_gate_passed);
+        assert!(gate.controlled_canary_gate_passed);
+        assert_eq!(gate.cleanup_stage_gate_status, "cleanup_stage_gate_passed");
+        assert_eq!(
+            gate.release_readiness_status,
+            "release_readiness_repeated_evidence_ready_under_current_thresholds"
+        );
+        assert_eq!(
+            gate.gate_status,
+            "release_gate_repeated_evidence_threshold_met"
+        );
     }
 }
