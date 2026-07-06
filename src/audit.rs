@@ -6951,3 +6951,201 @@ fn cleanup_reason_summary(reason: &CleanupReason) -> &'static str {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_memory_validation_history_json_gets_new_default_fields() {
+        let legacy_json = r#"
+        {
+          "history_status": "history_loaded",
+          "scope_key": "test-scope",
+          "scope_model_id": "test-model",
+          "scope_platform": "macos",
+          "scope_gpu_offload_requested": true,
+          "runs_recorded": 2,
+          "marker_detection_runs": 0,
+          "clear_canary_runs": 2,
+          "inconclusive_or_failed_runs": 0,
+          "strong_or_moderate_runs": 2,
+          "best_stage_score_min": 71,
+          "best_stage_score_max": 84,
+          "best_stage_score_avg": 77.5,
+          "last_recorded_at": "2026-07-06T10:00:00Z",
+          "stage_trends": [
+            {
+              "stage_id": "stage-a",
+              "stage_label": "Stage A",
+              "stage_kind": "host_page_discard_probe",
+              "runs_recorded": 2,
+              "avg_validation_score": 77.5,
+              "best_validation_score": 84,
+              "improved_runs": 2,
+              "unchanged_runs": 0,
+              "worsened_runs": 0,
+              "inconclusive_runs": 0,
+              "strong_or_moderate_runs": 2,
+              "marker_detection_runs": 0,
+              "clear_marker_support_runs": 2,
+              "helper_scan_runs": 0,
+              "helper_scan_clear_runs": 0,
+              "helper_scan_marker_detection_runs": 0,
+              "latest_vram_evidence_status": "evidence_improved_pid_no_longer_observed_after_strategy",
+              "latest_validation_verdict": "strong_improvement_signal",
+              "latest_marker_evidence_status": "gpu_evidence_supported_by_clear_session_and_canary_scans",
+              "evidence_support_status": "recommendation_evidence_supported_by_stage_local_marker_clearance",
+              "evidence_support_summary": "legacy summary",
+              "summary": "legacy trend summary",
+              "notes": []
+            }
+          ],
+          "controlled_canary_history": {
+            "history_status": "controlled_canary_history_ready",
+            "recommendation_status": "controlled_canary_recommendation_available",
+            "runs_with_canary_requested": 2,
+            "runs_with_completed_passes": 2,
+            "total_requested_passes": 4,
+            "total_completed_passes": 4,
+            "total_failed_passes": 0,
+            "clear_runs": 2,
+            "marker_detection_runs": 0,
+            "mixed_or_inconclusive_runs": 0,
+            "backend_unsupported_runs": 0,
+            "latest_execution_status": "controlled_canary_completed",
+            "latest_aggregate_signal_status": "controlled_canary_clear_across_passes",
+            "summary": "legacy canary history",
+            "notes": []
+          },
+          "cleanup_stage_effectiveness": {
+            "summary_status": "cleanup_stage_effectiveness_has_consistently_helpful_stage",
+            "consistently_helpful_count": 1,
+            "promising_but_limited_count": 0,
+            "ineffective_or_regressive_count": 0,
+            "marker_persistent_count": 0,
+            "waiting_for_repeated_history_count": 0,
+            "stages": [],
+            "summary": "legacy effectiveness summary",
+            "notes": []
+          },
+          "cleanup_stage_recommendation": {
+            "recommendation_status": "recommendation_available",
+            "clean_claim_status": "clean_claim_eligible_under_current_thresholds",
+            "evidence_support_status": "recommendation_evidence_supported_by_stage_local_marker_clearance",
+            "evidence_support_summary": "legacy recommendation summary",
+            "stage_id": "stage-a",
+            "stage_label": "Stage A",
+            "stage_kind": "host_page_discard_probe",
+            "runner_up_stage_id": null,
+            "runner_up_stage_label": null,
+            "runner_up_stage_kind": null,
+            "compared_stage_count": 1,
+            "runs_recorded": 2,
+            "avg_validation_score": 77.5,
+            "effectiveness_score": 91.0,
+            "runner_up_effectiveness_score": null,
+            "effectiveness_gap": null,
+            "avg_validation_score_gap": null,
+            "marker_detection_gap": null,
+            "improved_runs": 2,
+            "unchanged_runs": 0,
+            "worsened_runs": 0,
+            "inconclusive_runs": 0,
+            "marker_detection_runs": 0,
+            "summary": "legacy recommendation",
+            "clean_claim_summary": "legacy clean claim summary",
+            "notes": []
+          },
+          "release_gate": {
+            "gate_status": "release_gate_repeated_evidence_threshold_met",
+            "cleanup_stage_gate_status": "cleanup_stage_gate_passed",
+            "controlled_canary_gate_status": "controlled_canary_gate_passed",
+            "min_stage_runs_required": 2,
+            "min_clear_canary_runs_required": 2,
+            "max_marker_detection_runs_allowed_for_clean_claim": 0,
+            "max_worsened_runs_allowed_for_clean_stage": 0,
+            "max_inconclusive_runs_allowed_for_clean_stage": 0,
+            "required_stage_evidence_support_statuses": [
+              "recommendation_evidence_supported_by_stage_local_marker_clearance"
+            ],
+            "stage_gate_passed": true,
+            "controlled_canary_gate_passed": true,
+            "summary": "legacy release gate summary",
+            "notes": []
+          },
+          "summary": "legacy history summary",
+          "notes": []
+        }
+        "#;
+
+        let report: MemoryValidationHistoryReport =
+            serde_json::from_str(legacy_json).expect("legacy history json should deserialize");
+
+        assert_eq!(
+            report.cleanup_stage_recommendation.selection_fitness_status,
+            "selection_fitness_not_derived"
+        );
+        assert!(report
+            .cleanup_stage_recommendation
+            .selection_fitness_summary
+            .contains("preferred, provisional, demoted, or blocked"));
+        assert_eq!(
+            report.stage_trends[0].selection_fitness_status,
+            "selection_fitness_not_derived"
+        );
+        assert_eq!(
+            report.release_gate.release_readiness_status,
+            "release_readiness_not_derived"
+        );
+        assert_eq!(
+            report.release_gate.observed_stage_evidence_support_status,
+            "recommendation_evidence_not_derived"
+        );
+    }
+
+    #[test]
+    fn legacy_privacy_report_without_validation_sections_uses_defaults() {
+        let legacy_json = r#"
+        {
+          "session_id": "session-123",
+          "started_at": "2026-07-06T10:00:00Z",
+          "history_stored": false,
+          "backend": "llama.cpp",
+          "security_mode": "secure",
+          "gpu_layers": "0",
+          "process_exited_cleanly": true,
+          "cleanup": {
+            "attempted": true,
+            "successful": true,
+            "workspace_deleted": true,
+            "files_removed": 2,
+            "directories_removed": 1,
+            "artifacts_detected": [],
+            "sanitization_operations": [],
+            "error": null
+          },
+          "residual_risk": "legacy residual risk summary"
+        }
+        "#;
+
+        let report: PrivacyReport =
+            serde_json::from_str(legacy_json).expect("legacy privacy report should deserialize");
+
+        assert_eq!(
+            report.memory_validation.validation_status,
+            "validation_not_derived"
+        );
+        assert_eq!(
+            report.memory_validation_history.history_status,
+            "history_not_recorded"
+        );
+        assert_eq!(
+            report.platform_capability_matrix.matrix_status,
+            "matrix_not_derived"
+        );
+        assert!(report.session_profile.is_none());
+        assert!(report.llama_runtime.is_none());
+        assert!(report.process_scan.is_none());
+    }
+}
