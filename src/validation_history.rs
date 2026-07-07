@@ -3,6 +3,8 @@ use crate::audit::{
     MemoryValidationStageEffectivenessReport, MemoryValidationStageRecommendationReport,
     MemoryValidationStageTrendReport, PrivacyReport, ValidationReleaseGateReport,
 };
+use crate::logging::stdout_line;
+use crate::registry::{resolve_session_report_availability, SessionRegistry};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -168,6 +170,31 @@ pub fn apply_and_record_memory_validation_history(
             })
         }
     }
+}
+
+pub fn show_validation_history(home: &str, session_id: &str) -> Result<()> {
+    let registry = load_registry(home)?;
+    let session_registry = SessionRegistry::load(home)?;
+
+    let entry = session_registry
+        .find(session_id)
+        .with_context(|| format!("Session not found in registry: {session_id}"))?;
+    let availability = resolve_session_report_availability(home, entry);
+    let Some(report_path) = availability.loadable_path else {
+        anyhow::bail!(
+            "No loadable report was found for session {session_id}. NullContext checked the current report path and any archived lifecycle report."
+        );
+    };
+
+    let raw_report = fs::read_to_string(&report_path)
+        .with_context(|| format!("Failed to read report at {}", report_path.display()))?;
+    let report: PrivacyReport = serde_json::from_str(&raw_report)
+        .with_context(|| format!("Failed to parse report at {}", report_path.display()))?;
+    let history_report = build_history_report_from_registry(&registry, &report);
+
+    stdout_line(serde_json::to_string_pretty(&history_report)?);
+
+    Ok(())
 }
 
 impl ValidationHistoryRegistry {

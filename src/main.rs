@@ -41,7 +41,7 @@ use registry::{list_sessions, register_persistent_session, show_report, SessionL
 use runtime::RuntimeLaunchFailure;
 use session::Session;
 use validation_harness::run_controlled_canary_validation;
-use validation_history::apply_and_record_memory_validation_history;
+use validation_history::{apply_and_record_memory_validation_history, show_validation_history};
 
 fn main() -> Result<()> {
     match AppCommand::from_env()? {
@@ -53,6 +53,10 @@ fn main() -> Result<()> {
         AppCommand::ShowReport { session_id } => {
             let home = home_dir()?;
             show_report(&home, &session_id)
+        }
+        AppCommand::ShowValidationHistory { session_id } => {
+            let home = home_dir()?;
+            show_validation_history(&home, &session_id)
         }
         AppCommand::Serve => {
             let runtime = tokio::runtime::Runtime::new()?;

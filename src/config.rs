@@ -13,6 +13,7 @@ pub enum AppCommand {
     Run(SessionConfig),
     ListSessions,
     ShowReport { session_id: String },
+    ShowValidationHistory { session_id: String },
     Serve,
 }
 
@@ -262,6 +263,21 @@ impl AppCommand {
             args.zeroize();
 
             return Ok(Self::ShowReport { session_id });
+        }
+
+        if let Some(index) = args
+            .iter()
+            .position(|arg| arg == "--show-validation-history")
+        {
+            if index + 1 >= args.len() {
+                args.zeroize();
+                bail!("--show-validation-history requires a session id");
+            }
+
+            let session_id = args[index + 1].clone();
+            args.zeroize();
+
+            return Ok(Self::ShowValidationHistory { session_id });
         }
 
         let config = SessionConfig::from_args(home, args)?;

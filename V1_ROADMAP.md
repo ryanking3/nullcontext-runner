@@ -62,6 +62,7 @@ NullContext already has meaningful foundations in-tree:
 - failed-start cleanup scanning
 - repeated controlled canary helper runs
 - cross-session validation history
+- CLI scope inspection for saved validation-history runs
 - platform capability matrix reporting
 - RAM/VRAM runtime observation
 - Windows PowerShell memory observation
