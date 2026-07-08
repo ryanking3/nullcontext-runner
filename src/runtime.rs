@@ -1449,14 +1449,30 @@ fn observe_process_presence(pid: u32) -> (Option<bool>, Option<String>, Option<S
 
                 (Some(present), Some("ps pid".to_string()), None)
             }
-            Ok(output) => (
-                None,
-                None,
-                Some(format!(
-                    "Post-shutdown process presence check via ps failed with status {}.",
-                    output.status
-                )),
-            ),
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let no_matching_pid = stdout.trim().is_empty() && output.status.code() == Some(1);
+
+                if no_matching_pid {
+                    (
+                        Some(false),
+                        Some("ps pid".to_string()),
+                        Some(
+                            "Post-shutdown process presence check via ps returned no matching PID, so NullContext treated the runtime as absent."
+                                .to_string(),
+                        ),
+                    )
+                } else {
+                    (
+                        None,
+                        None,
+                        Some(format!(
+                            "Post-shutdown process presence check via ps failed with status {}.",
+                            output.status
+                        )),
+                    )
+                }
+            }
             Err(error) => (
                 None,
                 None,

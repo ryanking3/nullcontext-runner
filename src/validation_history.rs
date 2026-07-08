@@ -18,6 +18,38 @@ pub struct ValidationHistoryRegistry {
     pub entries: Vec<ValidationHistoryEntry>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ValidationHistoryRegistrySummary {
+    registry_status: String,
+    scopes_recorded: u32,
+    total_runs_recorded: u32,
+    latest_recorded_at: Option<String>,
+    scopes: Vec<ValidationHistoryScopeSummary>,
+    summary: String,
+    notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ValidationHistoryScopeSummary {
+    scope_key: String,
+    model_id: Option<String>,
+    model_name: Option<String>,
+    platform: Option<String>,
+    gpu_offload_requested: Option<bool>,
+    runs_recorded: u32,
+    marker_detection_runs: u32,
+    clear_canary_runs: u32,
+    inconclusive_or_failed_runs: u32,
+    strong_or_moderate_runs: u32,
+    best_stage_score_min: Option<u32>,
+    best_stage_score_max: Option<u32>,
+    best_stage_score_avg: Option<f64>,
+    latest_recorded_at: Option<String>,
+    latest_session_id: Option<String>,
+    latest_validation_status: Option<String>,
+    latest_best_stage_verdict: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationHistoryEntry {
     pub session_id: String,
@@ -197,6 +229,15 @@ pub fn show_validation_history(home: &str, session_id: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn list_validation_scopes(home: &str) -> Result<()> {
+    let registry = load_registry(home)?;
+    let summary = build_registry_summary(&registry);
+
+    stdout_line(serde_json::to_string_pretty(&summary)?);
+
+    Ok(())
+}
+
 impl ValidationHistoryRegistry {
     fn upsert(&mut self, entry: ValidationHistoryEntry) {
         self.entries
@@ -204,6 +245,125 @@ impl ValidationHistoryRegistry {
         self.entries.push(entry);
         self.entries
             .sort_by(|a, b| b.recorded_at.cmp(&a.recorded_at));
+    }
+}
+
+fn build_registry_summary(
+    registry: &ValidationHistoryRegistry,
+) -> ValidationHistoryRegistrySummary {
+    if registry.entries.is_empty() {
+        return ValidationHistoryRegistrySummary {
+            registry_status: "validation_history_registry_empty".to_string(),
+            scopes_recorded: 0,
+            total_runs_recorded: 0,
+            latest_recorded_at: None,
+            scopes: vec![],
+            summary:
+                "NullContext has not recorded any cross-session validation-history runs yet."
+                    .to_string(),
+            notes: vec![
+                "Run one or more sessions with memory-validation reporting to populate this registry."
+                    .to_string(),
+            ],
+        };
+    }
+
+    let mut by_scope: BTreeMap<String, Vec<&ValidationHistoryEntry>> = BTreeMap::new();
+    for entry in &registry.entries {
+        by_scope
+            .entry(entry.scope_key.clone())
+            .or_default()
+            .push(entry);
+    }
+
+    let mut scopes = by_scope
+        .into_iter()
+        .map(|(scope_key, mut entries)| {
+            entries.sort_by(|a, b| b.recorded_at.cmp(&a.recorded_at));
+            let latest = entries.first().copied();
+            let runs_recorded = entries.len() as u32;
+            let marker_detection_runs = entries
+                .iter()
+                .filter(|entry| {
+                    entry.process_scan_signal_status == "marker_persistence_detected"
+                        || entry.canary_aggregate_signal_status
+                            == "controlled_canary_markers_detected_across_passes"
+                })
+                .count() as u32;
+            let clear_canary_runs = entries
+                .iter()
+                .filter(|entry| {
+                    entry.canary_aggregate_signal_status
+                        == "controlled_canary_all_completed_passes_clear"
+                })
+                .count() as u32;
+            let inconclusive_or_failed_runs = entries
+                .iter()
+                .filter(|entry| {
+                    entry.validation_status != "stage_scoring_ready"
+                        || entry.canary_execution_status != "controlled_canary_completed"
+                })
+                .count() as u32;
+            let strong_or_moderate_runs = entries
+                .iter()
+                .filter(|entry| {
+                    matches!(
+                        entry.best_stage_verdict.as_str(),
+                        "strong_improvement_signal" | "moderate_improvement_signal"
+                    )
+                })
+                .count() as u32;
+            let best_stage_score_min = entries.iter().map(|entry| entry.best_stage_score).min();
+            let best_stage_score_max = entries.iter().map(|entry| entry.best_stage_score).max();
+            let best_stage_score_avg = Some(
+                entries
+                    .iter()
+                    .map(|entry| entry.best_stage_score as f64)
+                    .sum::<f64>()
+                    / entries.len() as f64,
+            );
+
+            ValidationHistoryScopeSummary {
+                scope_key,
+                model_id: latest.and_then(|entry| entry.model_id.clone()),
+                model_name: latest.and_then(|entry| entry.model_name.clone()),
+                platform: latest.and_then(|entry| entry.platform.clone()),
+                gpu_offload_requested: latest.and_then(|entry| entry.gpu_offload_requested),
+                runs_recorded,
+                marker_detection_runs,
+                clear_canary_runs,
+                inconclusive_or_failed_runs,
+                strong_or_moderate_runs,
+                best_stage_score_min,
+                best_stage_score_max,
+                best_stage_score_avg,
+                latest_recorded_at: latest.map(|entry| entry.recorded_at.clone()),
+                latest_session_id: latest.map(|entry| entry.session_id.clone()),
+                latest_validation_status: latest.map(|entry| entry.validation_status.clone()),
+                latest_best_stage_verdict: latest.map(|entry| entry.best_stage_verdict.clone()),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    scopes.sort_by(|a, b| b.latest_recorded_at.cmp(&a.latest_recorded_at));
+
+    ValidationHistoryRegistrySummary {
+        registry_status: "validation_history_registry_recorded".to_string(),
+        scopes_recorded: scopes.len() as u32,
+        total_runs_recorded: registry.entries.len() as u32,
+        latest_recorded_at: registry.entries.first().map(|entry| entry.recorded_at.clone()),
+        summary: format!(
+            "NullContext has recorded {} validation run(s) across {} scope(s). Use a scope's latest_session_id with --show-validation-history <session-id> when you want the full repeated-history report for one saved run in that scope.",
+            registry.entries.len(),
+            scopes.len()
+        ),
+        notes: vec![
+            "A scope groups runs by model id, host platform, and whether GPU offload was requested."
+                .to_string(),
+            "This registry summary is compact by design; use latest_session_id from a scope entry to inspect the full repeated-history report."
+                .to_string(),
+        ],
+        scopes,
     }
 }
 

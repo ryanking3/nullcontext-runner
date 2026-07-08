@@ -62,7 +62,9 @@ NullContext already has meaningful foundations in-tree:
 - failed-start cleanup scanning
 - repeated controlled canary helper runs
 - cross-session validation history
-- CLI scope inspection for saved validation-history runs
+- CLI validation-history scope listing and saved-session inspection
+- direct CLI controlled-canary execution for manual validation on the configured local runtime
+- macOS post-shutdown validation now treats an empty `ps` result as PID absence instead of collapsing it into an inconclusive helper-run state
 - platform capability matrix reporting
 - RAM/VRAM runtime observation
 - Windows PowerShell memory observation
@@ -537,15 +539,15 @@ It is meant to answer: how much real work is still likely left before a truthful
 Current rough estimate:
 
 - core security/evidence work across Tracks A-E: `0-3` commits
-- cross-cutting extra work: `0-3` commits
-- tests / validation / real-machine verification: `2-5` commits
+- cross-cutting extra work: `0-2` commits
+- tests / validation / real-machine verification: `2-4` commits
 - docs / wording / claim-boundary pass: `2-4` commits
 - packaging / release prep: `4-7` commits
 - cleanup / polish / final pass: `2-4` commits
 
 Estimated total remaining before `v1`:
 
-- `10-26` commits
+- `10-24` commits
 
 ### Track Breakdown
 
@@ -616,7 +618,7 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `0-3` commits
+- `0-2` commits
 
 Rough commit guide:
 
@@ -630,16 +632,19 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `2-5` commits
+- `2-4` commits
 
 Rough commit guide:
 
 - `T1` completed: targeted Rust tests now cover cleanup-stage ranking, marker-backed-versus-fallback recommendation ordering, runtime-global-only demotion, and cleanup-signal-only clean-claim blocking
 - `T2` completed: targeted Rust tests now cover validation-history stage aggregation, repeated-stage ordering from real entry aggregation, cleanup-stage gate blocking on cleanup-signal-only evidence, and the marker-backed happy-path release gate
 - `T3` completed: backend serde tests now prove older top-level reports and older nested memory-validation-history payloads hydrate missing modern fields with safe defaults instead of failing deserialization
+- `T3.5` completed: validation-history CLI now supports both scope listing and saved-session inspection, so repeated-run manual validation no longer requires digging through raw registry JSON first
+- `T3.6` completed: a direct `--run-controlled-canary` CLI path now exposes the repeated helper-runtime validation harness without requiring a full user session first
+- `T3.7` completed: Unix post-shutdown PID observation now treats `ps` exit `1` with no matching PID as an absent process, reducing false “inconclusive after shutdown” helper validation outcomes on macOS/Linux
 - `T4` macOS manual validation pass with repeated canary runs and repeated cleanup-stage runs
 - `T5` Windows/NVIDIA manual validation pass for GPU evidence, process memory evidence, and cleanup-stage reporting
-- `T6-T8` reserve room for follow-up test hardening after the major Track B/C work lands and exposes real edge cases
+- `T6-T7` reserve room for follow-up test hardening if the real-machine validation passes expose edge cases that still need codifying
 
 ### Docs And Claim Wording
 

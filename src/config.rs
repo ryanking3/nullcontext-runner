@@ -11,8 +11,10 @@ use zeroize::Zeroize;
 #[derive(Debug)]
 pub enum AppCommand {
     Run(SessionConfig),
+    RunControlledCanary(SessionConfig),
     ListSessions,
     ShowReport { session_id: String },
+    ListValidationScopes,
     ShowValidationHistory { session_id: String },
     Serve,
 }
@@ -253,6 +255,12 @@ impl AppCommand {
             return Ok(Self::ListSessions);
         }
 
+        if let Some(index) = args.iter().position(|arg| arg == "--run-controlled-canary") {
+            args.remove(index);
+            let config = SessionConfig::from_args(home, args)?;
+            return Ok(Self::RunControlledCanary(config));
+        }
+
         if let Some(index) = args.iter().position(|arg| arg == "--show-report") {
             if index + 1 >= args.len() {
                 args.zeroize();
@@ -263,6 +271,11 @@ impl AppCommand {
             args.zeroize();
 
             return Ok(Self::ShowReport { session_id });
+        }
+
+        if args.contains(&"--list-validation-scopes".to_string()) {
+            args.zeroize();
+            return Ok(Self::ListValidationScopes);
         }
 
         if let Some(index) = args

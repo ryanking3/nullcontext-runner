@@ -41,11 +41,18 @@ use registry::{list_sessions, register_persistent_session, show_report, SessionL
 use runtime::RuntimeLaunchFailure;
 use session::Session;
 use validation_harness::run_controlled_canary_validation;
-use validation_history::{apply_and_record_memory_validation_history, show_validation_history};
+use validation_history::{
+    apply_and_record_memory_validation_history, list_validation_scopes, show_validation_history,
+};
 
 fn main() -> Result<()> {
     match AppCommand::from_env()? {
         AppCommand::Run(config) => run_session(config),
+        AppCommand::RunControlledCanary(config) => {
+            let report = run_controlled_canary_validation(&config);
+            stdout_line(serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
         AppCommand::ListSessions => {
             let home = home_dir()?;
             list_sessions(&home)
@@ -53,6 +60,10 @@ fn main() -> Result<()> {
         AppCommand::ShowReport { session_id } => {
             let home = home_dir()?;
             show_report(&home, &session_id)
+        }
+        AppCommand::ListValidationScopes => {
+            let home = home_dir()?;
+            list_validation_scopes(&home)
         }
         AppCommand::ShowValidationHistory { session_id } => {
             let home = home_dir()?;
