@@ -1,6 +1,9 @@
 use crate::cleanup::CleanupReport;
 use crate::config::SessionConfig;
 use crate::memory_validation::build_memory_validation_report;
+use crate::process_scan::{
+    process_scan_signal_status_from_phase, process_scan_signal_status_from_report,
+};
 use crate::registry::{
     CleanupReason, RetentionPolicy, SessionLifecycleMetadata, SessionLifecycleState,
 };
@@ -1201,36 +1204,11 @@ fn contextualize_vram_cleanup_marker_evidence(report: &mut PrivacyReport) {
 }
 
 fn derive_process_scan_signal_status_from_report(report: &ProcessScanReport) -> String {
-    match report.overall_status.as_str() {
-        "markers_detected_in_scanned_memory" => "marker_persistence_detected".to_string(),
-        "no_markers_detected_in_scanned_regions" => {
-            "marker_scan_clear_in_scanned_regions".to_string()
-        }
-        "scan_attempt_failed" => "marker_scan_inconclusive".to_string(),
-        "scan_backend_unsupported_on_platform" => "marker_scan_backend_unsupported".to_string(),
-        "scan_skipped" | "scan_not_completed" => "marker_scan_not_completed".to_string(),
-        _ => "marker_scan_context_mixed".to_string(),
-    }
+    process_scan_signal_status_from_report(report)
 }
 
 fn derive_process_scan_signal_status_from_phase(phase: &ProcessScanPhaseReport) -> String {
-    if phase
-        .patterns
-        .iter()
-        .any(|pattern| pattern.status == "detected_in_scanned_memory")
-    {
-        return "marker_persistence_detected".to_string();
-    }
-
-    match phase.status.as_str() {
-        "scan_completed" => "marker_scan_clear_in_scanned_regions".to_string(),
-        "scan_attempt_failed" | "scan_attempt_incomplete" => "marker_scan_inconclusive".to_string(),
-        "scan_backend_unsupported_on_platform" => "marker_scan_backend_unsupported".to_string(),
-        "process_not_observable_for_scan"
-        | "post_shutdown_observation_inconclusive"
-        | "pattern_empty" => "marker_scan_not_completed".to_string(),
-        _ => "marker_scan_context_mixed".to_string(),
-    }
+    process_scan_signal_status_from_phase(phase)
 }
 
 fn derive_stage_process_scan_signal_status(
@@ -1513,6 +1491,7 @@ fn derive_vram_cleanup_marker_evidence_status(
         process_scan_signal_status,
         "marker_scan_inconclusive"
             | "marker_scan_backend_unsupported"
+            | "marker_scan_process_not_observable_after_cleanup"
             | "marker_scan_not_completed"
             | "process_scan_context_unavailable"
             | "marker_scan_context_mixed"
@@ -6322,6 +6301,7 @@ fn derive_vram_cleanup_selection_evidence_status(
         }
         "marker_scan_inconclusive"
         | "marker_scan_backend_unsupported"
+        | "marker_scan_process_not_observable_after_cleanup"
         | "marker_scan_not_completed"
         | "process_scan_context_unavailable"
         | "marker_scan_context_mixed"

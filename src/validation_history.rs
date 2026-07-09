@@ -2331,11 +2331,15 @@ fn helper_process_scan_signal_status(overall_status: &str) -> String {
     match overall_status {
         "markers_detected_in_scanned_memory" => "helper_process_scan_marker_detected".to_string(),
         "no_markers_detected_in_scanned_regions" => "helper_process_scan_clear".to_string(),
-        "scan_attempt_failed" => "helper_process_scan_inconclusive".to_string(),
+        "scan_attempt_failed" | "scan_attempt_incomplete" => {
+            "helper_process_scan_inconclusive".to_string()
+        }
         "scan_backend_unsupported_on_platform" => {
             "helper_process_scan_backend_unsupported".to_string()
         }
-        "scan_skipped" | "scan_not_completed" => "helper_process_scan_not_completed".to_string(),
+        "scan_skipped" | "scan_not_completed" | "process_not_observable_for_scan" => {
+            "helper_process_scan_not_completed".to_string()
+        }
         _ => "helper_process_scan_mixed".to_string(),
     }
 }

@@ -126,6 +126,42 @@ pub fn build_process_scan_report(
     }
 }
 
+pub fn process_scan_signal_status_from_report(report: &ProcessScanReport) -> String {
+    match report.overall_status.as_str() {
+        "markers_detected_in_scanned_memory" => "marker_persistence_detected".to_string(),
+        "no_markers_detected_in_scanned_regions" => {
+            "marker_scan_clear_in_scanned_regions".to_string()
+        }
+        "scan_attempt_failed" | "scan_attempt_incomplete" => "marker_scan_inconclusive".to_string(),
+        "scan_backend_unsupported_on_platform" => "marker_scan_backend_unsupported".to_string(),
+        "scan_skipped" | "scan_not_completed" => "marker_scan_not_completed".to_string(),
+        _ => "marker_scan_context_mixed".to_string(),
+    }
+}
+
+pub fn process_scan_signal_status_from_phase(phase: &ProcessScanPhaseReport) -> String {
+    if phase
+        .patterns
+        .iter()
+        .any(|pattern| pattern.status == "detected_in_scanned_memory")
+    {
+        return "marker_persistence_detected".to_string();
+    }
+
+    match phase.status.as_str() {
+        "scan_completed" => "marker_scan_clear_in_scanned_regions".to_string(),
+        "scan_attempt_failed" | "scan_attempt_incomplete" => "marker_scan_inconclusive".to_string(),
+        "scan_backend_unsupported_on_platform" => "marker_scan_backend_unsupported".to_string(),
+        "process_not_observable_for_scan" => {
+            "marker_scan_process_not_observable_after_cleanup".to_string()
+        }
+        "post_shutdown_observation_inconclusive" | "pattern_empty" => {
+            "marker_scan_not_completed".to_string()
+        }
+        _ => "marker_scan_context_mixed".to_string(),
+    }
+}
+
 pub fn scan_live_process_phase(
     pid: u32,
     markers: &[ProcessScanMarker<'_>],
@@ -233,6 +269,37 @@ fn phase_has_detected_marker(phase: &ProcessScanPhaseReport) -> bool {
         .patterns
         .iter()
         .any(|pattern| pattern.status == "detected_in_scanned_memory")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn phase_signal_status_preserves_process_absence_after_cleanup() {
+        let phase = ProcessScanPhaseReport {
+            phase: "post_shutdown".to_string(),
+            status: "process_not_observable_for_scan".to_string(),
+            method: "not_applicable_process_not_observed".to_string(),
+            target_pid: Some(1234),
+            scope_summary: "test".to_string(),
+            bytes_scanned: None,
+            regions_scanned: None,
+            regions_skipped: None,
+            patterns: vec![ProcessScanPatternReport {
+                pattern_kind: "test_marker".to_string(),
+                status: "process_not_observable_for_scan".to_string(),
+                matches_found: None,
+                notes: "test".to_string(),
+            }],
+            notes: vec![],
+        };
+
+        assert_eq!(
+            process_scan_signal_status_from_phase(&phase),
+            "marker_scan_process_not_observable_after_cleanup"
+        );
+    }
 }
 
 #[cfg(target_os = "windows")]

@@ -65,6 +65,8 @@ NullContext already has meaningful foundations in-tree:
 - CLI validation-history scope listing and saved-session inspection
 - direct CLI controlled-canary execution for manual validation on the configured local runtime
 - macOS post-shutdown validation now treats an empty `ps` result as PID absence instead of collapsing it into an inconclusive helper-run state
+- process-scan signal semantics are now centralized and preserve “process no longer observable after cleanup” separately from unsupported or generic incomplete scan states
+- controlled-canary aggregation now distinguishes repeated unsupported-platform runs from genuinely mixed or inconclusive canary evidence
 - platform capability matrix reporting
 - RAM/VRAM runtime observation
 - Windows PowerShell memory observation
@@ -642,6 +644,7 @@ Rough commit guide:
 - `T3.5` completed: validation-history CLI now supports both scope listing and saved-session inspection, so repeated-run manual validation no longer requires digging through raw registry JSON first
 - `T3.6` completed: a direct `--run-controlled-canary` CLI path now exposes the repeated helper-runtime validation harness without requiring a full user session first
 - `T3.7` completed: Unix post-shutdown PID observation now treats `ps` exit `1` with no matching PID as an absent process, reducing false “inconclusive after shutdown” helper validation outcomes on macOS/Linux
+- `T3.8` completed: process-scan signal mapping is now shared across backend layers, post-cleanup process absence is no longer flattened into generic mixed/not-completed buckets, and controlled-canary aggregation now labels unsupported-platform runs explicitly instead of calling them mixed
 - `T4` macOS manual validation pass with repeated canary runs and repeated cleanup-stage runs
 - `T5` Windows/NVIDIA manual validation pass for GPU evidence, process memory evidence, and cleanup-stage reporting
 - `T6-T7` reserve room for follow-up test hardening if the real-machine validation passes expose edge cases that still need codifying

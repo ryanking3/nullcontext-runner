@@ -285,12 +285,7 @@ fn build_controlled_canary_validation_run_report(
                 )
             }),
         passes,
-        notes: vec![
-            "Aggregate canary status is pessimistic: any pass that still detects markers outweighs cleaner passes."
-                .to_string(),
-            "The top-level process scan shown here is the representative pass selected for inspection, while the aggregate signal summarizes all passes."
-                .to_string(),
-        ],
+        notes: controlled_canary_run_notes(&aggregate_signal_status),
     }
 }
 
@@ -433,11 +428,44 @@ fn representative_canary_selection_reason(
                 pass.pass_index
             )
         }
+        "controlled_canary_backend_unsupported_across_passes" => {
+            format!(
+                "Pass {} was selected as a representative unsupported-platform pass because every completed canary helper run hit the same direct process-scan backend limitation on this platform build.",
+                pass.pass_index
+            )
+        }
         _ => format!(
             "Pass {} was selected as the most representative pessimistic pass for inspection because the repeated helper runs produced mixed or inconclusive outcomes.",
             pass.pass_index
         ),
     }
+}
+
+fn controlled_canary_run_notes(aggregate_signal_status: &str) -> Vec<String> {
+    let aggregate_note = match aggregate_signal_status {
+        "controlled_canary_markers_detected_across_passes" => {
+            "Aggregate canary status is pessimistic: any pass that still detects markers outweighs cleaner passes."
+                .to_string()
+        }
+        "controlled_canary_all_completed_passes_clear" => {
+            "Aggregate canary status reflects repeated clear passes: every completed helper run missed its markers in scanned readable regions."
+                .to_string()
+        }
+        "controlled_canary_backend_unsupported_across_passes" => {
+            "Aggregate canary status reflects a platform limitation rather than mixed evidence: every completed helper run hit the same direct process-scan backend gap."
+                .to_string()
+        }
+        _ => {
+            "Aggregate canary status remains mixed or limited: repeated helper runs did not collapse into one uniformly clear or uniformly negative RAM-side result."
+                .to_string()
+        }
+    };
+
+    vec![
+        aggregate_note,
+        "The top-level process scan shown here is the representative pass selected for inspection, while the aggregate signal summarizes all passes."
+            .to_string(),
+    ]
 }
 
 fn controlled_canary_pass_signal_status(pass: &ControlledCanaryValidationPassReport) -> String {
@@ -504,4 +532,99 @@ fn send_canary_completion_request(
     request.sanitize();
 
     Ok(response.content)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_completed_pass(
+        pass_index: u32,
+        process_scan_overall_status: &str,
+    ) -> ControlledCanaryValidationPassReport {
+        let phase_status = match process_scan_overall_status {
+            "scan_backend_unsupported_on_platform" => "scan_backend_unsupported_on_platform",
+            "no_markers_detected_in_scanned_regions" => "scan_completed",
+            _ => "scan_attempt_failed",
+        };
+        let process_scan = build_process_scan_report(
+            Some(1000 + pass_index),
+            vec![crate::audit::ProcessScanPhaseReport {
+                phase: "live_runtime".to_string(),
+                status: phase_status.to_string(),
+                method: "test".to_string(),
+                target_pid: Some(1000 + pass_index),
+                scope_summary: "test".to_string(),
+                bytes_scanned: None,
+                regions_scanned: None,
+                regions_skipped: None,
+                patterns: vec![],
+                notes: vec![],
+            }],
+        );
+
+        ControlledCanaryValidationPassReport {
+            pass_index,
+            execution_status: "controlled_canary_completed".to_string(),
+            canary_id: format!("canary-{pass_index}"),
+            runtime_pid: Some(1000 + pass_index),
+            runtime_endpoint: Some(format!("http://127.0.0.1:57{pass_index:03}")),
+            response_bytes: Some(64),
+            summary: "test".to_string(),
+            process_scan,
+            notes: vec![],
+        }
+    }
+
+    #[test]
+    fn unsupported_canary_runs_get_explicit_selection_reason() {
+        let passes = vec![
+            make_completed_pass(1, "scan_backend_unsupported_on_platform"),
+            make_completed_pass(2, "scan_backend_unsupported_on_platform"),
+            make_completed_pass(3, "scan_backend_unsupported_on_platform"),
+        ];
+
+        let report = build_controlled_canary_validation_run_report(passes);
+
+        assert_eq!(
+            report.aggregate_signal_status,
+            "controlled_canary_backend_unsupported_across_passes"
+        );
+        assert!(
+            report
+                .selection_reason
+                .contains("unsupported-platform pass"),
+            "selection reason should describe the repeated unsupported backend case explicitly"
+        );
+        assert!(
+            report
+                .notes
+                .first()
+                .is_some_and(|note| note.contains("platform limitation")),
+            "aggregate note should distinguish platform limitation from mixed evidence"
+        );
+    }
+
+    #[test]
+    fn clear_canary_runs_get_clear_aggregate_note() {
+        let passes = vec![
+            make_completed_pass(1, "no_markers_detected_in_scanned_regions"),
+            make_completed_pass(2, "no_markers_detected_in_scanned_regions"),
+            make_completed_pass(3, "no_markers_detected_in_scanned_regions"),
+        ];
+
+        let report = build_controlled_canary_validation_run_report(passes);
+
+        assert_eq!(
+            report.aggregate_signal_status,
+            "controlled_canary_all_completed_passes_clear"
+        );
+        assert!(
+            report
+                .notes
+                .first()
+                .is_some_and(|note| note.contains("repeated clear passes")),
+            "clear repeated runs should get a clear aggregate note instead of the generic pessimistic one"
+        );
+    }
 }

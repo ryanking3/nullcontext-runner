@@ -2,6 +2,9 @@ use crate::audit::{
     MemoryValidationReport, MemoryValidationStageScorecard, PrivacyReport, ProcessScanReport,
     VramCleanupStrategyStageReport,
 };
+use crate::process_scan::{
+    process_scan_signal_status_from_phase, process_scan_signal_status_from_report,
+};
 
 pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidationReport {
     let process_scan_signal_status =
@@ -139,21 +142,9 @@ pub fn build_memory_validation_report(report: &PrivacyReport) -> MemoryValidatio
 }
 
 fn derive_process_scan_signal_status(process_scan: Option<&ProcessScanReport>) -> String {
-    match process_scan.map(|scan| scan.overall_status.as_str()) {
-        Some("markers_detected_in_scanned_memory") => "marker_persistence_detected".to_string(),
-        Some("no_markers_detected_in_scanned_regions") => {
-            "marker_scan_clear_in_scanned_regions".to_string()
-        }
-        Some("scan_attempt_failed") => "marker_scan_inconclusive".to_string(),
-        Some("scan_backend_unsupported_on_platform") => {
-            "marker_scan_backend_unsupported".to_string()
-        }
-        Some("scan_skipped") | Some("scan_not_completed") => {
-            "marker_scan_not_completed".to_string()
-        }
-        Some(_) => "marker_scan_context_mixed".to_string(),
-        None => "process_scan_context_unavailable".to_string(),
-    }
+    process_scan
+        .map(process_scan_signal_status_from_report)
+        .unwrap_or_else(|| "process_scan_context_unavailable".to_string())
 }
 
 fn process_scan_validation_note(process_scan_signal_status: &str) -> String {
@@ -176,6 +167,10 @@ fn process_scan_validation_note(process_scan_signal_status: &str) -> String {
         }
         "marker_scan_not_completed" => {
             "No completed direct process scan was available for this run, so RAM-side validation evidence is limited."
+                .to_string()
+        }
+        "marker_scan_process_not_observable_after_cleanup" => {
+            "The runtime PID was no longer observable after cleanup, so NullContext had no remaining process target for a direct post-cleanup marker scan. That is useful shutdown evidence, but not the same as a clear direct marker miss."
                 .to_string()
         }
         _ => {
@@ -394,6 +389,10 @@ fn build_stage_scorecard(
             "Direct process scanning still detected configured markers in readable llama-server memory."
                 .to_string(),
         ),
+        "marker_scan_process_not_observable_after_cleanup" => strengths.push(
+            "After cleanup, the runtime PID was no longer observable, so no direct post-cleanup process target remained. That is a useful shutdown signal, but weaker than a clear marker miss in scanned memory."
+                .to_string(),
+        ),
         "marker_scan_inconclusive"
         | "marker_scan_backend_unsupported"
         | "marker_scan_not_completed"
@@ -539,38 +538,13 @@ fn build_stage_scorecard(
 }
 
 fn derive_process_scan_signal_status_from_report(report: &ProcessScanReport) -> String {
-    match report.overall_status.as_str() {
-        "markers_detected_in_scanned_memory" => "marker_persistence_detected".to_string(),
-        "no_markers_detected_in_scanned_regions" => {
-            "marker_scan_clear_in_scanned_regions".to_string()
-        }
-        "scan_attempt_failed" => "marker_scan_inconclusive".to_string(),
-        "scan_backend_unsupported_on_platform" => "marker_scan_backend_unsupported".to_string(),
-        "scan_skipped" | "scan_not_completed" => "marker_scan_not_completed".to_string(),
-        _ => "marker_scan_context_mixed".to_string(),
-    }
+    process_scan_signal_status_from_report(report)
 }
 
 fn derive_process_scan_signal_status_from_phase(
     phase: &crate::audit::ProcessScanPhaseReport,
 ) -> String {
-    if phase
-        .patterns
-        .iter()
-        .any(|pattern| pattern.status == "detected_in_scanned_memory")
-    {
-        return "marker_persistence_detected".to_string();
-    }
-
-    match phase.status.as_str() {
-        "scan_completed" => "marker_scan_clear_in_scanned_regions".to_string(),
-        "scan_attempt_failed" | "scan_attempt_incomplete" => "marker_scan_inconclusive".to_string(),
-        "scan_backend_unsupported_on_platform" => "marker_scan_backend_unsupported".to_string(),
-        "process_not_observable_for_scan"
-        | "post_shutdown_observation_inconclusive"
-        | "pattern_empty" => "marker_scan_not_completed".to_string(),
-        _ => "marker_scan_context_mixed".to_string(),
-    }
+    process_scan_signal_status_from_phase(phase)
 }
 
 fn validation_verdict_for_score(score: u32) -> String {
