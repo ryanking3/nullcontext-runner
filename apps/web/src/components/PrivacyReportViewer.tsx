@@ -1,5 +1,9 @@
 import { ReportGrid } from "./ReportGrid";
 import {
+  describeControlledCanarySignalStatus,
+  describeProcessScanOverallStatus,
+  describeProcessScanPhaseStatus,
+  describeProcessScanSignalStatus,
   formatBoolean,
   formatBytes,
   formatDuration,
@@ -1758,6 +1762,10 @@ export function PrivacyReportViewer({
             </span>
           </div>
 
+          <div className="report-risk-block">
+            <p>{describeProcessScanOverallStatus(currentReport.process_scan.overall_status)}</p>
+          </div>
+
           <ReportGrid
             entries={[
               {
@@ -1796,6 +1804,7 @@ export function PrivacyReportViewer({
                       {humanizeSnakeCase(phase.status)}
                     </span>
                   </div>
+                  <p className="muted-text">{describeProcessScanPhaseStatus(phase.status)}</p>
                   <div className="report-path-list">
                     <div>method: {humanizeSnakeCase(phase.method)}</div>
                     <div>scope: {phase.scope_summary}</div>
@@ -1979,6 +1988,19 @@ export function PrivacyReportViewer({
               process scan{" "}
               {humanizeSnakeCase(currentReport.memory_validation.process_scan_signal_status)}
             </span>
+          </div>
+
+          <div className="report-risk-block">
+            <p>
+              {describeProcessScanSignalStatus(
+                currentReport.memory_validation.process_scan_signal_status
+              )}
+            </p>
+            <p>
+              {describeControlledCanarySignalStatus(
+                currentReport.memory_validation.controlled_canary_run.aggregate_signal_status
+              )}
+            </p>
           </div>
 
           <ReportGrid
@@ -2974,6 +2996,16 @@ export function PrivacyReportViewer({
               <p>
                 <strong>selection reason:</strong>{" "}
                 {currentReport.memory_validation.controlled_canary_run.selection_reason}
+              </p>
+              <p>
+                {describeControlledCanarySignalStatus(
+                  currentReport.memory_validation.controlled_canary_run.aggregate_signal_status
+                )}
+              </p>
+              <p>
+                {describeProcessScanOverallStatus(
+                  currentReport.memory_validation.controlled_canary_run.process_scan.overall_status
+                )}
               </p>
             </div>
 

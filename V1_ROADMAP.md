@@ -67,6 +67,7 @@ NullContext already has meaningful foundations in-tree:
 - macOS post-shutdown validation now treats an empty `ps` result as PID absence instead of collapsing it into an inconclusive helper-run state
 - process-scan signal semantics are now centralized and preserve “process no longer observable after cleanup” separately from unsupported or generic incomplete scan states
 - controlled-canary aggregation now distinguishes repeated unsupported-platform runs from genuinely mixed or inconclusive canary evidence
+- the report UI now explains process-scan and controlled-canary statuses in operator wording instead of only showing humanized status IDs
 - platform capability matrix reporting
 - RAM/VRAM runtime observation
 - Windows PowerShell memory observation
@@ -543,13 +544,13 @@ Current rough estimate:
 - core security/evidence work across Tracks A-E: `0-3` commits
 - cross-cutting extra work: `0-2` commits
 - tests / validation / real-machine verification: `2-4` commits
-- docs / wording / claim-boundary pass: `2-4` commits
+- docs / wording / claim-boundary pass: `1-3` commits
 - packaging / release prep: `4-7` commits
 - cleanup / polish / final pass: `2-4` commits
 
 Estimated total remaining before `v1`:
 
-- `10-24` commits
+- `9-23` commits
 
 ### Track Breakdown
 
@@ -653,12 +654,12 @@ Rough commit guide:
 
 Estimated remaining:
 
-- `2-4` commits
+- `1-3` commits
 
 Rough commit guide:
 
 - `W1` freeze final README/roadmap/AGENTS wording around the actual evidence level reached by Tracks A-E
-- `W2` tighten “best effort”, “observed directly”, “not observed”, and “unsupported” language across reports and UI
+- `W2` completed: process-scan and controlled-canary status wording is now tightened in the report UI so unsupported, post-cleanup process disappearance, and mixed/inconclusive states read as explicit operator explanations instead of only humanized status IDs
 - `W3-W4` reserve room for one or two final docs passes after real-machine validation changes the claim boundaries
 
 ### Packaging And Release Prep

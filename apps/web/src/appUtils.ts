@@ -201,6 +201,87 @@ export function humanizeSnakeCase(value: string): string {
   return value.replaceAll("_", " ");
 }
 
+export function describeProcessScanOverallStatus(status: string): string {
+  switch (status) {
+    case "markers_detected_in_scanned_memory":
+      return "Configured markers were detected in scanned llama-server memory, which is strong negative RAM-side evidence.";
+    case "no_markers_detected_in_scanned_regions":
+      return "Configured markers were not found in the scanned readable regions, which is useful evidence but not proof of full process-memory clearing.";
+    case "scan_attempt_failed":
+    case "scan_attempt_incomplete":
+      return "A direct process scan was attempted, but it did not complete cleanly enough to support a strong RAM-side conclusion.";
+    case "scan_backend_unsupported_on_platform":
+      return "This platform build does not currently provide the direct process-scan backend needed for stronger RAM-side evidence.";
+    case "scan_skipped":
+    case "scan_not_completed":
+      return "No completed direct process scan was available for this report, so RAM-side evidence remains limited.";
+    default:
+      return "Process-scan evidence remained mixed, limited, or unavailable for this report.";
+  }
+}
+
+export function describeProcessScanPhaseStatus(status: string): string {
+  switch (status) {
+    case "scan_completed":
+      return "This scan phase completed and searched the configured patterns in the readable regions it could inspect.";
+    case "scan_attempt_failed":
+    case "scan_attempt_incomplete":
+      return "This scan phase started but remained incomplete or failed before it could produce a clean marker result.";
+    case "scan_backend_unsupported_on_platform":
+      return "This scan phase was unavailable because the current platform build does not implement the required direct-scan backend.";
+    case "process_not_observable_for_scan":
+      return "The runtime PID was no longer observable at this phase, so there was no remaining process target to scan.";
+    case "post_shutdown_observation_inconclusive":
+      return "NullContext could not conclusively determine whether the target process still existed at this phase.";
+    default:
+      return "This scan phase produced limited or mixed evidence.";
+  }
+}
+
+export function describeProcessScanSignalStatus(status: string): string {
+  switch (status) {
+    case "marker_persistence_detected":
+      return "Direct RAM-side scanning still detected configured markers in readable llama-server memory.";
+    case "marker_scan_clear_in_scanned_regions":
+      return "Direct RAM-side scanning missed the configured markers in scanned readable regions, which is a useful positive signal but not a full clean-memory claim.";
+    case "marker_scan_inconclusive":
+      return "Direct RAM-side scanning was attempted, but the result remained inconclusive.";
+    case "marker_scan_backend_unsupported":
+      return "This platform build does not currently support the stronger direct RAM-side scanning backend.";
+    case "marker_scan_process_not_observable_after_cleanup":
+      return "After cleanup, the runtime PID was no longer observable, so no remaining process target was available for a direct post-cleanup scan.";
+    case "marker_scan_not_completed":
+      return "No completed direct RAM-side scan was available for this report.";
+    case "process_scan_context_unavailable":
+      return "No process-scan context was recorded for this report.";
+    default:
+      return "Process-scan context remained mixed or only partially available.";
+  }
+}
+
+export function describeControlledCanarySignalStatus(status: string): string {
+  switch (status) {
+    case "controlled_canary_markers_detected_across_passes":
+      return "At least one repeated controlled-canary helper pass still detected its markers, which is strong negative validation evidence.";
+    case "controlled_canary_all_completed_passes_clear":
+      return "Every completed controlled-canary helper pass missed its markers in scanned readable regions.";
+    case "controlled_canary_backend_unsupported_across_passes":
+      return "The helper runs completed, but every pass hit the same platform/backend limitation instead of producing direct RAM-side scan evidence.";
+    case "controlled_canary_mixed_clear_and_inconclusive":
+      return "Some helper passes looked cleaner than others, but the repeated canary outcome did not collapse into one stable RAM-side verdict.";
+    case "controlled_canary_inconclusive_across_passes":
+      return "The repeated helper passes stayed inconclusive overall, so validation still leans on passive runtime evidence.";
+    case "controlled_canary_not_run_yet":
+      return "No controlled-canary helper run was recorded for this report.";
+    case "controlled_canary_completed_with_failures":
+      return "Some helper passes completed, but repeated canary execution still included failures.";
+    case "controlled_canary_all_passes_failed":
+      return "Every controlled-canary helper pass failed before it could produce usable repeated evidence.";
+    default:
+      return "Controlled-canary evidence remained limited, partial, or mixed across the repeated helper passes.";
+  }
+}
+
 export function lifecycleStateClass(state: string): string {
   if (state === "cleanup_succeeded") return "pill success";
   if (state === "cleanup_failed") return "pill failed";
