@@ -282,6 +282,87 @@ export function describeControlledCanarySignalStatus(status: string): string {
   }
 }
 
+export function describeProcessScanScope(scope: string): string {
+  switch (scope) {
+    case "stage_local_helper_scan":
+      return "This stage carried its own helper-runtime scan context instead of relying only on the broader session scan.";
+    case "stage_local_cleanup_phase":
+      return "This stage carried its own cleanup-phase scan context instead of relying only on the broader session scan.";
+    case "session_fallback":
+      return "This stage did not have stage-local RAM-side scan evidence, so it inherited the broader session-level scan context.";
+    case "process_scan_context_unavailable":
+      return "No direct process-scan scope was available for this stage.";
+    default:
+      return "This stage used a mixed or limited process-scan scope.";
+  }
+}
+
+export function describeCleanupSignalSupportStatus(status: string): string {
+  switch (status) {
+    case "cleanup_signal_support_strong":
+      return "Observed allocator/KV/model cleanup signals gave this stage strong internal runtime support.";
+    case "cleanup_signal_support_partial":
+      return "Some internal cleanup signals were observed, but the runtime-side support remained partial.";
+    case "cleanup_signal_support_limited":
+      return "Internal cleanup-signal support remained limited for this stage.";
+    case "cleanup_signal_support_unavailable":
+      return "No meaningful internal cleanup-signal support was available for this stage.";
+    default:
+      return "Cleanup-signal support remained mixed or only partially available.";
+  }
+}
+
+export function describeCleanupSignalScopeStatus(status: string): string {
+  switch (status) {
+    case "cleanup_signal_scope_stage_local_helper_runtime":
+      return "The cleanup-signal evidence came from a stage-local helper runtime, which is stronger than inheriting only the main runtime context.";
+    case "cleanup_signal_scope_runtime_global_only":
+      return "The cleanup-signal evidence was only runtime-global, so it was not clearly tied to one specific cleanup stage.";
+    case "cleanup_signal_scope_declared_only":
+      return "The runtime declared cleanup support, but this report did not observe the supporting signals directly.";
+    case "cleanup_signal_scope_unavailable":
+      return "No meaningful cleanup-signal scope could be established for this stage.";
+    default:
+      return "Cleanup-signal scope remained mixed or only partially established.";
+  }
+}
+
+export function describeSelectionFitnessStatus(status: string): string {
+  switch (status) {
+    case "selection_fitness_preferred_stage_local_marker_backed":
+      return "This result is preferred because it is backed by stronger stage-local marker evidence rather than only raw score or visibility deltas.";
+    case "selection_fitness_provisional_stage_local_cleanup_signal_backed":
+      return "This result is provisionally useful, but it leans on internal cleanup signals more than direct clear-marker confirmation.";
+    case "selection_fitness_limited_to_session_fallback_scans":
+      return "This result depends heavily on broader session fallback scans rather than stage-local RAM-side evidence.";
+    case "selection_fitness_runtime_global_cleanup_signal_only":
+      return "This result depends on runtime-global cleanup signals that were not tightly attributable to one stage.";
+    case "selection_fitness_not_derived":
+      return "NullContext did not derive a stronger stage-selection fitness interpretation for this result.";
+    default:
+      return "Selection fitness remained mixed, partial, or dependent on weaker evidence classes.";
+  }
+}
+
+export function describeRecommendationEvidenceSupportStatus(status: string): string {
+  switch (status) {
+    case "recommendation_evidence_supported_by_stage_local_marker_clearance":
+      return "This recommendation is backed by the strongest current repeated evidence class: stage-local clear marker support.";
+    case "recommendation_evidence_supported_by_marker_clearance_history":
+      return "This recommendation is backed by broader repeated marker-clearance history, even if one local stage did not carry the strongest direct scan.";
+    case "recommendation_evidence_supported_by_cleanup_signals_without_marker_clearance":
+      return "This recommendation is supported more by internal cleanup signals than by direct clear-marker evidence.";
+    case "recommendation_evidence_gpu_improvement_without_marker_confirmation":
+      return "This recommendation is mainly driven by GPU-side improvement without equally strong RAM-side marker confirmation.";
+    case "recommendation_evidence_limited_to_session_fallback_scans":
+      return "This recommendation relies on session-level fallback scan context rather than stage-local evidence.";
+    case "recommendation_evidence_limited_to_runtime_global_cleanup_signals":
+      return "This recommendation relies on runtime-global cleanup signals rather than tightly stage-local evidence.";
+    default:
+      return "This recommendation remains supported only by limited, partial, or mixed repeated evidence.";
+  }
+}
+
 export function lifecycleStateClass(state: string): string {
   if (state === "cleanup_succeeded") return "pill success";
   if (state === "cleanup_failed") return "pill failed";

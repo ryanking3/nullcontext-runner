@@ -68,6 +68,7 @@ NullContext already has meaningful foundations in-tree:
 - process-scan signal semantics are now centralized and preserve “process no longer observable after cleanup” separately from unsupported or generic incomplete scan states
 - controlled-canary aggregation now distinguishes repeated unsupported-platform runs from genuinely mixed or inconclusive canary evidence
 - the report UI now explains process-scan and controlled-canary statuses in operator wording instead of only showing humanized status IDs
+- stage scorecards and repeated validation-history panels now also explain selection-fitness, evidence-support, process-scan scope, and cleanup-signal scope in operator wording instead of only raw status labels
 - platform capability matrix reporting
 - RAM/VRAM runtime observation
 - Windows PowerShell memory observation
@@ -660,6 +661,7 @@ Rough commit guide:
 
 - `W1` freeze final README/roadmap/AGENTS wording around the actual evidence level reached by Tracks A-E
 - `W2` completed: process-scan and controlled-canary status wording is now tightened in the report UI so unsupported, post-cleanup process disappearance, and mixed/inconclusive states read as explicit operator explanations instead of only humanized status IDs
+- `W2.1` completed: deeper validation-history and stage-scorecard UI surfaces now explain evidence-support class, selection fitness, process-scan scope, and cleanup-signal scope in operator wording instead of just humanized enum values
 - `W3-W4` reserve room for one or two final docs passes after real-machine validation changes the claim boundaries
 
 ### Packaging And Release Prep

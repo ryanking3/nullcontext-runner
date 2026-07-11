@@ -1,9 +1,14 @@
 import { ReportGrid } from "./ReportGrid";
 import {
+  describeCleanupSignalScopeStatus,
+  describeCleanupSignalSupportStatus,
   describeControlledCanarySignalStatus,
   describeProcessScanOverallStatus,
+  describeProcessScanScope,
   describeProcessScanPhaseStatus,
   describeProcessScanSignalStatus,
+  describeRecommendationEvidenceSupportStatus,
+  describeSelectionFitnessStatus,
   formatBoolean,
   formatBytes,
   formatDuration,
@@ -2604,6 +2609,20 @@ export function PrivacyReportViewer({
                     .evidence_support_summary
                 }
               </p>
+              <div className="report-risk-block">
+                <p>
+                  {describeRecommendationEvidenceSupportStatus(
+                    currentReport.memory_validation_history.cleanup_stage_recommendation
+                      .evidence_support_status
+                  )}
+                </p>
+                <p>
+                  {describeSelectionFitnessStatus(
+                    currentReport.memory_validation_history.cleanup_stage_recommendation
+                      .selection_fitness_status
+                  )}
+                </p>
+              </div>
 
               {currentReport.memory_validation_history.cleanup_stage_recommendation.notes.length >
                 0 && (
@@ -2730,13 +2749,37 @@ export function PrivacyReportViewer({
                           latest process scan context:{" "}
                           {humanizeSnakeCase(trend.latest_process_scan_context_status)}
                         </div>
-                        <div>
-                          latest process scan scope:{" "}
-                          {humanizeSnakeCase(trend.latest_process_scan_context_scope)}
-                        </div>
-                        <div>{trend.selection_fitness_summary}</div>
-                        <div>{trend.evidence_support_summary}</div>
-                        <div>{trend.summary}</div>
+                      <div>
+                        latest process scan scope:{" "}
+                        {humanizeSnakeCase(trend.latest_process_scan_context_scope)}
+                      </div>
+                      <div className="muted-text">
+                        {describeSelectionFitnessStatus(trend.selection_fitness_status)}
+                      </div>
+                      <div className="muted-text">
+                        {describeRecommendationEvidenceSupportStatus(
+                          trend.evidence_support_status
+                        )}
+                      </div>
+                      <div className="muted-text">
+                        {describeProcessScanSignalStatus(trend.latest_process_scan_context_status)}
+                      </div>
+                      <div className="muted-text">
+                        {describeProcessScanScope(trend.latest_process_scan_context_scope)}
+                      </div>
+                      <div className="muted-text">
+                        {describeCleanupSignalSupportStatus(
+                          trend.latest_cleanup_signal_support_status
+                        )}
+                      </div>
+                      <div className="muted-text">
+                        {describeCleanupSignalScopeStatus(
+                          trend.latest_cleanup_signal_support_scope_status
+                        )}
+                      </div>
+                      <div>{trend.selection_fitness_summary}</div>
+                      <div>{trend.evidence_support_summary}</div>
+                      <div>{trend.summary}</div>
                         {trend.notes.map((note) => (
                           <div key={`${trend.stage_id}-${note}`}>{note}</div>
                         ))}
@@ -2844,6 +2887,14 @@ export function PrivacyReportViewer({
                             <div>
                               cleanup signal scope:{" "}
                               {humanizeSnakeCase(stage.cleanup_signal_scope_status)}
+                            </div>
+                            <div className="muted-text">
+                              {describeRecommendationEvidenceSupportStatus(
+                                stage.evidence_support_status
+                              )}
+                            </div>
+                            <div className="muted-text">
+                              {describeCleanupSignalScopeStatus(stage.cleanup_signal_scope_status)}
                             </div>
                             <div>improved runs: {stage.improved_runs}</div>
                             <div>unchanged runs: {stage.unchanged_runs}</div>
@@ -3135,6 +3186,12 @@ export function PrivacyReportViewer({
                         process scan scope:{" "}
                         {humanizeSnakeCase(scorecard.process_scan_context_scope)}
                       </div>
+                      <div className="muted-text">
+                        {describeProcessScanSignalStatus(scorecard.process_scan_context_status)}
+                      </div>
+                      <div className="muted-text">
+                        {describeProcessScanScope(scorecard.process_scan_context_scope)}
+                      </div>
                       <div>
                         cleanup signal support:{" "}
                         {humanizeSnakeCase(scorecard.cleanup_signal_support_status)}
@@ -3142,6 +3199,14 @@ export function PrivacyReportViewer({
                       <div>
                         cleanup signal scope:{" "}
                         {humanizeSnakeCase(scorecard.cleanup_signal_support_scope_status)}
+                      </div>
+                      <div className="muted-text">
+                        {describeCleanupSignalSupportStatus(scorecard.cleanup_signal_support_status)}
+                      </div>
+                      <div className="muted-text">
+                        {describeCleanupSignalScopeStatus(
+                          scorecard.cleanup_signal_support_scope_status
+                        )}
                       </div>
                       <div>
                         contributing cleanup signals:{" "}
@@ -3152,6 +3217,11 @@ export function PrivacyReportViewer({
                       <div>
                         controlled canary:{" "}
                         {humanizeSnakeCase(scorecard.controlled_canary_signal_status)}
+                      </div>
+                      <div className="muted-text">
+                        {describeControlledCanarySignalStatus(
+                          scorecard.controlled_canary_signal_status
+                        )}
                       </div>
                       <div>{scorecard.summary}</div>
                       <div>{scorecard.cleanup_signal_support_summary}</div>
