@@ -544,8 +544,14 @@ mod tests {
     ) -> ControlledCanaryValidationPassReport {
         let phase_status = match process_scan_overall_status {
             "scan_backend_unsupported_on_platform" => "scan_backend_unsupported_on_platform",
-            "no_markers_detected_in_scanned_regions" => "scan_completed",
+            "markers_detected_in_scanned_memory"
+            | "no_markers_detected_in_scanned_regions" => "scan_completed",
             _ => "scan_attempt_failed",
+        };
+        let pattern_status = match process_scan_overall_status {
+            "markers_detected_in_scanned_memory" => "detected_in_scanned_memory",
+            "no_markers_detected_in_scanned_regions" => "not_detected_in_scanned_regions",
+            _ => process_scan_overall_status,
         };
         let process_scan = build_process_scan_report(
             Some(1000 + pass_index),
@@ -558,7 +564,12 @@ mod tests {
                 bytes_scanned: None,
                 regions_scanned: None,
                 regions_skipped: None,
-                patterns: vec![],
+                patterns: vec![crate::audit::ProcessScanPatternReport {
+                    pattern_kind: "canary_marker".to_string(),
+                    status: pattern_status.to_string(),
+                    matches_found: None,
+                    notes: "test".to_string(),
+                }],
                 notes: vec![],
             }],
         );
@@ -626,5 +637,50 @@ mod tests {
                 .is_some_and(|note| note.contains("repeated clear passes")),
             "clear repeated runs should get a clear aggregate note instead of the generic pessimistic one"
         );
+    }
+
+    #[test]
+    fn marker_detection_overrides_clear_passes_and_selects_detected_pass() {
+        let passes = vec![
+            make_completed_pass(1, "no_markers_detected_in_scanned_regions"),
+            make_completed_pass(2, "markers_detected_in_scanned_memory"),
+            make_completed_pass(3, "no_markers_detected_in_scanned_regions"),
+        ];
+
+        let report = build_controlled_canary_validation_run_report(passes);
+
+        assert_eq!(
+            report.aggregate_signal_status,
+            "controlled_canary_markers_detected_across_passes"
+        );
+        assert_eq!(
+            report.aggregate_process_scan_status,
+            "markers_detected_in_scanned_memory"
+        );
+        assert_eq!(report.selected_pass_index, Some(2));
+        assert!(report.selection_reason.contains("still detected controlled canary markers"));
+        assert!(report
+            .notes
+            .first()
+            .is_some_and(|note| note.contains("pessimistic")));
+    }
+
+    #[test]
+    fn mixed_clear_and_unsupported_passes_remain_inconclusive() {
+        let passes = vec![
+            make_completed_pass(1, "no_markers_detected_in_scanned_regions"),
+            make_completed_pass(2, "scan_backend_unsupported_on_platform"),
+            make_completed_pass(3, "scan_backend_unsupported_on_platform"),
+        ];
+
+        let report = build_controlled_canary_validation_run_report(passes);
+
+        assert_eq!(
+            report.aggregate_signal_status,
+            "controlled_canary_mixed_clear_and_inconclusive"
+        );
+        assert_eq!(report.aggregate_process_scan_status, "scan_attempt_incomplete");
+        assert_eq!(report.selected_pass_index, Some(2));
+        assert!(report.selection_reason.contains("mixed or inconclusive outcomes"));
     }
 }
