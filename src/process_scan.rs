@@ -275,12 +275,11 @@ fn phase_has_detected_marker(phase: &ProcessScanPhaseReport) -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn phase_signal_status_preserves_process_absence_after_cleanup() {
-        let phase = ProcessScanPhaseReport {
-            phase: "post_shutdown".to_string(),
-            status: "process_not_observable_for_scan".to_string(),
-            method: "not_applicable_process_not_observed".to_string(),
+    fn phase(status: &str, pattern_status: &str) -> ProcessScanPhaseReport {
+        ProcessScanPhaseReport {
+            phase: "test_phase".to_string(),
+            status: status.to_string(),
+            method: "test".to_string(),
             target_pid: Some(1234),
             scope_summary: "test".to_string(),
             bytes_scanned: None,
@@ -288,17 +287,103 @@ mod tests {
             regions_skipped: None,
             patterns: vec![ProcessScanPatternReport {
                 pattern_kind: "test_marker".to_string(),
-                status: "process_not_observable_for_scan".to_string(),
+                status: pattern_status.to_string(),
                 matches_found: None,
                 notes: "test".to_string(),
             }],
             notes: vec![],
-        };
+        }
+    }
+
+    #[test]
+    fn phase_signal_status_preserves_process_absence_after_cleanup() {
+        let phase = phase(
+            "process_not_observable_for_scan",
+            "process_not_observable_for_scan",
+        );
 
         assert_eq!(
             process_scan_signal_status_from_phase(&phase),
             "marker_scan_process_not_observable_after_cleanup"
         );
+    }
+
+    #[test]
+    fn report_prioritizes_detected_markers_over_completed_clear_phases() {
+        let report = build_process_scan_report(
+            Some(1234),
+            vec![
+                phase("scan_completed", "not_detected_in_scanned_regions"),
+                phase("scan_completed", "detected_in_scanned_memory"),
+            ],
+        );
+
+        assert_eq!(report.overall_status, "markers_detected_in_scanned_memory");
+        assert_eq!(
+            process_scan_signal_status_from_report(&report),
+            "marker_persistence_detected"
+        );
+        assert!(report.summary.contains("found one or more configured marker"));
+    }
+
+    #[test]
+    fn report_maps_completed_marker_miss_to_scoped_clear_evidence() {
+        let report = build_process_scan_report(
+            Some(1234),
+            vec![phase("scan_completed", "not_detected_in_scanned_regions")],
+        );
+
+        assert_eq!(
+            report.overall_status,
+            "no_markers_detected_in_scanned_regions"
+        );
+        assert_eq!(
+            process_scan_signal_status_from_report(&report),
+            "marker_scan_clear_in_scanned_regions"
+        );
+        assert!(report.residual_risk_summary.contains("scanned readable regions"));
+        assert!(report.residual_risk_summary.contains("does not rule out persistence"));
+    }
+
+    #[test]
+    fn report_preserves_unsupported_backend_as_distinct_from_scan_failure() {
+        let report = build_process_scan_report(
+            Some(1234),
+            vec![phase(
+                "scan_backend_unsupported_on_platform",
+                "scan_backend_unsupported_on_platform",
+            )],
+        );
+
+        assert_eq!(report.overall_status, "scan_backend_unsupported_on_platform");
+        assert_eq!(
+            process_scan_signal_status_from_report(&report),
+            "marker_scan_backend_unsupported"
+        );
+        assert!(report.summary.contains("does not implement direct llama-server memory scanning"));
+    }
+
+    #[test]
+    fn post_shutdown_absence_skips_scan_without_claiming_marker_clearance() {
+        let phase = scan_process_phase_with_presence(
+            "post_shutdown",
+            1234,
+            Some(false),
+            &[ProcessScanMarker {
+                kind: "test_marker",
+                bytes: b"test",
+            }],
+        );
+
+        assert_eq!(phase.status, "process_not_observable_for_scan");
+        assert_eq!(
+            process_scan_signal_status_from_phase(&phase),
+            "marker_scan_process_not_observable_after_cleanup"
+        );
+        assert!(phase
+            .patterns
+            .iter()
+            .all(|pattern| pattern.status == "process_not_observable_for_scan"));
     }
 }
 
