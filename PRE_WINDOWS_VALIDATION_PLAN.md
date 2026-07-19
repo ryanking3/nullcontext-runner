@@ -2,169 +2,218 @@
 
 ## Purpose
 
-Use the week before Windows/NVIDIA access to improve confidence in NullContext's
-portable lifecycle, report, and evidence logic. The goal is to arrive at the
-Windows validation session with a repeatable evidence runbook and fewer
-unrelated regressions.
+Use the week before Windows/NVIDIA access to improve confidence in
+NullContext's portable lifecycle, report, and evidence logic. The goal is to
+arrive at the Windows validation session with a repeatable evidence runbook and
+fewer unrelated regressions.
 
 This Mac can validate local inference lifecycle behavior and macOS RAM
 observation. It cannot validate the Windows-only direct process-memory scan or
 the Windows/NVIDIA CUDA inspection path.
 
-## Scope and Guardrails
+## How to Use This Plan
 
-- Keep security claims conservative: a marker miss in scanned memory is not a
-  full-memory-clear claim.
-- Do not claim VRAM sanitization, swap/pagefile sanitization, or allocator
-  zeroization.
-- Prefer small, testable changes over broad rewrites.
-- Do not add cleanup stages merely to increase the number of experiments.
-- Preserve both one-shot and active-chat behavior.
+- Check off a task only when its stated acceptance criteria are met.
+- Record the commit that completed a code task below the checkbox.
+- Keep blocked tasks unchecked and explain the blocker in **Current Blockers**.
+- Do not turn a marker miss, process exit, host-tool observation, or declared
+  capability into a full-memory-clear claim.
 
-## Priority 1: Establish a Local macOS Smoke Path
+## Current Blockers
 
-### Prerequisites
+- [ ] Install Rust/Cargo and `rustfmt` on this Mac.
+- [ ] Install `pnpm` for the browser UI.
+- [ ] Provide an arm64/Metal-capable `llama-server` build.
+- [ ] Provide a small local GGUF model and an uncommitted
+  `~/.nullcontext/config.toml`.
 
-- Install the Rust toolchain and `pnpm`.
-- Provide a local arm64/Metal-capable `llama-server` build.
-- Provide one small local GGUF model suitable for repeatable smoke tests.
-- Create an uncommitted `~/.nullcontext/config.toml` pointing to the local
-  runtime and model.
+Until these are resolved, portable unit tests can be added and statically
+checked, but Rust formatting, compilation, and runtime smoke tests cannot run
+locally.
 
-### Verification
+## Guardrails
 
-- Run `cargo fmt` and `cargo build`.
-- Run `pnpm build` from `apps/web`.
-- Start the local server and confirm the health endpoint and browser UI load.
-- Exercise one-shot inference, cancellation, active chat, and active-chat end
-  plus sanitization.
-- Exercise persistent-session retention, cleanup, and reconciliation.
-- Ingest a small txt/markdown corpus, query it, and use it for one-shot and
-  active-chat grounding.
-- Inspect generated reports for macOS `ps` and `vmmap -summary` evidence,
-  lifecycle operations, and honest residual-risk wording.
+- [ ] Preserve one-shot and active-chat behavior throughout all changes.
+- [ ] Keep security claims conservative: a marker miss is limited to configured
+  markers and scanned regions.
+- [ ] Do not claim RAM/VRAM sanitization, swap/pagefile sanitization, or
+  allocator zeroization without direct supporting evidence.
+- [ ] Avoid broad rewrites of `src/runtime.rs`, `src/web.rs`, and active-chat
+  lifecycle code until the local smoke path passes.
+- [ ] Do not add cleanup stages merely to increase the number of experiments.
 
-### Expected Limitation
+The guardrails are ongoing rules, not completion tasks; leave them unchecked
+unless a final review explicitly verifies them for the full pre-Windows scope.
 
-The direct marker scan and controlled-canary RAM-side result will report the
-current-platform scan backend as unsupported. Treat this as a check that the
-fallback reporting is honest, not as a failed macOS test.
+## Track 1: Portable Evidence Tests
 
-## Priority 2: Add Portable Automated Coverage
+### 1.1 Process-scan evidence boundaries
 
-The repository has no formal automated test suite. Add focused unit and
-fixture-style tests that do not need a model, llama runtime, or Windows host.
+- [x] Cover report aggregation precedence when any phase detects a marker.
+- [x] Cover completed marker misses as scoped evidence, not full clearance.
+- [x] Cover unsupported backend status separately from failed/incomplete scans.
+- [x] Cover post-shutdown PID absence without converting it into marker
+  clearance.
 
-### Highest-Value Targets
+Completed in `d3581ad` — `Add process scan evidence boundary tests`.
 
-- Process-scan status aggregation and distinction among detected, clear in
-  scanned regions, incomplete, unsupported, and process-not-observable.
-- Validation-history aggregation, cleanup-stage ranking, evidence-support
-  classes, and release-gate verdicts.
-- Runtime introspection manifest parsing, signal alias normalization, and
-  declared-versus-observed contract gaps.
-- Model and session configuration validation.
-- Corpus chunking, retrieval selection, and provenance shaping.
-- Legacy and current privacy-report JSON compatibility.
+### 1.2 Controlled-canary aggregation
 
-### Completion Criteria
+- [x] Cover repeated clear canary aggregation.
+- [x] Cover repeated unsupported-platform aggregation.
+- [x] Cover marker detection overriding otherwise clear passes.
+- [x] Cover mixed clear and unsupported results remaining inconclusive.
+- [x] Make canary test fixtures model marker-detected scan phases correctly.
 
-- Tests cover the security-relevant status transitions and edge cases that the
-  report UI presents to operators.
-- `cargo test` passes locally once the Rust toolchain is installed.
-- Existing report fixtures continue to deserialize without silent weakening of
-  claim boundaries.
+Completed in `fdf4a53` — `Test controlled canary evidence aggregation`.
 
-## Priority 3: Focused Refactoring and Report Cleanup
+### 1.3 Validation history and release-gating
 
-Refactor only where it improves reviewability or prevents evidence semantics
-from drifting.
+- [ ] Add a focused regression test for the release-readiness verdict when the
+  leading stage lacks marker-backed evidence.
+- [ ] Add a focused regression test for insufficient repeated history.
+- [ ] Add a focused regression test for a marker-backed stage that satisfies
+  the repeated-evidence gate.
+- [ ] Confirm stage ranking continues to demote session-fallback and
+  runtime-global-only evidence.
 
-### Candidates
+Acceptance criteria: the tests distinguish a *best available* stage from a
+stage eligible for a stronger clean-stage/release-ready claim.
 
-- Extract repeated report-grid blocks from
-  `apps/web/src/components/PrivacyReportViewer.tsx`.
-- Keep status-to-operator-language helpers centralized in
-  `apps/web/src/appUtils.ts`.
-- Isolate pure evidence derivation from report serialization in `src/audit.rs`
-  where practical.
-- Add reusable sanitized report fixtures for UI and compatibility checks.
+### 1.4 Runtime introspection contracts
 
-### Do Not Do
+- [ ] Test manifest parsing for canonical signal IDs and aliases.
+- [ ] Test declared-but-unobserved signals remain distinct from observed ones.
+- [ ] Test undeclared observed signals remain visible in the contract gap.
+- [ ] Test stage-local helper-runtime cleanup signals remain distinct from
+  runtime-global signals.
 
-- Do not broadly rewrite `src/runtime.rs`, `src/web.rs`, or active-chat
-  lifecycle code without a passing local smoke path.
-- Do not add speculative macOS process-memory scanning as a substitute for the
-  Windows prototype.
-- Do not add more invasive cleanup stages unless repeated evidence identifies
-  a specific missing experiment.
+Acceptance criteria: a report cannot silently upgrade manifest declarations
+into observed allocator/KV cleanup events.
 
-## Priority 4: Claim-Boundary Audit
+### 1.5 Config, corpus, and report compatibility
 
-Review user-facing text in the CLI, report JSON summaries, and UI for terms
-such as `clean`, `cleared`, `sanitized`, `memory`, and `VRAM`.
+- [ ] Add model/session configuration validation tests for invalid paths and
+  invalid active-chat context bounds.
+- [ ] Add corpus chunking and retrieval-provenance tests.
+- [ ] Add sanitized legacy and current privacy-report JSON fixtures.
+- [ ] Verify fixture deserialization preserves conservative defaults for absent
+  newer evidence fields.
 
-Each claim must resolve to one of these evidence levels:
+Acceptance criteria: portable user flows and older reports do not regress when
+evidence/report schemas evolve.
 
-1. Configured markers were detected in scanned regions.
-2. Configured markers were not detected in scanned readable regions.
-3. The process was no longer observable after cleanup.
-4. Only host-tool/process-level RAM or GPU evidence exists.
-5. A direct runtime lifecycle signal was observed.
-6. The capability is unsupported or the observation is inconclusive.
+### 1.6 Run the portable suite
 
-Avoid language that upgrades any of these into proof of full RAM, VRAM, or
-allocator sanitization.
+- [ ] Run `cargo fmt --check`.
+- [ ] Run `cargo test`.
+- [ ] Record the passing commands and any intentionally skipped platform tests.
 
-## Priority 5: Prepare the Windows Evidence Session
+Blocked by the missing Rust toolchain.
 
-Update `WINDOWS_RUNTIME_VALIDATION.md` or add a companion checklist that
-requires an evidence bundle for each scenario.
+## Track 2: Local macOS Smoke Path
 
-### Record Once Per Machine
+### 2.1 Build and UI baseline
 
-- Windows version, GPU model, NVIDIA driver version, and llama-server build.
-- Model ID/path class, quantization, and GPU-offload setting.
-- NullContext commit SHA and configuration relevant to the run.
+- [ ] Run `cargo fmt` and `cargo build`.
+- [ ] Run `pnpm build` from `apps/web`.
+- [ ] Start `cargo run -- serve` and confirm `/api/health` responds.
+- [ ] Confirm the browser UI loads locally.
 
-### Required Scenarios
+### 2.2 Session lifecycle smoke tests
 
-1. Normal one-shot CPU or low-offload run.
-2. GPU-offloaded one-shot run.
-3. Intentional runtime-start failure.
-4. Active-chat start, message, cancel, end, and report generation.
-5. Controlled-canary validation run.
+- [ ] Run a secure one-shot inference.
+- [ ] Verify one-shot stop/cancel behavior.
+- [ ] Start active chat, stream a message, send a follow-up, and cancel a
+  generation without ending the session.
+- [ ] End active chat and verify the End + Sanitize report.
+- [ ] Verify persistent-session retention, cleanup, and reconciliation.
 
-### Capture for Every Scenario
+### 2.3 Corpus lifecycle smoke tests
 
-- Privacy report JSON.
-- Runtime PID and relevant NullContext logs.
-- `Get-Process` and `Win32_Process` output for the runtime PID.
-- `nvidia-smi` summary, `compute-apps`, and `pmon` output when GPU offload is
-  requested.
-- The observed result beside the expected report status and wording.
+- [ ] Ingest a small txt or markdown corpus.
+- [ ] Query the corpus and verify retrieval provenance.
+- [ ] Run one-shot corpus grounding.
+- [ ] Run active-chat corpus grounding.
+- [ ] Verify corpus retention, cleanup, and reconciliation.
 
-### Windows Completion Criteria
+### 2.4 macOS report checks
 
-- Reported RAM, process-presence, and GPU visibility values agree with the
-  contemporaneous host-tool captures or disclose the discrepancy.
-- Direct process-scan phase statuses are plausible for live, failed-start, and
-  post-shutdown cases.
-- No report suggests allocator-level or VRAM-sanitization truth when the raw
-  evidence only supports process-level visibility.
+- [ ] Confirm reports include `ps`/`vmmap -summary` RAM observation when
+  available.
+- [ ] Confirm live/post-shutdown process observations are represented honestly.
+- [ ] Confirm macOS reports identify direct process scanning as unsupported.
+- [ ] Confirm controlled-canary output identifies the unsupported scan backend
+  as a platform limitation, not clean RAM evidence.
 
-## Suggested Order
+Acceptance criteria: the host-side lifecycle/report path works end-to-end and
+all unsupported macOS direct-scan statuses are clear and conservative.
 
-1. Provision the macOS toolchain and local runtime.
-2. Establish build and smoke-test baselines.
-3. Add portable tests and report fixtures.
-4. Make only targeted refactors revealed by those tests.
-5. Complete the claim-boundary audit.
-6. Freeze the Windows runbook and collect its required commands and templates.
+## Track 3: Focused Refactoring and Report Fixtures
 
-## Success Condition Before Windows Access
+- [ ] Identify one repeated `PrivacyReportViewer` report-grid pattern that
+  obscures evidence semantics.
+- [ ] Extract it into a small typed component without changing wording or
+  report data.
+- [ ] Add or update a representative sanitized fixture for the extracted UI.
+- [ ] Verify TypeScript build after the refactor.
+- [ ] Review `src/audit.rs` for one isolated pure evidence-derivation helper
+  that can be separated from serialization safely.
 
-The repository builds locally, portable evidence logic is covered by automated
-tests, macOS lifecycle/report paths have been smoke-tested, and the Windows
-session can produce comparable evidence for every required scenario without
-ad-hoc decisions.
+Acceptance criteria: a narrow refactor reduces repetition or makes evidence
+semantics easier to review, with no lifecycle or claim-boundary change.
+
+## Track 4: Claim-Boundary Audit
+
+- [ ] Inventory user-facing uses of `clean`, `cleared`, `sanitized`, `memory`,
+  and `VRAM` across the CLI, report summaries, and web UI.
+- [ ] Classify each statement as one of: marker detected; marker miss in scanned
+  regions; process not observable; host-tool/process-level observation; direct
+  runtime signal; unsupported/inconclusive.
+- [ ] Rewrite any statement that implies complete RAM, VRAM, or allocator
+  clearing without matching evidence.
+- [ ] Add regression coverage for any corrected status semantics.
+- [ ] Record the final claim-boundary review commit.
+
+Acceptance criteria: every operator-facing security statement identifies both
+its evidence level and its remaining limitation.
+
+## Track 5: Windows Evidence Session Preparation
+
+### 5.1 Runbook and metadata
+
+- [ ] Update `WINDOWS_RUNTIME_VALIDATION.md` or add a companion runbook.
+- [ ] Add a template to record Windows version, GPU, NVIDIA driver,
+  llama-server build, NullContext commit, model class, and offload settings.
+- [ ] Add expected report statuses beside every scenario and host-tool capture.
+
+### 5.2 Required scenarios
+
+- [ ] Normal one-shot CPU or low-offload run.
+- [ ] GPU-offloaded one-shot run.
+- [ ] Intentional runtime-start failure.
+- [ ] Active-chat start, message, cancel, end, and report generation.
+- [ ] Controlled-canary validation run.
+
+### 5.3 Required evidence for each scenario
+
+- [ ] Privacy report JSON and relevant NullContext logs.
+- [ ] Runtime PID plus `Get-Process` and `Win32_Process` output.
+- [ ] `nvidia-smi` summary, `compute-apps`, and `pmon` output for GPU-offloaded
+  runs.
+- [ ] A recorded comparison of expected and observed status/wording.
+
+Acceptance criteria: the Windows session can produce comparable evidence for
+every required scenario without ad-hoc capture decisions.
+
+## Final Pre-Windows Exit Check
+
+- [ ] Rust build, formatting, and portable tests pass locally.
+- [ ] The macOS lifecycle/report smoke path has passed.
+- [ ] Unsupported macOS direct-scan behavior has been verified as honest.
+- [ ] Claim-boundary audit findings have been resolved and committed.
+- [ ] The Windows runbook and evidence templates are ready.
+
+The plan is complete only when every applicable exit item is checked or
+explicitly documented as blocked by missing hardware rather than missing
+preparation.
