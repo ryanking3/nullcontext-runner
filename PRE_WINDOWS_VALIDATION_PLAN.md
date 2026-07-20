@@ -69,16 +69,20 @@ Completed in `fdf4a53` — `Test controlled canary evidence aggregation`.
 
 ### 1.3 Validation history and release-gating
 
-- [ ] Add a focused regression test for the release-readiness verdict when the
+- [x] Add a focused regression test for the release-readiness verdict when the
   leading stage lacks marker-backed evidence.
-- [ ] Add a focused regression test for insufficient repeated history.
-- [ ] Add a focused regression test for a marker-backed stage that satisfies
+- [x] Add a focused regression test for insufficient repeated history.
+- [x] Add a focused regression test for a marker-backed stage that satisfies
   the repeated-evidence gate.
-- [ ] Confirm stage ranking continues to demote session-fallback and
+- [x] Confirm stage ranking continues to demote session-fallback and
   runtime-global-only evidence.
 
 Acceptance criteria: the tests distinguish a *best available* stage from a
 stage eligible for a stronger clean-stage/release-ready claim.
+
+Existing marker-backed, evidence-quality, and ranking coverage landed in
+`c69fc02`, `4517e4e`, and `5586b13`. The insufficient-history regression case
+is included in this change.
 
 ### 1.4 Runtime introspection contracts
 

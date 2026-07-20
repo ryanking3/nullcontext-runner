@@ -2819,4 +2819,41 @@ mod tests {
             "release_gate_repeated_evidence_threshold_met"
         );
     }
+
+    #[test]
+    fn release_gate_waits_for_more_history_before_a_clean_release_story() {
+        let mut recommendation = default_stage_recommendation_report("test");
+        recommendation.recommendation_status = "recommendation_available".to_string();
+        recommendation.clean_claim_status =
+            "clean_claim_eligible_under_current_thresholds".to_string();
+        recommendation.selection_fitness_status =
+            "selection_fitness_preferred_stage_local_marker_backed".to_string();
+        recommendation.evidence_support_status =
+            "recommendation_evidence_supported_by_stage_local_marker_clearance".to_string();
+        recommendation.runs_recorded = 1;
+        recommendation.marker_detection_runs = 0;
+        recommendation.worsened_runs = 0;
+        recommendation.inconclusive_runs = 0;
+
+        let gate = build_release_gate(&recommendation, &make_controlled_canary_history(1));
+
+        assert!(!gate.stage_gate_passed);
+        assert!(!gate.controlled_canary_gate_passed);
+        assert_eq!(
+            gate.cleanup_stage_gate_status,
+            "cleanup_stage_gate_waiting_for_more_repeated_runs"
+        );
+        assert_eq!(
+            gate.controlled_canary_gate_status,
+            "controlled_canary_gate_waiting_for_more_completed_history"
+        );
+        assert_eq!(
+            gate.gate_status,
+            "release_gate_blocked_on_stage_and_canary_thresholds"
+        );
+        assert_eq!(
+            gate.release_readiness_status,
+            "release_readiness_waiting_for_more_history"
+        );
+    }
 }
