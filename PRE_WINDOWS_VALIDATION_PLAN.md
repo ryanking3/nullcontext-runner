@@ -158,14 +158,15 @@ all unsupported macOS direct-scan statuses are clear and conservative.
 
 ## Track 3: Focused Refactoring and Report Fixtures
 
+- [x] Review `src/audit.rs` for an isolated pure evidence-derivation helper.
+- [x] Extract runtime-introspection aliasing and event-classification helpers
+  into an internal module without changing the report contract.
 - [ ] Identify one repeated `PrivacyReportViewer` report-grid pattern that
   obscures evidence semantics.
 - [ ] Extract it into a small typed component without changing wording or
   report data.
 - [ ] Add or update a representative sanitized fixture for the extracted UI.
 - [ ] Verify TypeScript build after the refactor.
-- [ ] Review `src/audit.rs` for one isolated pure evidence-derivation helper
-  that can be separated from serialization safely.
 
 Acceptance criteria: a narrow refactor reduces repetition or makes evidence
 semantics easier to review, with no lifecycle or claim-boundary change.
