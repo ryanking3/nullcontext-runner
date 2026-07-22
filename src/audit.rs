@@ -6751,6 +6751,76 @@ mod tests {
         ))
     }
 
+    fn build_test_instrumented_introspection() -> LlamaRuntimeIntrospectionReport {
+        let llama_path = unique_test_runtime_path();
+        let manifest_path = llama_path.with_extension("nullcontext-introspection.json");
+        fs::write(
+            &manifest_path,
+            r#"{
+                "runtime_build_profile": "instrumented_test_runtime",
+                "declared_signal_ids": ["allocator_reset_observed"],
+                "declared_cleanup_signal_ids": ["allocator_reset_observed"],
+                "allocator_introspection_status": "allocator_lifecycle_signals_available",
+                "allocator_reset_signal_status": "allocator_reset_signal_available"
+            }"#,
+        )
+        .expect("test manifest should be written");
+
+        let report = build_llama_runtime_introspection_report(
+            llama_path
+                .to_str()
+                .expect("temporary test path should be valid UTF-8"),
+            false,
+            &[RuntimeIntrospectionSignal {
+                event: "allocator_reset_observed".to_string(),
+                status: "observed".to_string(),
+                source_stream: "stdout".to_string(),
+                details: "test cleanup signal".to_string(),
+            }],
+        );
+        fs::remove_file(&manifest_path).expect("test manifest should be removed");
+        report
+    }
+
+    fn make_test_cleanup_stage(
+        helper_runtime_introspection: Option<LlamaRuntimeIntrospectionReport>,
+    ) -> VramCleanupStrategyStageReport {
+        VramCleanupStrategyStageReport {
+            stage_id: "test-stage".to_string(),
+            stage_label: "Test Stage".to_string(),
+            stage_kind: "test_stage".to_string(),
+            cooldown_ms_before_stage: 0,
+            verification_window_ms: 0,
+            action_status: "not_attempted".to_string(),
+            evidence_improvement_status: "evidence_inconclusive".to_string(),
+            process_scan_phase: None,
+            helper_process_scan_report: None,
+            helper_runtime_introspection,
+            selection_evidence_status: "cleanup_stage_selection_evidence_not_contextualized"
+                .to_string(),
+            selection_evidence_summary: "test".to_string(),
+            cleanup_signal_support_status: "cleanup_signal_support_unavailable".to_string(),
+            cleanup_signal_support_summary: "test".to_string(),
+            cleanup_signal_support_scope_status: "cleanup_signal_scope_unavailable".to_string(),
+            cleanup_signal_support_scope_summary: "test".to_string(),
+            contributing_cleanup_signals: vec![],
+            marker_evidence_status: "marker_evidence_not_contextualized".to_string(),
+            marker_evidence_summary: "test".to_string(),
+            evidence_snapshot: VramCleanupEvidenceSnapshot {
+                vram_inspection_status: "test".to_string(),
+                post_shutdown_gpu_visibility_status: "test".to_string(),
+                gpu_entry_observed: None,
+                gpu_memory_bytes: None,
+                gpu_peak_memory_bytes: None,
+                gpu_samples_collected: 0,
+                gpu_samples_with_pid_observed: 0,
+                gpu_last_pid_observed_at_ms: None,
+            },
+            summary: "test".to_string(),
+            notes: vec![],
+        }
+    }
+
     #[test]
     fn introspection_report_preserves_missing_and_undeclared_signal_contract_gaps() {
         let llama_path = unique_test_runtime_path();
@@ -6837,6 +6907,27 @@ mod tests {
         assert_eq!(
             alias_event.canonical_event.as_deref(),
             Some("allocator_reset_observed")
+        );
+    }
+
+    #[test]
+    fn helper_runtime_cleanup_scope_does_not_inherit_session_global_scope() {
+        let session_introspection = build_test_instrumented_introspection();
+        let helper_introspection = build_test_instrumented_introspection();
+        let stage_without_helper = make_test_cleanup_stage(None);
+        let stage_with_helper = make_test_cleanup_stage(Some(helper_introspection));
+
+        assert_eq!(
+            derive_runtime_cleanup_signal_scope_status(&session_introspection),
+            "cleanup_signal_scope_runtime_global_only"
+        );
+        assert_eq!(
+            derive_stage_cleanup_signal_scope_status(&stage_without_helper, &session_introspection),
+            "cleanup_signal_scope_runtime_global_only"
+        );
+        assert_eq!(
+            derive_stage_cleanup_signal_scope_status(&stage_with_helper, &session_introspection),
+            "cleanup_signal_scope_stage_local_helper_runtime"
         );
     }
 
