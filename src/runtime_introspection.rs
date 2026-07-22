@@ -59,3 +59,49 @@ fn parse_stream(source_stream: &str, content: &str) -> Vec<RuntimeIntrospectionS
 
     signals
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_valid_signals_from_both_runtime_streams() {
+        let stdout = r#"
+            ordinary runtime output
+            NULLCONTEXT_INTROSPECTION: {"event":"allocator_reset_observed","status":"observed","details":"after shutdown"}
+        "#;
+        let stderr = r#"
+            NULLCONTEXT_INTROSPECTION: {"event":"kv_cache_clear_observed"}
+        "#;
+
+        let signals = parse_runtime_introspection_signals(stdout, stderr);
+
+        assert_eq!(signals.len(), 2);
+        assert_eq!(signals[0].event, "allocator_reset_observed");
+        assert_eq!(signals[0].status, "observed");
+        assert_eq!(signals[0].source_stream, "stdout");
+        assert_eq!(signals[0].details, "after shutdown");
+        assert_eq!(signals[1].event, "kv_cache_clear_observed");
+        assert_eq!(signals[1].status, "observed");
+        assert_eq!(signals[1].source_stream, "stderr");
+        assert!(signals[1].details.is_empty());
+    }
+
+    #[test]
+    fn records_malformed_introspection_payload_without_dropping_later_signals() {
+        let stdout = r#"
+            NULLCONTEXT_INTROSPECTION: not-json
+            NULLCONTEXT_INTROSPECTION: {"event":"model_unload_observed","status":"observed"}
+        "#;
+
+        let signals = parse_runtime_introspection_signals(stdout, "");
+
+        assert_eq!(signals.len(), 2);
+        assert_eq!(signals[0].event, "introspection_signal_parse_failed");
+        assert_eq!(signals[0].status, "failed");
+        assert_eq!(signals[0].source_stream, "stdout");
+        assert!(signals[0].details.contains("not-json"));
+        assert_eq!(signals[1].event, "model_unload_observed");
+        assert_eq!(signals[1].status, "observed");
+    }
+}

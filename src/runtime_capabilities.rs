@@ -144,3 +144,94 @@ fn normalize_signal_aliases(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_test_runtime_path() -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after the Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "nullcontext-runtime-introspection-test-{}-{}",
+            std::process::id(),
+            timestamp
+        ))
+    }
+
+    #[test]
+    fn sidecar_manifest_keeps_declarations_separate_and_normalizes_aliases() {
+        let llama_path = unique_test_runtime_path();
+        let manifest_path = runtime_introspection_manifest_path(
+            llama_path
+                .to_str()
+                .expect("temporary test path should be valid UTF-8"),
+        );
+        fs::write(
+            &manifest_path,
+            r#"{
+                "runtime_build_profile": "instrumented_test_runtime",
+                "instrumentation_backend": "test_signals",
+                "declared_signal_ids": ["allocator_reset_observed", "kv_cache_clear_observed"],
+                "declared_cleanup_signal_ids": ["allocator_reset_observed"],
+                "signal_aliases": {
+                    "allocator_reset_observed": ["allocator_reset", "", "allocator_reset"],
+                    "extended_cleanup_signal": []
+                }
+            }"#,
+        )
+        .expect("test manifest should be written");
+
+        let capabilities = detect_runtime_introspection_capabilities(
+            llama_path
+                .to_str()
+                .expect("temporary test path should be valid UTF-8"),
+        );
+        fs::remove_file(&manifest_path).expect("test manifest should be removed");
+        let capabilities = capabilities.expect("test manifest should load");
+
+        assert_eq!(capabilities.capability_source, "sidecar_manifest");
+        assert_eq!(
+            capabilities.declared_signal_ids,
+            vec![
+                "allocator_reset_observed".to_string(),
+                "kv_cache_clear_observed".to_string()
+            ]
+        );
+        assert_eq!(
+            capabilities.declared_cleanup_signal_ids,
+            vec!["allocator_reset_observed".to_string()]
+        );
+        assert_eq!(
+            capabilities.signal_aliases.get("allocator_reset_observed"),
+            Some(&vec![
+                "allocator_reset".to_string(),
+                "allocator_reset_observed".to_string()
+            ])
+        );
+        assert_eq!(
+            capabilities.signal_aliases.get("extended_cleanup_signal"),
+            Some(&vec!["extended_cleanup_signal".to_string()])
+        );
+    }
+
+    #[test]
+    fn missing_sidecar_manifest_uses_stock_runtime_capabilities() {
+        let llama_path = unique_test_runtime_path();
+
+        let capabilities = detect_runtime_introspection_capabilities(
+            llama_path
+                .to_str()
+                .expect("temporary test path should be valid UTF-8"),
+        )
+        .expect("missing manifest should use a stock-runtime fallback");
+
+        assert_eq!(capabilities.capability_source, "stock_runtime_fallback");
+        assert!(capabilities.declared_signal_ids.is_empty());
+        assert!(capabilities.declared_cleanup_signal_ids.is_empty());
+        assert!(capabilities.signal_aliases.is_empty());
+    }
+}
