@@ -87,16 +87,16 @@ is included in this change.
 ### 1.4 Runtime introspection contracts
 
 - [x] Test manifest parsing for canonical signal IDs and aliases.
-- [ ] Test declared-but-unobserved signals remain distinct from observed ones.
-- [ ] Test undeclared observed signals remain visible in the contract gap.
+- [x] Test declared-but-unobserved signals remain distinct from observed ones.
+- [x] Test undeclared observed signals remain visible in the contract gap.
 - [ ] Test stage-local helper-runtime cleanup signals remain distinct from
   runtime-global signals.
 
 Acceptance criteria: a report cannot silently upgrade manifest declarations
 into observed allocator/KV cleanup events.
 
-Manifest and parser contract coverage is included in this change. The remaining
-items need report-level tests that compare declarations with captured signals.
+Parser, manifest, and report-level contract coverage is included in the recent
+introspection test changes. Stage-local helper-runtime scope remains to test.
 
 ### 1.5 Config, corpus, and report compatibility
 

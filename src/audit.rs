@@ -6935,6 +6935,109 @@ fn cleanup_reason_summary(reason: &CleanupReason) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_test_runtime_path() -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after the Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "nullcontext-audit-introspection-test-{}-{}",
+            std::process::id(),
+            timestamp
+        ))
+    }
+
+    #[test]
+    fn introspection_report_preserves_missing_and_undeclared_signal_contract_gaps() {
+        let llama_path = unique_test_runtime_path();
+        let manifest_path = llama_path.with_extension("nullcontext-introspection.json");
+        fs::write(
+            &manifest_path,
+            r#"{
+                "runtime_build_profile": "instrumented_test_runtime",
+                "declared_signal_ids": ["allocator_reset_observed", "kv_cache_clear_observed"],
+                "declared_cleanup_signal_ids": ["allocator_reset_observed"],
+                "signal_aliases": {
+                    "allocator_reset_observed": ["allocator_reset"]
+                }
+            }"#,
+        )
+        .expect("test manifest should be written");
+
+        let observed_signals = vec![
+            RuntimeIntrospectionSignal {
+                event: "allocator_reset".to_string(),
+                status: "observed".to_string(),
+                source_stream: "stdout".to_string(),
+                details: "test alias event".to_string(),
+            },
+            RuntimeIntrospectionSignal {
+                event: "unexpected_cleanup_event".to_string(),
+                status: "observed".to_string(),
+                source_stream: "stderr".to_string(),
+                details: "test undeclared event".to_string(),
+            },
+        ];
+        let report = build_llama_runtime_introspection_report(
+            llama_path
+                .to_str()
+                .expect("temporary test path should be valid UTF-8"),
+            false,
+            &observed_signals,
+        );
+        fs::remove_file(&manifest_path).expect("test manifest should be removed");
+
+        assert_eq!(report.capability_source, "sidecar_manifest");
+        assert!(report.allocator_reset_observed);
+        assert!(!report.kv_cache_clear_observed);
+        assert_eq!(
+            report.missing_declared_signal_ids,
+            vec!["kv_cache_clear_observed".to_string()]
+        );
+        assert_eq!(
+            report.undeclared_observed_signal_ids,
+            vec!["unexpected_cleanup_event".to_string()]
+        );
+        assert_eq!(report.missing_declared_signal_count, 1);
+        assert_eq!(report.undeclared_observed_signal_count, 1);
+        assert_eq!(
+            report.signal_contract_status,
+            "partial_declared_runtime_signals_observed"
+        );
+        assert!(report.notes.iter().any(|note| note.contains(
+            "allocator_reset -> allocator_reset_observed"
+        )));
+
+        let allocator_reset = report
+            .runtime_signal_matrix
+            .iter()
+            .find(|entry| entry.signal_id == "allocator_reset_observed")
+            .expect("allocator reset should have a signal-matrix entry");
+        assert_eq!(allocator_reset.evidence_status, "direct_signal_observed");
+
+        let kv_clear = report
+            .runtime_signal_matrix
+            .iter()
+            .find(|entry| entry.signal_id == "kv_cache_clear_observed")
+            .expect("KV clear should have a signal-matrix entry");
+        assert_eq!(
+            kv_clear.evidence_status,
+            "declared_support_but_signal_not_observed"
+        );
+
+        let alias_event = report
+            .observed_events
+            .iter()
+            .find(|event| event.event == "allocator_reset")
+            .expect("alias event should be preserved in the observed-event list");
+        assert_eq!(
+            alias_event.canonical_event.as_deref(),
+            Some("allocator_reset_observed")
+        );
+    }
 
     #[test]
     fn legacy_memory_validation_history_json_gets_new_default_fields() {
