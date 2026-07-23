@@ -159,8 +159,9 @@ all unsupported macOS direct-scan statuses are clear and conservative.
 ## Track 3: Focused Refactoring and Report Fixtures
 
 - [x] Review `src/audit.rs` for an isolated pure evidence-derivation helper.
-- [x] Extract runtime-introspection aliasing and event-classification helpers
-  into an internal module without changing the report contract.
+- [x] Extract runtime-introspection aliasing, event-classification, and
+  signal-matrix helpers into an internal module without changing the report
+  contract.
 - [ ] Identify one repeated `PrivacyReportViewer` report-grid pattern that
   obscures evidence semantics.
 - [ ] Extract it into a small typed component without changing wording or
