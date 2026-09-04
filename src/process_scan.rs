@@ -323,7 +323,9 @@ mod tests {
             process_scan_signal_status_from_report(&report),
             "marker_persistence_detected"
         );
-        assert!(report.summary.contains("found one or more configured marker"));
+        assert!(report
+            .summary
+            .contains("found one or more configured marker"));
     }
 
     #[test]
@@ -341,8 +343,12 @@ mod tests {
             process_scan_signal_status_from_report(&report),
             "marker_scan_clear_in_scanned_regions"
         );
-        assert!(report.residual_risk_summary.contains("scanned readable regions"));
-        assert!(report.residual_risk_summary.contains("does not rule out persistence"));
+        assert!(report
+            .residual_risk_summary
+            .contains("scanned readable regions"));
+        assert!(report
+            .residual_risk_summary
+            .contains("does not rule out persistence"));
     }
 
     #[test]
@@ -355,12 +361,17 @@ mod tests {
             )],
         );
 
-        assert_eq!(report.overall_status, "scan_backend_unsupported_on_platform");
+        assert_eq!(
+            report.overall_status,
+            "scan_backend_unsupported_on_platform"
+        );
         assert_eq!(
             process_scan_signal_status_from_report(&report),
             "marker_scan_backend_unsupported"
         );
-        assert!(report.summary.contains("does not implement direct llama-server memory scanning"));
+        assert!(report
+            .summary
+            .contains("does not implement direct llama-server memory scanning"));
     }
 
     #[test]

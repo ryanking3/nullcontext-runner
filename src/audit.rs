@@ -6627,9 +6627,10 @@ mod tests {
             report.signal_contract_status,
             "partial_declared_runtime_signals_observed"
         );
-        assert!(report.notes.iter().any(|note| note.contains(
-            "allocator_reset -> allocator_reset_observed"
-        )));
+        assert!(report
+            .notes
+            .iter()
+            .any(|note| note.contains("allocator_reset -> allocator_reset_observed")));
 
         let allocator_reset = report
             .runtime_signal_matrix

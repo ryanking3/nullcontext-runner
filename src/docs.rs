@@ -796,3 +796,44 @@ fn normalize_text(text: &str) -> String {
         .trim()
         .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_chunks_returns_empty_for_whitespace_only_input() {
+        let chunks = build_chunks("source-1", Path::new("notes.txt"), None, " \n\t  ", 0);
+
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn build_chunks_splits_large_text_with_expected_overlap() {
+        let text: String = (0..1300)
+            .map(|index| char::from(b'a' + (index % 26) as u8))
+            .collect();
+        let chars = text.chars().collect::<Vec<_>>();
+
+        let chunks = build_chunks("source-1", Path::new("notes.txt"), Some(7), &text, 0);
+
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].chunk_id, "chunk-1");
+        assert_eq!(chunks[1].chunk_id, "chunk-2");
+        assert_eq!(chunks[0].chunk_index, 0);
+        assert_eq!(chunks[1].chunk_index, 1);
+        assert_eq!(chunks[0].page_number, Some(7));
+        assert_eq!(chunks[1].page_number, Some(7));
+        assert_eq!(chunks[0].text.chars().count(), CHUNK_SIZE_CHARS);
+        assert_eq!(chunks[1].text.chars().count(), 300);
+
+        let expected_second_chunk = chars[CHUNK_SIZE_CHARS - CHUNK_OVERLAP_CHARS..]
+            .iter()
+            .collect::<String>();
+        assert_eq!(chunks[1].text, expected_second_chunk);
+        assert_eq!(
+            chunks[1].text,
+            chunks[0].text[1000..].to_string() + &text[1200..]
+        );
+    }
+}

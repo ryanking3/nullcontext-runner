@@ -544,8 +544,9 @@ mod tests {
     ) -> ControlledCanaryValidationPassReport {
         let phase_status = match process_scan_overall_status {
             "scan_backend_unsupported_on_platform" => "scan_backend_unsupported_on_platform",
-            "markers_detected_in_scanned_memory"
-            | "no_markers_detected_in_scanned_regions" => "scan_completed",
+            "markers_detected_in_scanned_memory" | "no_markers_detected_in_scanned_regions" => {
+                "scan_completed"
+            }
             _ => "scan_attempt_failed",
         };
         let pattern_status = match process_scan_overall_status {
@@ -658,7 +659,9 @@ mod tests {
             "markers_detected_in_scanned_memory"
         );
         assert_eq!(report.selected_pass_index, Some(2));
-        assert!(report.selection_reason.contains("still detected controlled canary markers"));
+        assert!(report
+            .selection_reason
+            .contains("still detected controlled canary markers"));
         assert!(report
             .notes
             .first()
@@ -679,8 +682,13 @@ mod tests {
             report.aggregate_signal_status,
             "controlled_canary_mixed_clear_and_inconclusive"
         );
-        assert_eq!(report.aggregate_process_scan_status, "scan_attempt_incomplete");
+        assert_eq!(
+            report.aggregate_process_scan_status,
+            "scan_attempt_incomplete"
+        );
         assert_eq!(report.selected_pass_index, Some(2));
-        assert!(report.selection_reason.contains("mixed or inconclusive outcomes"));
+        assert!(report
+            .selection_reason
+            .contains("mixed or inconclusive outcomes"));
     }
 }
