@@ -769,3 +769,184 @@ fn resolve_positive_usize(
 
     Ok(value)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestHome {
+        path: PathBuf,
+    }
+
+    impl TestHome {
+        fn new() -> Self {
+            let unique = format!(
+                "nullcontext-config-tests-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("system time should be after unix epoch")
+                    .as_nanos()
+            );
+            let path = env::temp_dir().join(unique);
+            fs::create_dir_all(path.join(".nullcontext"))
+                .expect("test home should create .nullcontext directory");
+            Self { path }
+        }
+
+        fn home(&self) -> String {
+            self.path.to_string_lossy().into_owned()
+        }
+
+        fn write_config(&self, body: &str) {
+            fs::write(self.path.join(".nullcontext").join("config.toml"), body)
+                .expect("test config should be writable");
+        }
+
+        fn create_file(&self, relative_path: &str) -> String {
+            let file_path = self.path.join(relative_path);
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent).expect("test file parent directory should exist");
+            }
+            fs::write(&file_path, b"test").expect("test file should be writable");
+            file_path.to_string_lossy().into_owned()
+        }
+
+        fn create_dir(&self, relative_path: &str) -> String {
+            let dir_path = self.path.join(relative_path);
+            fs::create_dir_all(&dir_path).expect("test directory should be creatable");
+            dir_path.to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn model_registry_marks_missing_legacy_model_path_unselectable() {
+        let home = TestHome::new();
+        let missing_model_path = home.path.join("models").join("missing.gguf");
+        home.write_config(&format!(
+            "model_path = {missing:?}\n",
+            missing = missing_model_path.to_string_lossy()
+        ));
+
+        let registry = load_model_registry(&home.home()).expect("registry should load");
+        let model = &registry.models[0];
+        let expected_message = format!(
+            "Model path does not exist: {}",
+            missing_model_path.to_string_lossy()
+        );
+
+        assert!(!model.selectable);
+        assert_eq!(model.validation_status, "missing");
+        assert_eq!(
+            model.validation_message.as_deref(),
+            Some(expected_message.as_str())
+        );
+    }
+
+    #[test]
+    fn model_registry_marks_directory_model_path_as_not_file() {
+        let home = TestHome::new();
+        let model_dir = home.create_dir("models/as-directory.gguf");
+        home.write_config(&format!("model_path = {model_dir:?}\n"));
+
+        let registry = load_model_registry(&home.home()).expect("registry should load");
+        let model = &registry.models[0];
+        let expected_message = format!("Model path is not a file: {model_dir}");
+
+        assert!(!model.selectable);
+        assert_eq!(model.validation_status, "not_file");
+        assert_eq!(
+            model.validation_message.as_deref(),
+            Some(expected_message.as_str())
+        );
+    }
+
+    #[test]
+    fn session_config_from_web_request_rejects_zero_chat_context_token_budget_override() {
+        let home = TestHome::new();
+        let model_path = home.create_file("models/test.gguf");
+        home.write_config(&format!(
+            "model_path = {model_path:?}\nchat_context_token_budget = 2048\nchat_context_turn_limit = 12\n"
+        ));
+
+        let error = SessionConfig::from_web_request(
+            home.home(),
+            "hello".to_string(),
+            None,
+            false,
+            None,
+            None,
+            Some(0),
+            None,
+        )
+        .expect_err("zero token budget override should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("chat_context_token_budget must be greater than 0"));
+    }
+
+    #[test]
+    fn session_config_from_web_request_rejects_zero_chat_context_turn_limit_override() {
+        let home = TestHome::new();
+        let model_path = home.create_file("models/test.gguf");
+        home.write_config(&format!(
+            "model_path = {model_path:?}\nchat_context_token_budget = 2048\nchat_context_turn_limit = 12\n"
+        ));
+
+        let error = SessionConfig::from_web_request(
+            home.home(),
+            "hello".to_string(),
+            None,
+            false,
+            None,
+            None,
+            None,
+            Some(0),
+        )
+        .expect_err("zero turn-limit override should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("chat_context_turn_limit must be greater than 0"));
+    }
+
+    #[test]
+    fn load_model_registry_rejects_zero_model_chat_context_budget_in_config() {
+        let home = TestHome::new();
+        let model_path = home.create_file("models/test.gguf");
+        home.write_config(&format!(
+            "[[models]]\nid = \"test\"\nmodel_path = {model_path:?}\nchat_context_token_budget = 0\n"
+        ));
+
+        let error = load_model_registry(&home.home())
+            .expect_err("zero configured model token budget should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("models.test.chat_context_token_budget must be greater than 0"));
+    }
+
+    #[test]
+    fn load_model_registry_rejects_zero_legacy_chat_context_turn_limit_in_config() {
+        let home = TestHome::new();
+        let model_path = home.create_file("models/test.gguf");
+        home.write_config(&format!(
+            "model_path = {model_path:?}\nchat_context_turn_limit = 0\n"
+        ));
+
+        let error = load_model_registry(&home.home())
+            .expect_err("zero legacy turn limit should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("chat_context_turn_limit must be greater than 0"));
+    }
+}

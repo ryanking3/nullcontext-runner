@@ -353,12 +353,10 @@ struct PageProbeMapping {
 
 #[cfg(target_os = "windows")]
 fn detect_host_memory_budget() -> HostMemoryBudget {
-    use windows_sys::Win32::System::Memory::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 
-    let mut status = MEMORYSTATUSEX {
-        dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
-        ..Default::default()
-    };
+    let mut status = unsafe { std::mem::zeroed::<MEMORYSTATUSEX>() };
+    status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
 
     let ok = unsafe { GlobalMemoryStatusEx(&mut status as *mut MEMORYSTATUSEX) };
     if ok == 0 {

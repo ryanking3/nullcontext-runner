@@ -460,7 +460,7 @@ fn scan_process_phase_windows(
     let process_handle =
         unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid) };
 
-    if process_handle == 0 {
+    if process_handle.is_null() {
         return ProcessScanPhaseReport {
             phase: phase.to_string(),
             status: "scan_attempt_failed".to_string(),
@@ -505,15 +505,7 @@ fn scan_process_phase_windows(
     let mut address = 0usize;
 
     loop {
-        let mut info = MEMORY_BASIC_INFORMATION {
-            BaseAddress: std::ptr::null_mut(),
-            AllocationBase: std::ptr::null_mut(),
-            AllocationProtect: 0,
-            RegionSize: 0,
-            State: 0,
-            Protect: 0,
-            Type: 0,
-        };
+        let mut info = unsafe { std::mem::zeroed::<MEMORY_BASIC_INFORMATION>() };
 
         let queried = unsafe {
             VirtualQueryEx(

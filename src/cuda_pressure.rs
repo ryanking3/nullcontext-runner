@@ -96,37 +96,67 @@ impl CudaDriverApi {
 
             match library {
                 Ok(library) => {
-                    let cu_init = unsafe { *library.get::<CuInit>(b"cuInit\0") }
-                        .map_err(|error| format!("missing cuInit in {candidate}: {error}"))?;
-                    let cu_device_get_count =
-                        unsafe { *library.get::<CuDeviceGetCount>(b"cuDeviceGetCount\0") }
+                    let cu_init = unsafe {
+                        *library
+                            .get::<CuInit>(b"cuInit\0")
+                            .map_err(|error| format!("missing cuInit in {candidate}: {error}"))?
+                    };
+                    let cu_device_get_count = unsafe {
+                        *library
+                            .get::<CuDeviceGetCount>(b"cuDeviceGetCount\0")
                             .map_err(|error| {
                                 format!("missing cuDeviceGetCount in {candidate}: {error}")
-                            })?;
-                    let cu_device_get = unsafe { *library.get::<CuDeviceGet>(b"cuDeviceGet\0") }
-                        .map_err(|error| format!("missing cuDeviceGet in {candidate}: {error}"))?;
-                    let cu_ctx_create_v2 =
-                        unsafe { *library.get::<CuCtxCreateV2>(b"cuCtxCreate_v2\0") }.map_err(
-                            |error| format!("missing cuCtxCreate_v2 in {candidate}: {error}"),
-                        )?;
-                    let cu_ctx_destroy_v2 =
-                        unsafe { *library.get::<CuCtxDestroyV2>(b"cuCtxDestroy_v2\0") }.map_err(
-                            |error| format!("missing cuCtxDestroy_v2 in {candidate}: {error}"),
-                        )?;
-                    let cu_mem_get_info_v2 =
-                        unsafe { *library.get::<CuMemGetInfoV2>(b"cuMemGetInfo_v2\0") }.map_err(
-                            |error| format!("missing cuMemGetInfo_v2 in {candidate}: {error}"),
-                        )?;
-                    let cu_mem_alloc_v2 =
-                        unsafe { *library.get::<CuMemAllocV2>(b"cuMemAlloc_v2\0") }.map_err(
-                            |error| format!("missing cuMemAlloc_v2 in {candidate}: {error}"),
-                        )?;
-                    let cu_mem_free_v2 = unsafe { *library.get::<CuMemFreeV2>(b"cuMemFree_v2\0") }
-                        .map_err(|error| format!("missing cuMemFree_v2 in {candidate}: {error}"))?;
-                    let cu_memset_d8_v2 =
-                        unsafe { *library.get::<CuMemsetD8V2>(b"cuMemsetD8_v2\0") }.map_err(
-                            |error| format!("missing cuMemsetD8_v2 in {candidate}: {error}"),
-                        )?;
+                            })?
+                    };
+                    let cu_device_get = unsafe {
+                        *library
+                            .get::<CuDeviceGet>(b"cuDeviceGet\0")
+                            .map_err(|error| {
+                                format!("missing cuDeviceGet in {candidate}: {error}")
+                            })?
+                    };
+                    let cu_ctx_create_v2 = unsafe {
+                        *library
+                            .get::<CuCtxCreateV2>(b"cuCtxCreate_v2\0")
+                            .map_err(|error| {
+                                format!("missing cuCtxCreate_v2 in {candidate}: {error}")
+                            })?
+                    };
+                    let cu_ctx_destroy_v2 = unsafe {
+                        *library
+                            .get::<CuCtxDestroyV2>(b"cuCtxDestroy_v2\0")
+                            .map_err(|error| {
+                                format!("missing cuCtxDestroy_v2 in {candidate}: {error}")
+                            })?
+                    };
+                    let cu_mem_get_info_v2 = unsafe {
+                        *library
+                            .get::<CuMemGetInfoV2>(b"cuMemGetInfo_v2\0")
+                            .map_err(|error| {
+                                format!("missing cuMemGetInfo_v2 in {candidate}: {error}")
+                            })?
+                    };
+                    let cu_mem_alloc_v2 = unsafe {
+                        *library
+                            .get::<CuMemAllocV2>(b"cuMemAlloc_v2\0")
+                            .map_err(|error| {
+                                format!("missing cuMemAlloc_v2 in {candidate}: {error}")
+                            })?
+                    };
+                    let cu_mem_free_v2 = unsafe {
+                        *library
+                            .get::<CuMemFreeV2>(b"cuMemFree_v2\0")
+                            .map_err(|error| {
+                                format!("missing cuMemFree_v2 in {candidate}: {error}")
+                            })?
+                    };
+                    let cu_memset_d8_v2 = unsafe {
+                        *library
+                            .get::<CuMemsetD8V2>(b"cuMemsetD8_v2\0")
+                            .map_err(|error| {
+                                format!("missing cuMemsetD8_v2 in {candidate}: {error}")
+                            })?
+                    };
 
                     return Ok(Self {
                         _library: library,

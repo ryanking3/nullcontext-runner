@@ -682,9 +682,11 @@ fn inspect_process_via_nvml(pid: u32) -> Option<BackendObservation> {
 
     match summary {
         Ok(summary) => {
+            let detail_status = nvml_process_scope_status(&summary);
+            let detail_summary = nvml_process_scope_summary(&summary);
             let mut notes = Vec::new();
 
-            if let Some(driver_version) = summary.driver_version {
+            if let Some(driver_version) = summary.driver_version.as_deref() {
                 notes.push(format!("NVML driver version: {driver_version}."));
             }
 
@@ -705,8 +707,8 @@ fn inspect_process_via_nvml(pid: u32) -> Option<BackendObservation> {
                     source: Some("NVML running-process APIs".to_string()),
                     backend: "nvml_process_listing".to_string(),
                     pid_observed: Some(true),
-                    detail_status: Some(nvml_process_scope_status(&summary)),
-                    detail_summary: Some(nvml_process_scope_summary(&summary)),
+                    detail_status: Some(detail_status),
+                    detail_summary: Some(detail_summary),
                     note: Some(notes.join(" ")),
                 })
             } else {
@@ -718,7 +720,7 @@ fn inspect_process_via_nvml(pid: u32) -> Option<BackendObservation> {
                     backend: "nvml_process_listing".to_string(),
                     pid_observed: Some(false),
                     detail_status: Some("nvml_process_scope_pid_not_observed".to_string()),
-                    detail_summary: Some(nvml_process_scope_summary(&summary)),
+                    detail_summary: Some(detail_summary),
                     note: Some(notes.join(" ")),
                 })
             }
