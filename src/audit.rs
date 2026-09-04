@@ -6488,6 +6488,11 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    const LEGACY_PRIVACY_REPORT_FIXTURE: &str =
+        include_str!("../tests/fixtures/privacy_reports/legacy_minimal.json");
+    const CURRENT_PRIVACY_REPORT_FIXTURE: &str =
+        include_str!("../tests/fixtures/privacy_reports/current_partial.json");
+
     fn unique_test_runtime_path() -> PathBuf {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -6831,31 +6836,8 @@ mod tests {
 
     #[test]
     fn legacy_privacy_report_without_validation_sections_uses_defaults() {
-        let legacy_json = r#"
-        {
-          "session_id": "session-123",
-          "started_at": "2026-07-06T10:00:00Z",
-          "history_stored": false,
-          "backend": "llama.cpp",
-          "security_mode": "secure",
-          "gpu_layers": "0",
-          "process_exited_cleanly": true,
-          "cleanup": {
-            "attempted": true,
-            "successful": true,
-            "workspace_deleted": true,
-            "files_removed": 2,
-            "directories_removed": 1,
-            "artifacts_detected": [],
-            "sanitization_operations": [],
-            "error": null
-          },
-          "residual_risk": "legacy residual risk summary"
-        }
-        "#;
-
-        let report: PrivacyReport =
-            serde_json::from_str(legacy_json).expect("legacy privacy report should deserialize");
+        let report: PrivacyReport = serde_json::from_str(LEGACY_PRIVACY_REPORT_FIXTURE)
+            .expect("legacy privacy report fixture should deserialize");
 
         assert_eq!(
             report.memory_validation.validation_status,
@@ -6872,5 +6854,172 @@ mod tests {
         assert!(report.session_profile.is_none());
         assert!(report.llama_runtime.is_none());
         assert!(report.process_scan.is_none());
+    }
+
+    #[test]
+    fn current_privacy_report_fixture_preserves_conservative_nested_defaults() {
+        let report: PrivacyReport = serde_json::from_str(CURRENT_PRIVACY_REPORT_FIXTURE)
+            .expect("current privacy report fixture should deserialize");
+
+        assert_eq!(report.session_id, "session-current");
+        assert_eq!(
+            report.memory_validation.validation_status,
+            "validation_derived"
+        );
+        assert_eq!(report.memory_validation.stage_scorecards.len(), 1);
+        assert_eq!(
+            report.memory_validation.stage_scorecards[0].process_scan_context_scope,
+            default_process_scan_context_scope()
+        );
+        assert_eq!(
+            report.memory_validation.stage_scorecards[0].cleanup_signal_support_status,
+            default_cleanup_signal_support_status()
+        );
+        assert_eq!(
+            report.memory_validation.stage_scorecards[0].cleanup_signal_support_scope_status,
+            default_cleanup_signal_support_scope_status()
+        );
+        assert_eq!(
+            report.memory_validation.stage_scorecards[0].controlled_canary_signal_status,
+            default_controlled_canary_signal_status()
+        );
+
+        assert_eq!(report.memory_validation_history.stage_trends.len(), 1);
+        let trend = &report.memory_validation_history.stage_trends[0];
+        assert_eq!(trend.cleanup_signal_strong_runs, 0);
+        assert_eq!(trend.stage_local_scan_runs, 0);
+        assert_eq!(
+            trend.latest_cleanup_signal_support_status,
+            default_cleanup_signal_support_status()
+        );
+        assert_eq!(
+            trend.latest_cleanup_signal_support_scope_status,
+            default_cleanup_signal_support_scope_status()
+        );
+        assert_eq!(
+            trend.latest_process_scan_context_status,
+            default_process_scan_context_status()
+        );
+        assert_eq!(
+            trend.latest_process_scan_context_scope,
+            default_process_scan_context_scope()
+        );
+        assert_eq!(
+            trend.selection_fitness_status,
+            default_stage_selection_fitness_status_not_derived()
+        );
+        assert_eq!(
+            trend.evidence_support_status,
+            default_memory_validation_stage_trend_evidence_support_status()
+        );
+
+        assert_eq!(
+            report
+                .memory_validation_history
+                .cleanup_stage_effectiveness
+                .stages[0]
+                .evidence_support_status,
+            default_memory_validation_stage_recommendation_evidence_support_status()
+        );
+        assert_eq!(
+            report
+                .memory_validation_history
+                .cleanup_stage_effectiveness
+                .stages[0]
+                .cleanup_signal_scope_status,
+            default_cleanup_signal_support_scope_status()
+        );
+
+        assert_eq!(
+            report
+                .memory_validation_history
+                .cleanup_stage_recommendation
+                .selection_fitness_status,
+            default_stage_selection_fitness_status_not_derived()
+        );
+        assert_eq!(
+            report
+                .memory_validation_history
+                .cleanup_stage_recommendation
+                .evidence_support_status,
+            default_memory_validation_stage_recommendation_evidence_support_status()
+        );
+
+        assert_eq!(
+            report
+                .memory_validation_history
+                .release_gate
+                .release_readiness_status,
+            default_release_readiness_status_not_derived()
+        );
+        assert_eq!(
+            report
+                .memory_validation_history
+                .release_gate
+                .observed_stage_evidence_support_status,
+            default_recommendation_evidence_not_derived()
+        );
+        assert!(report
+            .memory_validation_history
+            .release_gate
+            .required_stage_evidence_support_statuses
+            .is_empty());
+
+        let runtime = report
+            .llama_runtime
+            .as_ref()
+            .expect("current fixture should include runtime data");
+        assert_eq!(
+            runtime.live_gpu_evidence_class,
+            default_live_gpu_evidence_class()
+        );
+        assert_eq!(
+            runtime.post_shutdown_gpu_evidence_class,
+            default_post_shutdown_gpu_evidence_class()
+        );
+        assert_eq!(
+            runtime.gpu_claim_boundary_status,
+            default_gpu_claim_boundary_status()
+        );
+        assert_eq!(
+            runtime.allocator_kv_cleanup_boundary_status,
+            default_allocator_kv_cleanup_boundary_status()
+        );
+        assert!(runtime.introspection.runtime_signal_matrix.is_empty());
+
+        assert_eq!(
+            runtime
+                .vram_cleanup
+                .comparison
+                .cleanup_signal_support_status,
+            default_cleanup_signal_support_status()
+        );
+        assert_eq!(
+            runtime
+                .vram_cleanup
+                .comparison
+                .cleanup_signal_support_scope_status,
+            default_cleanup_signal_support_scope_status()
+        );
+        assert_eq!(
+            runtime.vram_cleanup.comparison.selection_reason,
+            default_vram_cleanup_selection_reason()
+        );
+        assert_eq!(
+            runtime.vram_cleanup.stages[0].selection_evidence_status,
+            default_vram_cleanup_selection_evidence_status()
+        );
+        assert_eq!(
+            runtime.vram_cleanup.stages[0].cleanup_signal_support_status,
+            default_cleanup_signal_support_status()
+        );
+        assert_eq!(
+            runtime.vram_cleanup.stages[0].cleanup_signal_support_scope_status,
+            default_cleanup_signal_support_scope_status()
+        );
+        assert_eq!(
+            runtime.vram_cleanup.stages[0].marker_evidence_status,
+            default_vram_cleanup_marker_evidence_status()
+        );
     }
 }

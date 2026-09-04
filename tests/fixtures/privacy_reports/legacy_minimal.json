@@ -1,0 +1,20 @@
+{
+  "session_id": "session-123",
+  "started_at": "2026-07-06T10:00:00Z",
+  "history_stored": false,
+  "backend": "llama.cpp",
+  "security_mode": "secure",
+  "gpu_layers": "0",
+  "process_exited_cleanly": true,
+  "cleanup": {
+    "attempted": true,
+    "successful": true,
+    "workspace_deleted": true,
+    "files_removed": 2,
+    "directories_removed": 1,
+    "artifacts_detected": [],
+    "sanitization_operations": [],
+    "error": null
+  },
+  "residual_risk": "legacy residual risk summary"
+}
