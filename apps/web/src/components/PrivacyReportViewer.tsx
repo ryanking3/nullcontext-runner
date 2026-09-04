@@ -1,3 +1,4 @@
+import { EvidenceStatusList } from "./EvidenceStatusList";
 import { ReportGrid } from "./ReportGrid";
 import {
   describeCleanupSignalScopeStatus,
@@ -74,6 +75,89 @@ function runtimeInspectionTakeaway(
   }
 
   return "Inspection completed, but some memory domains remain inconclusive or host-tooling dependent.";
+}
+
+function signalMatrixEntries(
+  entries: Array<{
+    signal_id: string;
+    signal_label: string;
+    declared_support_status: string;
+    observation_status: string;
+    evidence_status: string;
+    observed_count: number;
+    observed_sources: string[];
+    observed_phases: string[];
+    sample_observed_status?: string | null;
+    sample_observed_details?: string | null;
+    summary: string;
+  }>
+) {
+  return entries.map((entry) => ({
+    key: entry.signal_id,
+    label: entry.signal_label,
+    status: entry.evidence_status,
+    details: [
+      {
+        key: "declared-support",
+        content: (
+          <>
+            declared support: {humanizeSnakeCase(entry.declared_support_status)}
+          </>
+        ),
+      },
+      {
+        key: "observation",
+        content: <>observation: {humanizeSnakeCase(entry.observation_status)}</>,
+      },
+      {
+        key: "observed-count",
+        content: <>observed count: {entry.observed_count}</>,
+      },
+      {
+        key: "observed-sources",
+        content: (
+          <>
+            observed sources:{" "}
+            {entry.observed_sources.length > 0 ? entry.observed_sources.join(", ") : "none"}
+          </>
+        ),
+      },
+      {
+        key: "observed-phases",
+        content: (
+          <>
+            observed phases:{" "}
+            {entry.observed_phases.length > 0
+              ? entry.observed_phases.map((phase) => humanizeSnakeCase(phase)).join(", ")
+              : "none"}
+          </>
+        ),
+      },
+      {
+        key: "sample-status",
+        content: (
+          <>
+            sample status:{" "}
+            {entry.sample_observed_status
+              ? humanizeSnakeCase(entry.sample_observed_status)
+              : "none"}
+          </>
+        ),
+      },
+      ...(entry.sample_observed_details
+        ? [
+            {
+              key: "sample-details",
+              content: <>sample details: {entry.sample_observed_details}</>,
+            },
+          ]
+        : []),
+      {
+        key: "summary",
+        content: <>{entry.summary}</>,
+      },
+    ],
+  }));
 }
 
 export function PrivacyReportViewer({
@@ -393,67 +477,112 @@ export function PrivacyReportViewer({
               <span>security boundaries</span>
               <span className="pill neutral">9</span>
             </summary>
-            <div className="report-list">
-              {[
+            <EvidenceStatusList
+              entries={[
                 {
+                  key: "gpu-trust-boundary",
                   label: "gpu trust boundary",
                   status: currentReport.llama_runtime.gpu_trust_boundary_status,
-                  summary: currentReport.llama_runtime.gpu_trust_boundary_summary,
+                  details: [
+                    {
+                      key: "summary",
+                      content: currentReport.llama_runtime.gpu_trust_boundary_summary,
+                    },
+                  ],
                 },
                 {
+                  key: "gpu-evidence-tier",
                   label: "gpu evidence tier",
                   status: currentReport.llama_runtime.gpu_evidence_tier_status,
-                  summary: currentReport.llama_runtime.gpu_evidence_tier_summary,
+                  details: [
+                    {
+                      key: "summary",
+                      content: currentReport.llama_runtime.gpu_evidence_tier_summary,
+                    },
+                  ],
                 },
                 {
+                  key: "gpu-claim-boundary",
                   label: "gpu claim boundary",
                   status: currentReport.llama_runtime.gpu_claim_boundary_status,
-                  summary: currentReport.llama_runtime.gpu_claim_boundary_summary,
+                  details: [
+                    {
+                      key: "summary",
+                      content: currentReport.llama_runtime.gpu_claim_boundary_summary,
+                    },
+                  ],
                 },
                 {
+                  key: "gpu-context-visibility",
                   label: "gpu context visibility",
                   status: currentReport.llama_runtime.gpu_context_visibility_status,
-                  summary: currentReport.llama_runtime.gpu_context_visibility_summary,
+                  details: [
+                    {
+                      key: "summary",
+                      content: currentReport.llama_runtime.gpu_context_visibility_summary,
+                    },
+                  ],
                 },
                 {
+                  key: "gpu-allocator-visibility",
                   label: "gpu allocator visibility",
                   status: currentReport.llama_runtime.gpu_allocator_visibility_status,
-                  summary: currentReport.llama_runtime.gpu_allocator_visibility_summary,
+                  details: [
+                    {
+                      key: "summary",
+                      content: currentReport.llama_runtime.gpu_allocator_visibility_summary,
+                    },
+                  ],
                 },
                 {
+                  key: "gpu-backend-provenance",
                   label: "gpu backend provenance",
                   status: currentReport.llama_runtime.gpu_backend_provenance_status,
-                  summary: currentReport.llama_runtime.gpu_backend_provenance_summary,
+                  details: [
+                    {
+                      key: "summary",
+                      content: currentReport.llama_runtime.gpu_backend_provenance_summary,
+                    },
+                  ],
                 },
                 {
+                  key: "gpu-backend-comparison",
                   label: "gpu backend comparison",
                   status: currentReport.llama_runtime.gpu_backend_comparison_status,
-                  summary: currentReport.llama_runtime.gpu_backend_comparison_summary,
+                  details: [
+                    {
+                      key: "summary",
+                      content: currentReport.llama_runtime.gpu_backend_comparison_summary,
+                    },
+                  ],
                 },
                 {
+                  key: "gpu-driver-process-scope",
                   label: "gpu driver-process scope",
                   status: currentReport.llama_runtime.gpu_driver_process_scope_status,
-                  summary: currentReport.llama_runtime.gpu_driver_process_scope_summary,
+                  details: [
+                    {
+                      key: "summary",
+                      content: currentReport.llama_runtime.gpu_driver_process_scope_summary,
+                    },
+                  ],
                 },
                 {
+                  key: "allocator-kv-cleanup-boundary",
                   label: "allocator/kv cleanup boundary",
                   status: currentReport.llama_runtime.allocator_kv_cleanup_boundary_status,
-                  summary: currentReport.llama_runtime.allocator_kv_cleanup_boundary_summary,
+                  details: [
+                    {
+                      key: "summary",
+                      content:
+                        currentReport.llama_runtime.allocator_kv_cleanup_boundary_summary,
+                    },
+                  ],
                 },
-              ].map((entry) => (
-                <div className="report-item" key={entry.label}>
-                  <div className="report-item-header">
-                    <strong>{entry.label}</strong>
-                    <span className={inspectionStatusClass(entry.status)}>
-                      {humanizeSnakeCase(entry.status)}
-                    </span>
-                  </div>
-                  <div className="report-path-list">
-                    <div>{entry.summary}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+              ]}
+              statusClassName={inspectionStatusClass}
+              formatStatus={humanizeSnakeCase}
+            />
           </details>
 
           <ReportGrid
@@ -1461,52 +1590,13 @@ export function PrivacyReportViewer({
               {currentReport.llama_runtime.introspection.runtime_signal_matrix.length === 0 ? (
                 <p className="muted-text">no runtime-signal contract entries were recorded</p>
               ) : (
-                <div className="report-list">
-                  {currentReport.llama_runtime.introspection.runtime_signal_matrix.map((entry) => (
-                    <div className="report-item" key={entry.signal_id}>
-                      <div className="report-item-header">
-                        <strong>{entry.signal_label}</strong>
-                        <span className={inspectionStatusClass(entry.evidence_status)}>
-                          {humanizeSnakeCase(entry.evidence_status)}
-                        </span>
-                      </div>
-                      <div className="report-path-list">
-                        <div>
-                          declared support:{" "}
-                          {humanizeSnakeCase(entry.declared_support_status)}
-                        </div>
-                        <div>
-                          observation: {humanizeSnakeCase(entry.observation_status)}
-                        </div>
-                        <div>observed count: {entry.observed_count}</div>
-                        <div>
-                          observed sources:{" "}
-                          {entry.observed_sources.length > 0
-                            ? entry.observed_sources.join(", ")
-                            : "none"}
-                        </div>
-                        <div>
-                          observed phases:{" "}
-                          {entry.observed_phases.length > 0
-                            ? entry.observed_phases
-                                .map((phase) => humanizeSnakeCase(phase))
-                                .join(", ")
-                            : "none"}
-                        </div>
-                        <div>
-                          sample status:{" "}
-                          {entry.sample_observed_status
-                            ? humanizeSnakeCase(entry.sample_observed_status)
-                            : "none"}
-                        </div>
-                        {entry.sample_observed_details && (
-                          <div>sample details: {entry.sample_observed_details}</div>
-                        )}
-                        <div>{entry.summary}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <EvidenceStatusList
+                  entries={signalMatrixEntries(
+                    currentReport.llama_runtime.introspection.runtime_signal_matrix
+                  )}
+                  statusClassName={inspectionStatusClass}
+                  formatStatus={humanizeSnakeCase}
+                />
               )}
             </details>
 
@@ -1520,52 +1610,13 @@ export function PrivacyReportViewer({
               {currentReport.llama_runtime.introspection.cleanup_signal_matrix.length === 0 ? (
                 <p className="muted-text">no cleanup-signal coverage entries were recorded</p>
               ) : (
-                <div className="report-list">
-                  {currentReport.llama_runtime.introspection.cleanup_signal_matrix.map((entry) => (
-                    <div className="report-item" key={entry.signal_id}>
-                      <div className="report-item-header">
-                        <strong>{entry.signal_label}</strong>
-                        <span className={inspectionStatusClass(entry.evidence_status)}>
-                          {humanizeSnakeCase(entry.evidence_status)}
-                        </span>
-                      </div>
-                      <div className="report-path-list">
-                        <div>
-                          declared support:{" "}
-                          {humanizeSnakeCase(entry.declared_support_status)}
-                        </div>
-                        <div>
-                          observation: {humanizeSnakeCase(entry.observation_status)}
-                        </div>
-                        <div>observed count: {entry.observed_count}</div>
-                        <div>
-                          observed sources:{" "}
-                          {entry.observed_sources.length > 0
-                            ? entry.observed_sources.join(", ")
-                            : "none"}
-                        </div>
-                        <div>
-                          observed phases:{" "}
-                          {entry.observed_phases.length > 0
-                            ? entry.observed_phases
-                                .map((phase) => humanizeSnakeCase(phase))
-                                .join(", ")
-                            : "none"}
-                        </div>
-                        <div>
-                          sample status:{" "}
-                          {entry.sample_observed_status
-                            ? humanizeSnakeCase(entry.sample_observed_status)
-                            : "none"}
-                        </div>
-                        {entry.sample_observed_details && (
-                          <div>sample details: {entry.sample_observed_details}</div>
-                        )}
-                        <div>{entry.summary}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <EvidenceStatusList
+                  entries={signalMatrixEntries(
+                    currentReport.llama_runtime.introspection.cleanup_signal_matrix
+                  )}
+                  statusClassName={inspectionStatusClass}
+                  formatStatus={humanizeSnakeCase}
+                />
               )}
             </details>
 
@@ -1925,29 +1976,43 @@ export function PrivacyReportViewer({
             {currentReport.platform_capability_matrix.capabilities.length === 0 ? (
               <p className="muted-text">no capability entries available</p>
             ) : (
-              <div className="report-list">
-                {currentReport.platform_capability_matrix.capabilities.map((capability) => (
-                  <div className="report-item" key={capability.capability_id}>
-                    <div className="report-item-header">
-                      <strong>{capability.capability_label}</strong>
-                      <span className={inspectionStatusClass(capability.current_status)}>
-                        {humanizeSnakeCase(capability.current_status)}
-                      </span>
-                    </div>
-
-                    <div className="report-path-list">
-                      <div>track: {humanizeSnakeCase(capability.roadmap_track)}</div>
-                      <div>evidence: {humanizeSnakeCase(capability.evidence_level)}</div>
-                      <div>v1 blocker: {capability.v1_blocker ? "yes" : "no"}</div>
-                      <div>boundary: {capability.claim_boundary}</div>
-                      <div>{capability.summary}</div>
-                      {capability.notes.map((note) => (
-                        <div key={`${capability.capability_id}-${note}`}>{note}</div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <EvidenceStatusList
+                entries={currentReport.platform_capability_matrix.capabilities.map(
+                  (capability) => ({
+                    key: capability.capability_id,
+                    label: capability.capability_label,
+                    status: capability.current_status,
+                    details: [
+                      {
+                        key: "track",
+                        content: <>track: {humanizeSnakeCase(capability.roadmap_track)}</>,
+                      },
+                      {
+                        key: "evidence",
+                        content: <>evidence: {humanizeSnakeCase(capability.evidence_level)}</>,
+                      },
+                      {
+                        key: "v1-blocker",
+                        content: <>v1 blocker: {capability.v1_blocker ? "yes" : "no"}</>,
+                      },
+                      {
+                        key: "boundary",
+                        content: <>boundary: {capability.claim_boundary}</>,
+                      },
+                      {
+                        key: "summary",
+                        content: <>{capability.summary}</>,
+                      },
+                      ...capability.notes.map((note, index) => ({
+                        key: `note-${index}`,
+                        content: <>{note}</>,
+                      })),
+                    ],
+                  })
+                )}
+                statusClassName={inspectionStatusClass}
+                formatStatus={humanizeSnakeCase}
+              />
             )}
           </details>
 
